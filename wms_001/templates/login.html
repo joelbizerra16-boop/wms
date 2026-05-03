@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login | WMS</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg-dark: #0f172a;
+            --card: #ffffff;
+            --ink: #0f172a;
+            --muted: #64748b;
+            --accent: #f97316;
+            --accent-dark: #ea580c;
+            --border: #dbe2ea;
+            --danger-bg: #fef2f2;
+            --danger-ink: #b91c1c;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-dark);
+            color: var(--ink);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+        }
+
+        .login-card {
+            width: min(100%, 380px);
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 1.9rem;
+            font-weight: 800;
+        }
+
+        p {
+            margin: 0 0 24px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 18px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+        }
+
+        button {
+            width: 100%;
+            border: 0;
+            border-radius: 8px;
+            padding: 12px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+
+        button:hover {
+            background: var(--accent-dark);
+        }
+
+        .erro {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            background: var(--danger-bg);
+            color: var(--danger-ink);
+            border-radius: 12px;
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+<body>
+    <main class="login-card">
+        <h1>Entrar no WMS</h1>
+        <p>Use suas credenciais para acessar a área inicial do sistema.</p>
+
+        {% if erro %}
+        <div class="erro">{{ erro }}</div>
+        {% endif %}
+
+        <form method="post">
+            {% csrf_token %}
+            <label for="username">Usuário</label>
+            <input id="username" name="username" type="text" autocomplete="username" value="{{ form.username.value|default:'' }}" required>
+
+            <label for="password">Senha</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+            <button type="submit">Login</button>
+        </form>
+    </main>
+</body>
+</html>

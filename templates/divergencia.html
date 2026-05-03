@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+
+{% block title %}Divergência | WMS{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Tratativa crítica</span>
+        <h1>Divergência</h1>
+        <p>Registro formal da divergência encontrada na conferência da NF.</p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="detail-list">
+        <div class="detail-item">
+            <span class="detail-item__label">NF</span>
+            <span class="detail-item__value">{{ item.conferencia.nf.numero }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Produto</span>
+            <span class="detail-item__value">{{ item.produto.cod_prod }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Esperado</span>
+            <span class="detail-item__value">{{ item.qtd_esperada }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Conferido</span>
+            <span class="detail-item__value">{{ item.qtd_conferida }}</span>
+        </div>
+    </div>
+
+    <form method="post">
+        {% csrf_token %}
+        <label>Tipo</label>
+        <div class="choice-list">
+            {% for valor, rotulo in motivos %}
+            <label class="choice-item">
+                <input type="radio" name="motivo" value="{{ valor }}"> {{ rotulo }}
+            </label>
+            {% endfor %}
+        </div>
+
+        <label for="observacao">Observação</label>
+        <textarea id="observacao" name="observacao" rows="4"></textarea>
+
+        <div class="actions-row" style="margin-top:14px;">
+            <button type="submit" class="btn-warning">Salvar</button>
+            <a href="{% url 'web-conferencia-exec' item.conferencia.nf.id %}" class="btn btn-light">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

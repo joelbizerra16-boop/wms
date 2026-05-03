@@ -1,0 +1,657 @@
+from decimal import Decimal
+
+from django.db import transaction
+from django.db.models import F, Prefetch, Q
+from django.utils import timezone
+
+from apps.conferencia.models import Conferencia, ConferenciaItem
+from apps.core.services.produto_validacao_service import (
+    ProdutoValidacaoError,
+    buscar_produto_por_leitura,
+    validar_produto,
+)
+from apps.logs.models import Log, UserActivityLog
+from apps.nf.models import NotaFiscal
+from apps.nf.services.consistencia_service import sanear_consistencia_nf, separacao_concluida_nf
+from apps.nf.services.status_service import atualizar_status_nf, sincronizar_status_operacional_nf
+from apps.produtos.models import Produto
+from apps.tarefas.models import Tarefa, TarefaItem
+from apps.usuarios.models import Setor
+from apps.usuarios.session_utils import usuario_esta_logado
+
+
+class ConferenciaError(Exception):
+    pass
+
+
+NF_CANCELADA_ERRO = 'NF cancelada não pode ser processada'
+TAREFA_SETOR_ERRO = 'NF não pertence ao setor do usuário'
+USUARIO_SEM_SETOR_ERRO = 'Usuário sem setor vinculado. Contate o administrador.'
+
+
+STATUS_TAREFA_LIBERA_CONFERENCIA = {
+    Tarefa.Status.CONCLUIDO,
+    Tarefa.Status.LIBERADO_COM_RESTRICAO,
+    Tarefa.Status.CONCLUIDO_COM_RESTRICAO,
+}
+
+
+def _normalizar_setor_operacional(valor):
+    setor = (valor or '').strip().upper()
+    if setor == 'FILTRO':
+        return Setor.Codigo.FILTROS
+    if setor == 'NAO ENCONTRADO':
+        return Setor.Codigo.NAO_ENCONTRADO
+    return setor
+
+
+def _usuario_pode_ver_todos_setores(usuario):
+    return bool(getattr(usuario, 'is_superuser', False))
+
+
+def _setores_usuario(usuario):
+    if usuario is None:
+        return set()
+    setores = list(usuario.setores.values_list('nome', flat=True))
+    if not setores and getattr(usuario, 'setor', None) and usuario.setor != Setor.Codigo.NAO_ENCONTRADO:
+        setores = [usuario.setor]
+    return {_normalizar_setor_operacional(valor) for valor in setores if _normalizar_setor_operacional(valor)}
+
+
+def _nf_pertence_a_setores_usuario(nf, usuario):
+    if usuario is None or _usuario_pode_ver_todos_setores(usuario):
+        return True
+    setores_usuario = _setores_usuario(usuario)
+    if not setores_usuario:
+        return False
+    setores_nf = {
+        _normalizar_setor_operacional(tarefa.setor)
+        for tarefa in _tarefas_relacionadas_nf(nf)
+        if _normalizar_setor_operacional(tarefa.setor)
+    }
+    if not setores_nf:
+        return False
+    return bool(setores_nf.intersection(setores_usuario))
+
+
+def _validar_setor_nf(nf, usuario):
+    if usuario is None or _usuario_pode_ver_todos_setores(usuario):
+        return
+    setores_usuario = _setores_usuario(usuario)
+    if not setores_usuario:
+        raise ConferenciaError(USUARIO_SEM_SETOR_ERRO)
+    if not _nf_pertence_a_setores_usuario(nf, usuario):
+        raise ConferenciaError(TAREFA_SETOR_ERRO)
+
+
+def _itens_separacao_nf_qs(nf):
+    return TarefaItem.objects.filter(Q(tarefa__nf=nf) | Q(nf=nf))
+
+
+def _resumo_separacao_nf(nf):
+    itens_qs = _itens_separacao_nf_qs(nf)
+    total_itens = itens_qs.count()
+    if total_itens == 0:
+        return {'status_separacao': 'PENDENTE', 'itens_pendentes': 0, 'itens_separados': 0, 'total_itens': 0}
+
+    itens_pendentes = itens_qs.filter(quantidade_separada__lt=F('quantidade_total')).count()
+    itens_separados = max(total_itens - itens_pendentes, 0)
+    status_separacao = 'SEPARADO' if itens_pendentes == 0 else 'PENDENTE'
+    return {
+        'status_separacao': status_separacao,
+        'itens_pendentes': itens_pendentes,
+        'itens_separados': itens_separados,
+        'total_itens': total_itens,
+    }
+
+
+def avaliar_liberacao_conferencia(nf):
+    """
+    Regra obrigatória de fluxo:
+    - Conferência só libera quando separação estiver concluída e sem itens pendentes.
+    - Exceção: quando não houver item de separação relacionado para a NF, considera
+      'SEPARADO_COM_RESTRICAO' e permite seguir.
+    """
+    resumo = _resumo_separacao_nf(nf)
+    if resumo['status_separacao'] != 'SEPARADO':
+        return {
+            'liberado': False,
+            'motivo': 'Pedido ainda não foi separado',
+            'status_fluxo': 'BLOQUEADO',
+            'itens_pendentes': resumo['itens_pendentes'],
+            'total_itens': resumo['total_itens'],
+            'itens_separados': resumo['itens_separados'],
+        }
+    return {
+        'liberado': True,
+        'motivo': '',
+        'status_fluxo': 'AGUARDANDO',
+        'itens_pendentes': 0,
+        'total_itens': resumo['total_itens'],
+        'itens_separados': resumo['itens_separados'],
+    }
+
+
+def listar_nfs_disponiveis(usuario=None):
+    if usuario is not None and not _usuario_pode_ver_todos_setores(usuario) and not _setores_usuario(usuario):
+        return []
+    tarefas_prefetch = Prefetch('tarefas', queryset=Tarefa.objects.prefetch_related('itens').order_by('id'))
+    nfs = (
+        NotaFiscal.objects.select_related('cliente', 'rota')
+        .prefetch_related(tarefas_prefetch, 'itens_tarefa', 'conferencias__itens')
+        .filter(status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA, ativa=True)
+        .order_by('-data_emissao')
+    )
+
+    disponiveis = []
+    for nf in nfs:
+        consistencia = sanear_consistencia_nf(nf, actor=usuario)
+        if not consistencia['valida']:
+            continue
+        atualizar_status_nf(nf)
+
+        conferencia_em_fluxo_obj = (
+            nf.conferencias.filter(
+                status__in=[
+                    Conferencia.Status.EM_CONFERENCIA,
+                    Conferencia.Status.AGUARDANDO,
+                    Conferencia.Status.LIBERADO_COM_RESTRICAO,
+                ]
+            )
+            .select_related('conferente')
+            .order_by('-created_at')
+            .first()
+        )
+        if (
+            conferencia_em_fluxo_obj
+            and conferencia_em_fluxo_obj.status == Conferencia.Status.EM_CONFERENCIA
+            and not usuario_esta_logado(conferencia_em_fluxo_obj.conferente)
+        ):
+            conferencia_em_fluxo_obj.status = Conferencia.Status.AGUARDANDO
+            conferencia_em_fluxo_obj.save(update_fields=['status', 'updated_at'])
+
+        conferencia_ativa = bool(
+            conferencia_em_fluxo_obj is not None
+            and conferencia_em_fluxo_obj.status == Conferencia.Status.EM_CONFERENCIA
+        )
+        conferencia_finalizada = nf.conferencias.filter(
+            status__in=[Conferencia.Status.OK, Conferencia.Status.CONCLUIDO_COM_RESTRICAO]
+        ).exists()
+        if conferencia_finalizada and conferencia_em_fluxo_obj is None:
+            continue
+
+        validacao_fluxo = avaliar_liberacao_conferencia(nf)
+        if not _nf_pertence_a_setores_usuario(nf, usuario):
+            continue
+        status_separacao = 'SEPARADO' if validacao_fluxo['liberado'] else 'PENDENTE'
+        possui_liberacao_restricao = (
+            nf.status == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
+            or nf.conferencias.filter(status=Conferencia.Status.LIBERADO_COM_RESTRICAO).exists()
+        )
+        itens_pendentes_conferencia = _itens_pendentes_conferencia(nf, conferencia_em_fluxo_obj)
+        status_elegivel = nf.status in {
+            NotaFiscal.Status.PENDENTE,
+            NotaFiscal.Status.NORMAL,
+            NotaFiscal.Status.EM_CONFERENCIA,
+            NotaFiscal.Status.LIBERADA_COM_RESTRICAO,
+            NotaFiscal.Status.BLOQUEADA_COM_RESTRICAO,
+        }
+        fluxo_direto_balcao = bool(nf.balcao)
+        # Conferencia so lista pedido totalmente separado.
+        if status_separacao != 'SEPARADO':
+            continue
+        if itens_pendentes_conferencia <= 0 and conferencia_em_fluxo_obj is None:
+            continue
+        if not (
+            status_elegivel
+            and (
+                separacao_concluida_nf(nf)
+                or possui_liberacao_restricao
+                or conferencia_em_fluxo_obj is not None
+                or fluxo_direto_balcao
+            )
+        ):
+            continue
+
+        ultima_conferencia = nf.conferencias.exclude(status=Conferencia.Status.CANCELADA).order_by('-created_at').first()
+        progresso = _progresso_conferencia(ultima_conferencia)
+        bloqueado = bool(
+            usuario is not None
+            and conferencia_em_fluxo_obj is not None
+            and conferencia_em_fluxo_obj.conferente_id != usuario.id
+            and conferencia_em_fluxo_obj.status == Conferencia.Status.EM_CONFERENCIA
+        )
+        disponiveis.append(
+            {
+                'id': nf.id,
+                'numero': nf.numero,
+                'cliente': nf.cliente.nome,
+                'rota': f'Balcao - {nf.rota.nome}' if nf.balcao else nf.rota.nome,
+                'status_fiscal': nf.status_fiscal,
+                'status': nf.status,
+                'status_separacao': status_separacao,
+                'conferencia_liberada': validacao_fluxo['liberado'],
+                'conferencia_bloqueio_motivo': validacao_fluxo['motivo'],
+                'balcao': nf.balcao,
+                '_updated_ts': nf.updated_at.timestamp(),
+                'progresso': progresso,
+                'itens_pendentes_conferencia': itens_pendentes_conferencia,
+                'bloqueado': bloqueado,
+                'usuario_em_uso': (
+                    (conferencia_em_fluxo_obj.conferente.nome or conferencia_em_fluxo_obj.conferente.username)
+                    if conferencia_em_fluxo_obj is not None and conferencia_em_fluxo_obj.conferente_id
+                    else ''
+                ),
+                'em_uso_por_mim': bool(
+                    usuario is not None
+                    and conferencia_em_fluxo_obj is not None
+                    and conferencia_em_fluxo_obj.conferente_id == usuario.id
+                ),
+            }
+        )
+    disponiveis.sort(key=lambda nf: (0 if nf['balcao'] else 1, -nf['_updated_ts']))
+    for nf in disponiveis:
+        nf.pop('_updated_ts', None)
+    return disponiveis
+
+
+def _itens_pendentes_conferencia(nf, conferencia_em_fluxo_obj):
+    if conferencia_em_fluxo_obj is not None:
+        return conferencia_em_fluxo_obj.itens.filter(
+            status__in=[ConferenciaItem.Status.AGUARDANDO, ConferenciaItem.Status.DIVERGENCIA]
+        ).count()
+    return len(list(nf.itens.all()))
+
+
+def iniciar_conferencia(nf_id, usuario):
+    nf = (
+        NotaFiscal.objects.select_related('cliente', 'rota')
+        .prefetch_related('itens__produto', 'tarefas__itens', 'conferencias__itens')
+        .get(id=nf_id)
+    )
+
+    if nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA or not nf.ativa:
+        _registrar_bloqueio_nf_cancelada(usuario, 'INICIO CONFERENCIA BLOQUEADO', nf)
+        raise ConferenciaError(NF_CANCELADA_ERRO)
+    _validar_setor_nf(nf, usuario)
+
+    validacao_fluxo = avaliar_liberacao_conferencia(nf)
+    if not validacao_fluxo['liberado']:
+        raise ConferenciaError(validacao_fluxo['motivo'])
+
+    conferencia_ativa = nf.conferencias.filter(status=Conferencia.Status.EM_CONFERENCIA).select_related('conferente').first()
+    if conferencia_ativa:
+        if conferencia_ativa.conferente_id != usuario.id:
+            raise ConferenciaError('NF ja esta em conferencia por outro usuario.')
+        return _dados_conferencia(conferencia_ativa)
+
+    if nf.conferencias.filter(status__in=[Conferencia.Status.OK, Conferencia.Status.CONCLUIDO_COM_RESTRICAO]).exists():
+        raise ConferenciaError('NF ja foi conferida com sucesso.')
+    if nf.conferencias.filter(status=Conferencia.Status.LIBERADO_COM_RESTRICAO).exists():
+        raise ConferenciaError('NF ja foi liberada com restricao.')
+
+    with transaction.atomic():
+        conferencia = Conferencia.objects.create(nf=nf, conferente=usuario, status=Conferencia.Status.EM_CONFERENCIA)
+
+        for item_nf in nf.itens.select_related('produto').all():
+            ConferenciaItem.objects.create(
+                conferencia=conferencia,
+                produto=item_nf.produto,
+                qtd_esperada=item_nf.quantidade,
+                qtd_conferida=Decimal('0'),
+                status=ConferenciaItem.Status.AGUARDANDO,
+            )
+
+        Log.objects.create(usuario=usuario, acao='INICIO CONFERENCIA', detalhe=f'Conferencia iniciada para NF {nf.numero}.')
+        UserActivityLog.objects.create(
+            usuario=usuario,
+            tipo=UserActivityLog.Tipo.TAREFA_INICIO,
+            tarefa=nf.tarefas.first(),
+            timestamp=timezone.now(),
+        )
+    return _dados_conferencia(conferencia)
+
+
+def bipar_conferencia(conferencia_id, codigo, usuario):
+    conferencia = _obter_conferencia_em_andamento(conferencia_id, usuario)
+
+    with transaction.atomic():
+        conferencia = (
+            Conferencia.objects.select_for_update()
+            .select_related('nf', 'conferente')
+            .get(id=conferencia.id)
+        )
+        itens_pendentes = list(
+            ConferenciaItem.objects.select_for_update()
+            .filter(
+                conferencia=conferencia,
+                status=ConferenciaItem.Status.AGUARDANDO,
+                qtd_conferida__lt=F('qtd_esperada'),
+            )
+            .select_related('produto')
+            .order_by('id')
+        )
+        if not itens_pendentes:
+            raise ConferenciaError('Não existem itens pendentes para bipagem.')
+        produto_lido = buscar_produto_por_leitura(codigo)
+        if produto_lido is None:
+            raise ConferenciaError('Produto não cadastrado.')
+        item_esperado = next(
+            (item for item in itens_pendentes if item.produto_id == produto_lido.id),
+            itens_pendentes[0],
+        )
+        try:
+            validacao = validar_produto(
+                codigo_lido=codigo,
+                item_id=item_esperado.id,
+                usuario=usuario,
+                item_model=ConferenciaItem,
+                tipo_validacao='CONFERENCIA',
+            )
+        except ProdutoValidacaoError as exc:
+            raise ConferenciaError(str(exc)) from exc
+
+        item = validacao.item
+        if item.status == ConferenciaItem.Status.DIVERGENCIA:
+            raise ConferenciaError('Item em divergencia nao pode ser bipado sem tratativa.')
+        if item.qtd_conferida >= item.qtd_esperada:
+            raise ConferenciaError('Quantidade conferida excede o esperado.')
+
+        item.qtd_conferida += Decimal('1')
+        item.bipado_por = usuario
+        item.data_bipagem = timezone.now()
+        if item.qtd_conferida == item.qtd_esperada:
+            item.status = ConferenciaItem.Status.OK
+            item.motivo_divergencia = None
+            item.observacao_divergencia = ''
+        item.save(
+            update_fields=[
+                'qtd_conferida',
+                'status',
+                'motivo_divergencia',
+                'observacao_divergencia',
+                'bipado_por',
+                'data_bipagem',
+                'updated_at',
+            ]
+        )
+
+        atualizar_status_nf(conferencia.nf)
+
+        Log.objects.create(
+            usuario=usuario,
+            acao='BIPAGEM CONFERENCIA',
+            detalhe=f'NF {conferencia.nf.numero} - produto {item.produto.cod_prod} bipado.',
+        )
+        UserActivityLog.objects.create(
+            usuario=usuario,
+            tipo=UserActivityLog.Tipo.BIPAGEM,
+            tarefa=conferencia.nf.tarefas.first(),
+            timestamp=timezone.now(),
+        )
+
+    itens_qs = conferencia.itens.select_related('produto').order_by('id')
+    proximo_item = itens_qs.filter(
+        qtd_conferida__lt=F('qtd_esperada'),
+        status=ConferenciaItem.Status.AGUARDANDO,
+    ).first()
+    todos_itens_completos = not itens_qs.exclude(status=ConferenciaItem.Status.OK).exists()
+    finalizado = todos_itens_completos
+
+    conferencia_resultado = None
+    if finalizado:
+        conferencia_resultado = finalizar_conferencia(conferencia.id, usuario)
+        conferencia.refresh_from_db(fields=['status', 'updated_at'])
+    else:
+        conferencia_resultado = _dados_conferencia(conferencia)
+
+    item_atual = _dados_item(item)
+    return {
+        'status': 'ok',
+        'item_atual': item_atual,
+        'item_id': item_atual['item_id'],
+        'produto': item_atual['produto'],
+        'ean': item_atual['ean'],
+        'esperado': item_atual['esperado'],
+        'conferido': item_atual['conferido'],
+        'percentual': item_atual['percentual'],
+        'progresso': item_atual['progresso'],
+        'proximo_item': _dados_item_operacional(proximo_item) if proximo_item else None,
+        'finalizado': finalizado,
+        'conferencia': conferencia_resultado,
+    }
+
+
+@transaction.atomic
+def registrar_divergencia(item_id, motivo, observacao, usuario):
+    item = ConferenciaItem.objects.select_related('conferencia__nf', 'conferencia__conferente', 'produto').get(id=item_id)
+    conferencia = item.conferencia
+
+    if conferencia.status != Conferencia.Status.EM_CONFERENCIA:
+        raise ConferenciaError('Conferencia nao esta ativa.')
+    if conferencia.conferente_id != usuario.id:
+        raise ConferenciaError('Somente o conferente vinculado pode registrar divergencia.')
+    if item.qtd_conferida == item.qtd_esperada and item.qtd_esperada > 0:
+        raise ConferenciaError('Item ja esta conferido e nao possui divergencia.')
+    if not motivo:
+        raise ConferenciaError('Motivo da divergencia e obrigatorio.')
+
+    item.status = ConferenciaItem.Status.DIVERGENCIA
+    item.motivo_divergencia = motivo
+    item.observacao_divergencia = (observacao or '').strip()
+    item.save(update_fields=['status', 'motivo_divergencia', 'observacao_divergencia', 'updated_at'])
+
+    Log.objects.create(
+        usuario=usuario,
+        acao='DIVERGENCIA CONFERENCIA',
+        detalhe=f'NF {conferencia.nf.numero} - produto {item.produto.cod_prod} com motivo {motivo}.',
+    )
+    return _dados_item(item)
+
+
+def finalizar_conferencia(conferencia_id, usuario):
+    conferencia = _obter_conferencia_em_andamento(conferencia_id, usuario)
+    itens = list(conferencia.itens.select_related('produto').all())
+
+    if not itens:
+        raise ConferenciaError('Conferencia sem itens para finalizar.')
+    conferencia_liberada = conferencia.status == Conferencia.Status.LIBERADO_COM_RESTRICAO or conferencia.nf.status == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
+    if any(item.status == ConferenciaItem.Status.AGUARDANDO for item in itens) and not conferencia_liberada:
+        raise ConferenciaError('Existem itens pendentes de bipagem ou tratativa.')
+
+    possui_divergencia = any(item.status == ConferenciaItem.Status.DIVERGENCIA for item in itens)
+    with transaction.atomic():
+        if conferencia_liberada:
+            conferencia.status = Conferencia.Status.CONCLUIDO_COM_RESTRICAO
+        else:
+            conferencia.status = Conferencia.Status.DIVERGENCIA if possui_divergencia else Conferencia.Status.OK
+        conferencia.save(update_fields=['status', 'updated_at'])
+
+        nf = conferencia.nf
+        sincronizar_status_operacional_nf(nf)
+
+        if conferencia.status == Conferencia.Status.CONCLUIDO_COM_RESTRICAO:
+            detalhe = f'Conferencia da NF {nf.numero} finalizada com restricao liberada.'
+        elif possui_divergencia:
+            _gerar_retorno_para_separacao(conferencia)
+            detalhe = f'Conferencia da NF {nf.numero} finalizada com divergencia.'
+        else:
+            detalhe = f'Conferencia da NF {nf.numero} finalizada com sucesso.'
+
+        Log.objects.create(usuario=usuario, acao='FINALIZACAO CONFERENCIA', detalhe=detalhe)
+        UserActivityLog.objects.create(
+            usuario=usuario,
+            tipo=UserActivityLog.Tipo.TAREFA_FIM,
+            tarefa=conferencia.nf.tarefas.first(),
+            timestamp=timezone.now(),
+        )
+    return _dados_conferencia(conferencia)
+
+
+def _obter_conferencia_em_andamento(conferencia_id, usuario):
+    conferencia = (
+        Conferencia.objects.select_related('nf', 'conferente', 'nf__rota')
+        .prefetch_related('itens__produto')
+        .get(id=conferencia_id)
+    )
+    if conferencia.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
+        _registrar_bloqueio_nf_cancelada(usuario, 'CONFERENCIA BLOQUEADA', conferencia.nf)
+        raise ConferenciaError(NF_CANCELADA_ERRO)
+    _validar_setor_nf(conferencia.nf, usuario)
+    if conferencia.status not in {Conferencia.Status.EM_CONFERENCIA, Conferencia.Status.LIBERADO_COM_RESTRICAO}:
+        raise ConferenciaError('Conferencia nao esta em andamento.')
+    if conferencia.conferente_id != usuario.id:
+        raise ConferenciaError('Conferencia vinculada a outro usuario.')
+    return conferencia
+
+
+def _gerar_retorno_para_separacao(conferencia):
+    itens_divergentes = list(conferencia.itens.filter(status=ConferenciaItem.Status.DIVERGENCIA).select_related('produto'))
+    if not itens_divergentes:
+        return
+
+    filtros = []
+    normais = []
+    for item in itens_divergentes:
+        quantidade_retorno = item.qtd_esperada - item.qtd_conferida
+        if quantidade_retorno <= 0:
+            quantidade_retorno = item.qtd_esperada or Decimal('1')
+        if item.produto.categoria == Produto.Categoria.FILTROS:
+            filtros.append((item.produto, quantidade_retorno))
+        else:
+            normais.append((item.produto, quantidade_retorno))
+
+    if filtros:
+        tarefa_filtro = Tarefa.objects.create(
+            nf=conferencia.nf,
+            tipo=Tarefa.Tipo.FILTRO,
+            setor=Produto.Categoria.FILTROS,
+            rota=conferencia.nf.rota,
+            status=Tarefa.Status.ABERTO,
+        )
+        for produto, quantidade in filtros:
+            TarefaItem.objects.create(tarefa=tarefa_filtro, nf=conferencia.nf, produto=produto, quantidade_total=quantidade)
+
+    if normais:
+        agrupados_por_setor = {}
+        for produto, quantidade in normais:
+            agrupados_por_setor.setdefault(produto.categoria, []).append((produto, quantidade))
+
+        for setor, itens in agrupados_por_setor.items():
+            tarefa = Tarefa.objects.filter(
+                nf__isnull=True,
+                tipo=Tarefa.Tipo.ROTA,
+                setor=setor,
+                rota=conferencia.nf.rota,
+                status=Tarefa.Status.ABERTO,
+            ).first()
+            if tarefa is None:
+                tarefa = Tarefa.objects.create(
+                    nf=None,
+                    tipo=Tarefa.Tipo.ROTA,
+                    setor=setor,
+                    rota=conferencia.nf.rota,
+                    status=Tarefa.Status.ABERTO,
+                )
+            for produto, quantidade in itens:
+                item_tarefa = TarefaItem.objects.filter(tarefa=tarefa, produto=produto, nf=conferencia.nf).first()
+                if item_tarefa is None:
+                    TarefaItem.objects.create(tarefa=tarefa, nf=conferencia.nf, produto=produto, quantidade_total=quantidade)
+                    continue
+                item_tarefa.quantidade_total += quantidade
+                item_tarefa.save(update_fields=['quantidade_total', 'updated_at'])
+
+
+def _tarefas_relacionadas_nf(nf):
+    setores_nf = {
+        item.produto.categoria
+        for item in nf.itens.select_related('produto').all()
+        if item.produto.categoria != Produto.Categoria.FILTROS
+    }
+    tarefas = [tarefa for tarefa in nf.tarefas.all() if tarefa.tipo == Tarefa.Tipo.FILTRO]
+    if not setores_nf:
+        return tarefas
+
+    tarefas_rota = list(
+        Tarefa.objects.filter(
+            nf__isnull=True,
+            tipo=Tarefa.Tipo.ROTA,
+            rota=nf.rota,
+            setor__in=setores_nf,
+        )
+    )
+    if len({tarefa.setor for tarefa in tarefas_rota}) != len(setores_nf):
+        return tarefas
+    return tarefas + tarefas_rota
+
+
+def _dados_conferencia(conferencia):
+    conferencia = Conferencia.objects.select_related('nf', 'conferente').prefetch_related('itens__produto').get(id=conferencia.id)
+    return {
+        'id': conferencia.id,
+        'nf_id': conferencia.nf_id,
+        'nf_numero': conferencia.nf.numero,
+        'conferente': conferencia.conferente.nome,
+        'status': conferencia.status,
+        'progresso': _progresso_conferencia(conferencia),
+    }
+
+
+def _dados_item(item):
+    return {
+        'item_id': item.id,
+        'produto': item.produto.cod_prod,
+        'ean': item.produto.cod_ean,
+        'status': item.status,
+        'esperado': float(item.qtd_esperada),
+        'conferido': float(item.qtd_conferida),
+        'percentual': float(_percentual(item.qtd_conferida, item.qtd_esperada)),
+        'progresso': _progresso_conferencia(item.conferencia),
+    }
+
+
+def _dados_item_operacional(item):
+    if item is None:
+        return None
+    return {
+        'item_id': item.id,
+        'produto': item.produto.cod_prod,
+        'descricao': item.produto.descricao,
+        'ean': item.produto.cod_ean,
+        'status': item.status,
+        'esperado': float(item.qtd_esperada),
+        'conferido': float(item.qtd_conferida),
+        'bipado_por': (
+            item.bipado_por.nome or item.bipado_por.username
+            if item.bipado_por is not None
+            else ''
+        ),
+        'data_bipagem': item.data_bipagem.isoformat() if item.data_bipagem else None,
+    }
+
+
+def _progresso_conferencia(conferencia):
+    if conferencia is None:
+        return {'esperado': 0.0, 'conferido': 0.0, 'percentual': 0.0}
+    itens = list(conferencia.itens.all())
+    esperado = sum((item.qtd_esperada for item in itens), Decimal('0'))
+    conferido = sum((item.qtd_conferida for item in itens), Decimal('0'))
+    return {
+        'esperado': float(esperado),
+        'conferido': float(conferido),
+        'percentual': float(_percentual(conferido, esperado)),
+    }
+
+
+def _percentual(conferido, esperado):
+    if not esperado:
+        return Decimal('0')
+    return (conferido / esperado * Decimal('100')).quantize(Decimal('0.01'))
+
+
+def _registrar_bloqueio_nf_cancelada(usuario, acao, nf):
+    Log.objects.create(
+        usuario=usuario,
+        acao=acao,
+        detalhe=f'NF {nf.numero} bloqueada. Motivo: NF CANCELADA.',
+    )

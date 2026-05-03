@@ -1,0 +1,173 @@
+{% extends 'base.html' %}
+
+{% block title %}Clientes | WMS{% endblock %}
+{% block container_class %}container-fluid px-5{% endblock %}
+
+{% block content %}
+<section class="box cadastro-shell clientes-page page-container">
+    <style>
+        .clientes-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn-toggle-clientes {
+            background: #1d4ed8;
+            color: #fff;
+            border: none;
+            width: 52px;
+            height: 52px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 8px 20px rgba(29, 78, 216, 0.22);
+        }
+
+        .btn-toggle-clientes:hover {
+            transform: scale(1.05);
+            background: #1e40af;
+        }
+
+        .clientes-collapse {
+            overflow: hidden;
+            max-height: 0;
+            opacity: 0;
+            transform: translateY(-6px);
+            transition: max-height 0.35s ease, opacity 0.25s ease, transform 0.25s ease;
+        }
+
+        .clientes-collapse.is-open {
+            max-height: 1200px;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        @media (max-width: 768px) {
+            .btn-toggle-clientes {
+                width: 45px;
+                height: 45px;
+                font-size: 22px;
+            }
+        }
+    </style>
+    <div class="page-header">
+        <div class="clientes-header">
+            <div>
+                <h1>Clientes</h1>
+                <p>Cadastro de clientes com importação de planilha e listagem com rolagem.</p>
+            </div>
+            <button
+                type="button"
+                id="toggleClientesBtn"
+                class="btn-toggle-clientes"
+                aria-label="Mostrar importação e novo cliente"
+                aria-expanded="false"
+                title="Mostrar importação e novo cliente"
+            >+</button>
+        </div>
+    </div>
+
+    <div id="clientesCollapse" class="clientes-collapse">
+    <div class="cadastro-top-grid">
+        <div class="card cadastro-card card-flex">
+            <h2 class="section-title">Importação</h2>
+            <form method="post" enctype="multipart/form-data" class="cadastro-import-form">
+                {% csrf_token %}
+                <input type="hidden" name="acao" value="upload">
+                <input type="file" name="arquivo" class="form-control" accept=".xlsx,.xls,.csv" required>
+                <div class="mt-auto">
+                    <button type="submit" class="btn btn-primary w-100">Importar Planilha</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card cadastro-card card-flex">
+            <h2 class="section-title">Novo cliente</h2>
+            <form method="post" class="cadastro-form-shell">
+                {% csrf_token %}
+                <input type="hidden" name="acao" value="cadastrar">
+                <div class="cadastro-form-grid">
+                    <div>
+                        <label for="codigo">Código</label>
+                        <input id="codigo" name="codigo" type="text" class="form-control">
+                    </div>
+                    <div>
+                        <label for="nome">Nome</label>
+                        <input id="nome" name="nome" type="text" class="form-control" required>
+                    </div>
+                    <div>
+                        <label for="rota">Rota</label>
+                        <input id="rota" name="rota" type="text" class="form-control">
+                    </div>
+                    <div>
+                        <label for="inscricao_estadual">Inscrição Estadual</label>
+                        <input id="inscricao_estadual" name="inscricao_estadual" type="text" class="form-control">
+                    </div>
+                </div>
+                <div class="cadastro-form-actions mt-auto">
+                    <button type="submit" class="btn btn-primary">Salvar cliente</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    </div>
+
+    <div class="card cadastro-card cadastro-listagem-card">
+        <h2 class="section-title">Listagem</h2>
+        <div class="content-scroll">
+            <div class="table-wrap table-responsive tabela-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Nome</th>
+                            <th>Rota</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cliente in clientes %}
+                        <tr>
+                            <td>{{ cliente.codigo|default:"-" }}</td>
+                            <td>{{ cliente.nome }}</td>
+                            <td>{{ cliente.rota|default:"-" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="3">Nenhum cliente cadastrado.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+<script>
+(() => {
+    const toggleBtn = document.getElementById('toggleClientesBtn');
+    const collapseEl = document.getElementById('clientesCollapse');
+    if (!toggleBtn || !collapseEl) return;
+
+    function setOpen(open) {
+        collapseEl.classList.toggle('is-open', open);
+        toggleBtn.textContent = open ? '−' : '+';
+        toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        toggleBtn.setAttribute('aria-label', open ? 'Ocultar importação e novo cliente' : 'Mostrar importação e novo cliente');
+        toggleBtn.title = open ? 'Ocultar importação e novo cliente' : 'Mostrar importação e novo cliente';
+    }
+
+    setOpen(false);
+    toggleBtn.addEventListener('click', () => {
+        setOpen(!collapseEl.classList.contains('is-open'));
+    });
+})();
+</script>
+{% endblock %}

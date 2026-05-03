@@ -1,0 +1,43 @@
+﻿{% load custom_filters %}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <title>RelatÃ³rio de Produtividade</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+        h1 { margin: 0 0 12px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { border: 1px solid #d1d5db; padding: 8px; font-size: 12px; text-align: left; }
+        th { background: #eff6ff; }
+        .meta { color: #6b7280; font-size: 12px; }
+        @media print { .no-print { display: none; } }
+    </style>
+</head>
+<body>
+    <h1>GestÃ£o de Produtividade WMS</h1>
+    <p class="meta">PerÃ­odo: {{ filtros.date_from|date:'d/m/Y' }} atÃ© {{ filtros.date_to|date:'d/m/Y' }}</p>
+    <button class="no-print" onclick="window.print()">Salvar como PDF</button>
+    <table>
+        <thead>
+            <tr>
+                <th>UsuÃ¡rio</th><th>Perfil</th><th>Setor</th><th>Bipagens</th><th>Tarefas</th><th>Tempo mÃ©dio</th><th>Logado</th><th>Ãšltimo acesso</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in detalhado %}
+            <tr>
+                <td>{{ row.usuario }}</td>
+                <td>{{ row.perfil }}</td>
+                <td>{{ row.setores|default:'-' }}</td>
+                <td>{{ row.total_bipagens }}</td>
+                <td>{{ row.total_tarefas }}</td>
+                <td>{{ row.tempo_medio_tarefa|format_duration }}</td>
+                <td>{{ row.tempo_total_logado|format_duration }}</td>
+                <td>{% if row.ultimo_acesso %}{{ row.ultimo_acesso|date:'d/m/Y H:i' }}{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

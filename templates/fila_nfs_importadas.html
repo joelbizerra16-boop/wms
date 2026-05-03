@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+
+{% block title %}Fila de NFs Importadas | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Pré-processamento</span>
+        <h1>Fila de NFs Importadas</h1>
+        <p>As chaves das NFs são registradas aqui e só entram na separação após liberação manual.</p>
+    </div>
+    <div class="actions-row">
+        {% if pode_limpar_dados %}
+        <form method="post" action="{% url 'web-limpar-dados-importacao' %}" id="limpeza-importacao-form" style="margin:0;">
+            {% csrf_token %}
+            <input type="hidden" name="confirmar_limpeza" value="SIM">
+            <button type="submit" class="btn btn-danger">Limpar dados antigos (30 dias)</button>
+        </form>
+        {% endif %}
+        <a href="{% url 'web-importar-xml' %}" class="btn btn-light">Voltar para importação</a>
+    </div>
+</div>
+
+<div class="card table-card">
+    <div class="table-wrap table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Número NF</th>
+                    <th>Chave NF</th>
+                    <th>Tipo</th>
+                    <th>Status</th>
+                    <th>Data</th>
+                    <th>Ação</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entrada in entradas %}
+                <tr>
+                    <td>{{ entrada.numero_nf|default:'-' }}</td>
+                    <td>{{ entrada.chave_nf }}</td>
+                    <td>{{ entrada.get_tipo_display }}</td>
+                    <td>
+                        <span class="status-badge {% if entrada.status == 'AGUARDANDO' %}status-badge--warning{% elif entrada.status == 'LIBERADO' %}status-badge--success{% else %}status-badge--info{% endif %}">
+                            {{ entrada.get_status_display }}
+                        </span>
+                    </td>
+                    <td>{{ entrada.data_importacao|date:"d/m/Y H:i:s" }}</td>
+                    <td>
+                        {% if entrada.status == 'AGUARDANDO' %}
+                        <form method="post" action="{% url 'web-liberar-entrada-nf' entrada.id %}" style="margin:0;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn-primary">Liberar</button>
+                        </form>
+                        {% else %}
+                        <span class="muted">Sem ação</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="empty-state">Nenhuma entrada de NF registrada.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include 'partials/pagination_controls.html' %}
+{% if pode_limpar_dados %}
+<script>
+    (function () {
+        const form = document.getElementById('limpeza-importacao-form');
+        if (!form) return;
+        form.addEventListener('submit', function (event) {
+            const confirmado = window.confirm(
+                'Você está prestes a remover os dados mais antigos (30 dias). Essa ação não poderá ser desfeita. Deseja continuar?'
+            );
+            if (!confirmado) {
+                event.preventDefault();
+            }
+        });
+    })();
+</script>
+{% endif %}
+{% endblock %}

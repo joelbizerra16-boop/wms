@@ -1,0 +1,347 @@
+{% extends 'base.html' %}
+
+{% block title %}Usuários | WMS{% endblock %}
+
+{% block content %}
+<div class="card section users-page-header">
+    <div class="actions-row" style="justify-content: space-between;">
+        <h1 style="margin: 0;">Usuários</h1>
+        <button type="button" class="btn-primary" id="btnToggleUser">+ Novo usuário</button>
+    </div>
+</div>
+
+<div class="card section users-collapse" id="formNovoUsuario" aria-hidden="true" style="display: none;">
+    <h2 style="margin-top: 0;">Novo usuário</h2>
+    <form method="post" id="novo-usuario-form">
+        {% csrf_token %}
+        <div class="user-form-grid">
+            <div class="user-form-col">
+                <div class="user-form-field">
+                    <label for="nome">Nome</label>
+                    <input id="nome" name="nome" type="text" required>
+                </div>
+                <div class="user-form-field">
+                    <label for="username">Username</label>
+                    <input id="username" name="username" type="text" required>
+                </div>
+                <div class="user-form-field">
+                    <label for="senha">Senha</label>
+                    <input id="senha" name="senha" type="password" required>
+                </div>
+            </div>
+            <div class="user-form-col">
+                <div class="user-form-field">
+                    <label for="perfil">Perfil</label>
+                    <select id="perfil" name="perfil">
+                        {% for valor, label in perfis %}
+                        <option value="{{ valor }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="user-form-field">
+                    <label>Setores</label>
+                    <div class="setores-container">
+                        {% for setor in setores %}
+                        <label class="setor-item">
+                            <input type="checkbox" name="setores" value="{{ setor }}">
+                            <span>{{ setor }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="user-form-checkboxes">
+                    <label class="user-checkbox-row"><input name="is_active" type="checkbox" checked> <span>Usuário ativo</span></label>
+                    <label class="user-checkbox-row"><input name="is_staff" type="checkbox"> <span>Usuário staff</span></label>
+                </div>
+            </div>
+        </div>
+        <div class="actions-row" style="margin-top: 16px;">
+            <button type="submit" class="btn-primary">Salvar</button>
+        </div>
+    </form>
+</div>
+
+<div class="card section">
+    <table>
+        <thead>
+            <tr>
+                <th>Nome</th>
+                <th>Username</th>
+                <th>Perfil</th>
+                <th>Setores</th>
+                <th>Status</th>
+                <th>Staff</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody id="usuarios-tbody">
+            {% for item in usuarios %}
+            <tr data-user-id="{{ item.id }}">
+                <td>{{ item.nome }}</td>
+                <td>{{ item.username }}</td>
+                <td>
+                    <span class="status-badge user-perfil-badge user-perfil-badge--{{ item.perfil|lower }}">
+                        {{ item.perfil }}
+                    </span>
+                </td>
+                <td>{{ item.setores_display }}</td>
+                <td>
+                    <span class="status-badge js-status-badge {% if item.is_active %}status-badge--success{% else %}status-badge--danger{% endif %}">
+                        {% if item.is_active %}ATIVO{% else %}INATIVO{% endif %}
+                    </span>
+                </td>
+                <td>{{ item.is_staff|yesno:'Sim,Não' }}</td>
+                <td>
+                    <div class="acoes">
+                        <a href="{% url 'editar_usuario' item.id %}" class="btn-acao editar" title="Editar">✏️</a>
+                        {% if item.id == usuario.id or item.is_superuser or item.username|lower == 'admin' %}
+                        <span class="status-badge protected-badge">Protegido</span>
+                        {% else %}
+                        <form method="post" action="{% url 'excluir_usuario' item.id %}" onsubmit="return confirm('Este usuário será desativado e não poderá acessar o sistema. Deseja continuar?')">
+                            {% csrf_token %}
+                            <button type="submit" class="btn-acao excluir" title="Desativar">⛔</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7">Nenhum usuário cadastrado.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="modal" id="usuario-status-modal" aria-hidden="true">
+    <div class="modal__dialog" role="dialog" aria-modal="true">
+        <div class="modal__header">
+            <h3 class="modal__title">Confirmar ação</h3>
+            <button type="button" class="modal__close js-close-usuario-modal" aria-label="Fechar">×</button>
+        </div>
+        <div class="modal__body">
+            <p id="usuario-status-modal-text">Tem certeza que deseja bloquear este usuário?</p>
+            <div class="modal__actions">
+                <button type="button" class="btn-light js-close-usuario-modal">Cancelar</button>
+                <button type="button" class="btn-danger" id="usuario-status-confirmar">Confirmar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<style>
+.setores-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+    width: 100%;
+}
+
+.setor-item {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    width: 100%;
+    margin: 0;
+}
+
+.setor-item:hover {
+    background: #f3f6fb;
+}
+
+.setor-item input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+}
+
+.setor-item span {
+    display: inline-block;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.2;
+    color: #1e293b;
+}
+
+.setor-item input:checked + span {
+    color: #2563eb;
+    font-weight: 600;
+}
+
+.setor-item:has(input:checked) {
+    background: #eff6ff;
+    border-color: #2563eb;
+}
+
+.acoes {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-acao {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #fff;
+    border: 0;
+    transition: 0.2s;
+    cursor: pointer;
+}
+
+.btn-acao.editar { background: #2563eb; }
+.btn-acao.editar:hover { background: #1d4ed8; }
+.btn-acao.excluir { background: #ef4444; }
+.btn-acao.excluir:hover { background: #dc2626; }
+</style>
+
+<script>
+(function () {
+    const formWrapper = document.getElementById('formNovoUsuario');
+    const toggleFormBtn = document.getElementById('btnToggleUser');
+    const form = document.getElementById('novo-usuario-form');
+    const modal = document.getElementById('usuario-status-modal');
+    const modalText = document.getElementById('usuario-status-modal-text');
+    const confirmarBtn = document.getElementById('usuario-status-confirmar');
+    const toastContainer = document.getElementById('toast-container');
+    let activeButton = null;
+
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) {
+            return parts.pop().split(';').shift();
+        }
+        return '';
+    }
+
+    function showToast(message, kind) {
+        const toast = document.createElement('div');
+        toast.className = `toast ${kind === 'erro' ? 'toast--error' : 'toast--success'}`;
+        toast.textContent = message;
+        toastContainer.appendChild(toast);
+        setTimeout(function () { toast.classList.add('is-visible'); }, 10);
+        setTimeout(function () {
+            toast.classList.remove('is-visible');
+            setTimeout(function () { toast.remove(); }, 220);
+        }, 3000);
+    }
+
+    function openForm() {
+        formWrapper.style.display = 'block';
+        formWrapper.setAttribute('aria-hidden', 'false');
+        requestAnimationFrame(function () {
+            formWrapper.classList.add('is-visible');
+        });
+        toggleFormBtn.textContent = 'Fechar formulário';
+        setTimeout(function () {
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 160);
+    }
+
+    function closeForm() {
+        formWrapper.classList.remove('is-visible');
+        formWrapper.setAttribute('aria-hidden', 'true');
+        setTimeout(function () {
+            if (!formWrapper.classList.contains('is-visible')) {
+                formWrapper.style.display = 'none';
+            }
+        }, 300);
+        toggleFormBtn.textContent = '+ Novo usuário';
+    }
+
+    function openModal(button) {
+        activeButton = button;
+        const label = button.dataset.actionLabel || 'bloquear';
+        modalText.textContent = `Tem certeza que deseja ${label} este usuário?`;
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeModal() {
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+        activeButton = null;
+    }
+
+    async function confirmarAcao() {
+        if (!activeButton) {
+            return;
+        }
+        const userId = activeButton.dataset.userId;
+        const response = await fetch(`/usuarios/${userId}/toggle-status/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+            showToast(data.erro || 'Falha ao atualizar usuário.', 'erro');
+            closeModal();
+            return;
+        }
+        sessionStorage.setItem('usuarios-toast', data.mensagem || 'Usuário atualizado com sucesso.');
+        window.location.reload();
+    }
+
+    toggleFormBtn && toggleFormBtn.addEventListener('click', function () {
+        if (formWrapper.style.display !== 'none') {
+            closeForm();
+            return;
+        }
+        openForm();
+    });
+
+    document.querySelectorAll('.js-toggle-usuario').forEach(function (button) {
+        button.addEventListener('click', function () {
+            openModal(button);
+        });
+    });
+
+    modal.querySelectorAll('.js-close-usuario-modal').forEach(function (button) {
+        button.addEventListener('click', closeModal);
+    });
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+    confirmarBtn && confirmarBtn.addEventListener('click', confirmarAcao);
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.classList.contains('is-open')) {
+            closeModal();
+        }
+    });
+
+    {% if messages %}
+    {% for message in messages %}
+    showToast('{{ message|escapejs }}', '{{ message.tags|escapejs }}');
+    {% endfor %}
+    {% endif %}
+
+    const persistedToast = sessionStorage.getItem('usuarios-toast');
+    if (persistedToast) {
+        showToast(persistedToast, 'ok');
+        sessionStorage.removeItem('usuarios-toast');
+    }
+})();
+</script>
+{% endblock %}

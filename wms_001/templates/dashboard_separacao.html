@@ -1,0 +1,196 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard Separação | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Dashboard WMS</span>
+        <h1>Dashboard de Separação</h1>
+        <p>Visão operacional dos itens separados, em execução e pendentes por tarefa.</p>
+    </div>
+</div>
+
+<div class="metrics-grid">
+    <div class="metric-card metric-card--accent metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--info">📦</div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Total</span>
+            <div class="metric-card__value" id="dashboard-total">{{ indicadores.total }}</div>
+            <div class="metric-card__meta">Volume total monitorado</div>
+        </div>
+    </div>
+    <div class="metric-card metric-card--success metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--success">✔</div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Separado</span>
+            <div class="metric-card__value" id="dashboard-separado">{{ indicadores.separado }}</div>
+            <div class="metric-card__meta"><span id="dashboard-percentual">{{ indicadores.percentual }}</span>% concluído</div>
+        </div>
+    </div>
+    <div class="metric-card metric-card--danger metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--danger">⏱</div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Pendente</span>
+            <div class="metric-card__value" id="dashboard-pendente">{{ indicadores.pendente }}</div>
+            <div class="metric-card__meta">Itens aguardando avanço operacional</div>
+        </div>
+    </div>
+    <div class="metric-card metric-card--warning metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--warning">↻</div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Atualização</span>
+            <div class="metric-card__value">3s</div>
+            <div class="metric-card__meta">Resumo automático por polling</div>
+        </div>
+    </div>
+</div>
+
+{% if indicadores.em_execucao == 0 %}
+<div class="card">
+    <div class="empty-state">Sem itens em separação no momento</div>
+</div>
+{% endif %}
+
+<div class="card">
+    <form method="get" class="filter-form">
+        <div>
+            <label for="date_from">Data inicial</label>
+            <input id="date_from" type="date" name="data_inicial" value="{{ filtros.date_from }}">
+        </div>
+        <div>
+            <label for="date_to">Data final</label>
+            <input id="date_to" type="date" name="data_final" value="{{ filtros.date_to }}">
+        </div>
+        <div>
+            <label for="q">Busca global</label>
+            <input id="q" type="text" name="busca" value="{{ filtros.busca }}" placeholder="Buscar NF, cliente, produto, descricao, rota, status...">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-primary">Filtrar</button>
+            <a href="{% url 'web-dashboard-separacao' %}" class="btn btn-light">Limpar</a>
+        </div>
+    </form>
+</div>
+
+{% if detalhe_nf %}
+<div class="card card--soft" id="detalhe-nf">
+    <div class="actions-row" style="justify-content: space-between; margin-bottom: 12px;">
+        <h2 class="section-title" style="margin: 0;">Detalhe da NF {{ detalhe_nf.numero }}</h2>
+        <a href="{{ detalhe_nf.ocultar_url }}" class="btn btn-light">Ocultar detalhe</a>
+    </div>
+    <div class="detail-list">
+        <div class="detail-item"><span class="detail-item__label">NF</span><span class="detail-item__value">{{ detalhe_nf.numero }}</span></div>
+        <div class="detail-item"><span class="detail-item__label">Cliente</span><span class="detail-item__value">{{ detalhe_nf.cliente }}</span></div>
+        <div class="detail-item"><span class="detail-item__label">Rota</span><span class="detail-item__value">{{ detalhe_nf.rota }}</span></div>
+    </div>
+    <div class="table-wrap" style="margin-top: 12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Hora</th>
+                    <th>Usuário</th>
+                    <th>Produto</th>
+                    <th>Descrição</th>
+                    <th>Quantidade bipada</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in detalhe_nf.separacao_historico %}
+                <tr>
+                    <td>{{ row.data_bipagem|date:"d/m/Y" }}</td>
+                    <td>{{ row.data_bipagem|date:"H:i:s" }}</td>
+                    <td>{{ row.usuario }}</td>
+                    <td>{{ row.produto }}</td>
+                    <td>{{ row.descricao }}</td>
+                    <td>{{ row.quantidade }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="empty-state">Sem histórico de bipagem na separação para esta NF.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div id="dashboard-separacao-tabela">
+    {% include 'partials/dashboard_separacao_tabela.html' %}
+</div>
+
+{% include 'partials/liberacao_divergencia_modal.html' %}
+{% if acesso.can_manage %}
+{% include 'partials/exclusao_modal.html' %}
+{% endif %}
+
+<script>
+(function () {
+    let requisicaoResumoEmAndamento = false;
+    let requisicaoTabelaEmAndamento = false;
+
+    function formatNumber(value) {
+        return new Intl.NumberFormat('pt-BR', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        }).format(Number(value || 0));
+    }
+
+    async function refreshDashboardResumo() {
+        if (requisicaoResumoEmAndamento) {
+            return;
+        }
+        requisicaoResumoEmAndamento = true;
+        const search = window.location.search || '';
+        try {
+            const response = await fetch(`/api/dashboard/resumo/${search}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!response.ok) {
+                throw new Error('Nao foi possivel atualizar o dashboard.');
+            }
+            const data = await response.json();
+            document.getElementById('dashboard-total').textContent = formatNumber(data.total);
+            document.getElementById('dashboard-separado').textContent = formatNumber(data.separado);
+            document.getElementById('dashboard-percentual').textContent = formatNumber(data.percentual);
+            document.getElementById('dashboard-pendente').textContent = formatNumber(data.pendente);
+        } finally {
+            requisicaoResumoEmAndamento = false;
+        }
+    }
+
+    async function refreshDashboardTabela() {
+        if (requisicaoTabelaEmAndamento) {
+            return;
+        }
+        requisicaoTabelaEmAndamento = true;
+        const params = new URLSearchParams(window.location.search);
+        params.set('partial', 'table');
+        try {
+            const response = await fetch(`${window.location.pathname}?${params.toString()}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!response.ok) {
+                throw new Error('Nao foi possivel atualizar a tabela de separacao.');
+            }
+            const html = await response.text();
+            const target = document.getElementById('dashboard-separacao-tabela');
+            if (target) {
+                target.innerHTML = html;
+            }
+        } finally {
+            requisicaoTabelaEmAndamento = false;
+        }
+    }
+
+    refreshDashboardResumo().catch(function () {});
+    refreshDashboardTabela().catch(function () {});
+    setInterval(function () {
+        if (document.hidden) {
+            return;
+        }
+        refreshDashboardResumo().catch(function () {});
+        refreshDashboardTabela().catch(function () {});
+    }, 5000);
+})();
+</script>
+{% endblock %}

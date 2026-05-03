@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block title %}Erro na conferencia | WMS{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Conferencia</span>
+        <h1>Nenhuma NF disponivel</h1>
+        <p>{{ mensagem }}</p>
+    </div>
+</div>
+
+<div class="card">
+    <a class="btn btn-primary" href="{% url 'web-conferencia-lista' %}">Voltar para a lista de conferencias</a>
+</div>
+{% endblock %}

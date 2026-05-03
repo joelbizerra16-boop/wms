@@ -1,0 +1,59 @@
+﻿{% extends 'base.html' %}
+{% load custom_filters %}
+
+{% block title %}RelatÃ³rio de Atividades | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">ðŸ“Š GestÃ£o de Produtividade WMS</span>
+        <h1>RelatÃ³rio de Atividades</h1>
+    </div>
+</div>
+
+{% include 'produtividade/_submenu.html' %}
+{% include 'produtividade/_filtros.html' %}
+
+<div class="card section">
+    <div class="actions-row" style="justify-content:flex-end;">
+        <a class="btn btn-primary" href="{% url 'web-produtividade-export-excel' %}?{{ request.GET.urlencode }}">Exportar Excel</a>
+        <a class="btn btn-light" target="_blank" href="{% url 'web-produtividade-export-pdf' %}?{{ request.GET.urlencode }}">Exportar PDF</a>
+    </div>
+</div>
+
+<div class="card table-card">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>UsuÃ¡rio</th>
+                    <th>Perfil</th>
+                    <th>Setor</th>
+                    <th>Total de bipagens</th>
+                    <th>Total de tarefas</th>
+                    <th>Tempo mÃ©dio por tarefa</th>
+                    <th>Tempo total logado</th>
+                    <th>Ãšltimo acesso</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in detalhado %}
+                <tr>
+                    <td>{{ row.usuario }}</td>
+                    <td>{{ row.perfil }}</td>
+                    <td>{{ row.setores|default:'-' }}</td>
+                    <td>{{ row.total_bipagens }}</td>
+                    <td>{{ row.total_tarefas }}</td>
+                    <td>{{ row.tempo_medio_tarefa|format_duration }}</td>
+                    <td>{{ row.tempo_total_logado|format_duration }}</td>
+                    <td>{% if row.ultimo_acesso %}{{ row.ultimo_acesso|date:'d/m/Y H:i' }}{% else %}-{% endif %}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" class="empty-state">Sem dados para o perÃ­odo.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

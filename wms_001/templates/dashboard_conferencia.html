@@ -1,0 +1,221 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard Conferência | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">NF no centro</span>
+        <h1>Dashboard de Conferência</h1>
+        <p>Conferência das NFs com visão conjunta de progresso da separação e validação final.</p>
+    </div>
+</div>
+
+<div class="metrics-grid">
+    <div class="metric-card metric-card--accent metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--info">🧾</div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">NFs</span>
+            <div class="metric-card__value" id="conf-total-nfs">{{ indicadores.total_nfs }}</div>
+            <div class="metric-card__meta">Volume em acompanhamento</div>
+        </div>
+    </div>
+    <div class="metric-card metric-card--success metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--success">✅</div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Conferidas</span>
+            <div class="metric-card__value" id="conf-conferidas">{{ indicadores.conferidas }}</div>
+            <div class="metric-card__meta"><span id="conf-percentual">{{ indicadores.percentual_concluido }}</span>% concluídas</div>
+        </div>
+    </div>
+    <div class="metric-card metric-card--warning metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--warning">⚠</div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Divergências</span>
+            <div class="metric-card__value" id="conf-divergencias">{{ indicadores.divergencias }}</div>
+            <div class="metric-card__meta">Tratativas abertas</div>
+        </div>
+    </div>
+    <div class="metric-card metric-card--danger metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--danger">⌛</div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Pendentes</span>
+            <div class="metric-card__value" id="conf-pendentes">{{ indicadores.pendentes }}</div>
+            <div class="metric-card__meta">Aguardando conferência</div>
+        </div>
+    </div>
+</div>
+
+<div class="card card--soft">
+    <h2 class="section-title">Status Geral da Separação</h2>
+    <div class="detail-list">
+        <div class="detail-item">
+            <span class="detail-item__label">Total itens</span>
+            <span class="detail-item__value" id="sep-total">{{ resumo_separacao.total }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Separado</span>
+            <span class="detail-item__value" id="sep-separado">{{ resumo_separacao.separado }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Em execução</span>
+            <span class="detail-item__value" id="sep-execucao">{{ resumo_separacao.em_execucao }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Aguardando</span>
+            <span class="detail-item__value" id="sep-aguardando">{{ resumo_separacao.aguardando }}</span>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <form method="get" class="filter-form">
+        <div>
+            <label for="date_from">Data inicial</label>
+            <input id="date_from" type="date" name="data_inicial" value="{{ filtros.date_from }}">
+        </div>
+        <div>
+            <label for="date_to">Data final</label>
+            <input id="date_to" type="date" name="data_final" value="{{ filtros.date_to }}">
+        </div>
+        <div>
+            <label for="q">Busca global</label>
+            <input id="q" type="text" name="busca" value="{{ filtros.busca }}" placeholder="Buscar NF, cliente, produto, descricao, rota, status...">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-primary">Filtrar</button>
+            <a href="{% url 'web-dashboard-conferencia' %}" class="btn btn-light">Limpar</a>
+        </div>
+    </form>
+</div>
+
+{% if detalhe_nf %}
+<div class="card card--soft" id="detalhe-nf">
+    <div class="actions-row" style="justify-content: space-between; margin-bottom: 12px;">
+        <h2 class="section-title" style="margin: 0;">Detalhe da NF {{ detalhe_nf.numero }}</h2>
+        <a href="{{ detalhe_nf.ocultar_url }}" class="btn btn-light">Ocultar detalhe</a>
+    </div>
+    <div class="detail-list">
+        <div class="detail-item"><span class="detail-item__label">NF</span><span class="detail-item__value">{{ detalhe_nf.numero }}</span></div>
+        <div class="detail-item"><span class="detail-item__label">Cliente</span><span class="detail-item__value">{{ detalhe_nf.cliente }}</span></div>
+        <div class="detail-item"><span class="detail-item__label">Rota</span><span class="detail-item__value">{{ detalhe_nf.rota }}</span></div>
+    </div>
+    <div class="table-wrap" style="margin-top: 12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Data/Hora conferência</th>
+                    <th>Usuário conferente</th>
+                    <th>Data/Hora separação</th>
+                    <th>Usuário separador</th>
+                    <th>Produto</th>
+                    <th>Descrição</th>
+                    <th>Quantidade</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in detalhe_nf.conferencia_rastreabilidade %}
+                <tr>
+                    <td>{% if row.data_conferencia %}{{ row.data_conferencia|date:"d/m/Y H:i:s" }}{% else %}-{% endif %}</td>
+                    <td>{{ row.usuario_conferencia }}</td>
+                    <td>{% if row.data_separacao %}{{ row.data_separacao|date:"d/m/Y H:i:s" }}{% else %}-{% endif %}</td>
+                    <td>{{ row.usuario_separacao }}</td>
+                    <td>{{ row.produto }}</td>
+                    <td>{{ row.descricao }}</td>
+                    <td>{{ row.quantidade }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="empty-state">Sem rastreabilidade operacional de conferência para esta NF.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div id="dashboard-conferencia-tabela">
+    {% include 'partials/dashboard_conferencia_tabela.html' %}
+</div>
+
+{% include 'partials/liberacao_divergencia_modal.html' %}
+{% if acesso.can_manage %}
+{% include 'partials/exclusao_modal.html' %}
+{% endif %}
+
+<script>
+(function () {
+    let requisicaoResumoEmAndamento = false;
+    let requisicaoTabelaEmAndamento = false;
+
+    function formatNumber(value) {
+        return new Intl.NumberFormat('pt-BR', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        }).format(Number(value || 0));
+    }
+
+    async function refreshDashboardResumo() {
+        if (requisicaoResumoEmAndamento) {
+            return;
+        }
+        requisicaoResumoEmAndamento = true;
+        const search = window.location.search || '';
+        try {
+            const response = await fetch(`/api/dashboard/resumo/${search}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!response.ok) {
+                throw new Error('Nao foi possivel atualizar o dashboard.');
+            }
+            const data = await response.json();
+
+            document.getElementById('conf-total-nfs').textContent = data.total_nfs;
+            document.getElementById('conf-conferidas').textContent = data.conferidas;
+            document.getElementById('conf-divergencias').textContent = data.divergencias;
+            document.getElementById('conf-pendentes').textContent = data.pendentes;
+            document.getElementById('conf-percentual').textContent = data.total_nfs === 0 ? '0' : formatNumber((Number(data.conferidas) / Number(data.total_nfs)) * 100);
+
+            document.getElementById('sep-total').textContent = formatNumber(data.total);
+            document.getElementById('sep-separado').textContent = formatNumber(data.separado);
+            document.getElementById('sep-execucao').textContent = formatNumber(data.em_execucao);
+            document.getElementById('sep-aguardando').textContent = formatNumber(data.aguardando);
+        } finally {
+            requisicaoResumoEmAndamento = false;
+        }
+    }
+
+    async function refreshDashboardTabela() {
+        if (requisicaoTabelaEmAndamento) {
+            return;
+        }
+        requisicaoTabelaEmAndamento = true;
+        const params = new URLSearchParams(window.location.search);
+        params.set('partial', 'table');
+        try {
+            const response = await fetch(`${window.location.pathname}?${params.toString()}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!response.ok) {
+                throw new Error('Nao foi possivel atualizar a tabela de conferencia.');
+            }
+            const html = await response.text();
+            const target = document.getElementById('dashboard-conferencia-tabela');
+            if (target) {
+                target.innerHTML = html;
+            }
+        } finally {
+            requisicaoTabelaEmAndamento = false;
+        }
+    }
+
+    refreshDashboardResumo().catch(function () {});
+    refreshDashboardTabela().catch(function () {});
+    setInterval(function () {
+        if (document.hidden) {
+            return;
+        }
+        refreshDashboardResumo().catch(function () {});
+        refreshDashboardTabela().catch(function () {});
+    }, 5000);
+})();
+</script>
+{% endblock %}

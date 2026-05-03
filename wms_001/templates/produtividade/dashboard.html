@@ -1,0 +1,89 @@
+﻿{% extends 'base.html' %}
+{% load custom_filters %}
+
+{% block title %}Gestão de Produtividade | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">📊 Gestão de Produtividade WMS</span>
+        <h1>Dashboard de Produtividade</h1>
+        <p>Métricas gerenciais de desempenho dos conferentes e separadores.</p>
+    </div>
+</div>
+
+{% include 'produtividade/_submenu.html' %}
+{% include 'produtividade/_filtros.html' %}
+
+<div class="metrics-grid">
+    <div class="metric-card metric-card--success">
+        <span class="metric-card__label">Total de bipagens</span>
+        <div class="metric-card__value">{{ cards.total_bipagens }}</div>
+    </div>
+    <div class="metric-card metric-card--accent">
+        <span class="metric-card__label">Tarefas concluídas</span>
+        <div class="metric-card__value">{{ cards.total_tarefas_concluidas }}</div>
+    </div>
+    <div class="metric-card metric-card--warning">
+        <span class="metric-card__label">Tempo médio separação</span>
+        <div class="metric-card__value">{{ cards.tempo_medio_separacao|format_duration }}</div>
+    </div>
+    <div class="metric-card metric-card--warning">
+        <span class="metric-card__label">Tempo médio conferência</span>
+        <div class="metric-card__value">{{ cards.tempo_medio_conferencia|format_duration }}</div>
+    </div>
+    <div class="metric-card metric-card--accent">
+        <span class="metric-card__label">Usuários ativos</span>
+        <div class="metric-card__value">{{ cards.usuarios_ativos }}</div>
+    </div>
+    <div class="metric-card metric-card--danger">
+        <span class="metric-card__label">Tempo médio logado</span>
+        <div class="metric-card__value">{{ cards.tempo_medio_logado|format_duration }}</div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card"><h3 style="margin-top:0;">Bipagens por dia</h3><canvas id="chartBipagensDia"></canvas></div>
+    <div class="card"><h3 style="margin-top:0;">Produtividade por usuário</h3><canvas id="chartProdUsuario"></canvas></div>
+</div>
+<div class="grid-2">
+    <div class="card"><h3 style="margin-top:0;">Tempo médio por tarefa (min)</h3><canvas id="chartTempoTarefa"></canvas></div>
+    <div class="card"><h3 style="margin-top:0;">Comparativo por setor</h3><canvas id="chartSetor"></canvas></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+    const charts = JSON.parse('{{ charts_json|escapejs }}');
+    new Chart(document.getElementById('chartBipagensDia'), {
+        type: 'line',
+        data: {
+            labels: charts.bipagens_por_dia.map(x => x.dia),
+            datasets: [{ label: 'Bipagens', data: charts.bipagens_por_dia.map(x => x.total), borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.2)' }]
+        }
+    });
+    new Chart(document.getElementById('chartProdUsuario'), {
+        type: 'bar',
+        data: {
+            labels: charts.produtividade_por_usuario.map(x => x.usuario__nome || x.usuario__username),
+            datasets: [{ label: 'Tarefas', data: charts.produtividade_por_usuario.map(x => x.total), backgroundColor: '#2563eb' }]
+        }
+    });
+    new Chart(document.getElementById('chartTempoTarefa'), {
+        type: 'bar',
+        data: {
+            labels: charts.tempo_medio_por_tarefa.map(x => x.usuario),
+            datasets: [{ label: 'Minutos', data: charts.tempo_medio_por_tarefa.map(x => x.tempo), backgroundColor: '#f59e0b' }]
+        }
+    });
+    new Chart(document.getElementById('chartSetor'), {
+        type: 'doughnut',
+        data: {
+            labels: charts.comparativo_setor.map(x => x.setor),
+            datasets: [{ data: charts.comparativo_setor.map(x => x.total), backgroundColor: ['#22c55e', '#f59e0b', '#ef4444', '#3b82f6'] }]
+        }
+    });
+})();
+</script>
+{% endblock %}

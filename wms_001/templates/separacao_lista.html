@@ -1,0 +1,49 @@
+{% extends 'base_operacional.html' %}
+
+{% block title %}Separação | WMS{% endblock %}
+{% block op_title %}Separação{% endblock %}
+
+{% block content %}
+<div class="box">
+    <h1>Separação</h1>
+    <div id="conteudo-dinamico">
+        {% include 'partials/separacao_lista_tabela.html' %}
+    </div>
+</div>
+{% if acesso.can_manage %}
+{% include 'partials/exclusao_modal.html' %}
+{% endif %}
+<script>
+(function () {
+    let requisicaoEmAndamento = false;
+
+    async function refreshListaSeparacao() {
+        if (requisicaoEmAndamento) {
+            return;
+        }
+        requisicaoEmAndamento = true;
+        try {
+            const response = await fetch(window.location.href, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!response.ok) {
+                return;
+            }
+            const html = await response.text();
+            const target = document.querySelector('#conteudo-dinamico');
+            if (target) {
+                target.innerHTML = html;
+            }
+        } finally {
+            requisicaoEmAndamento = false;
+        }
+    }
+
+    setInterval(function () {
+        if (!document.hidden) {
+            refreshListaSeparacao().catch(function () {});
+        }
+    }, 5000);
+})();
+</script>
+{% endblock %}

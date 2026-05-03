@@ -1,0 +1,69 @@
+<div class="table-wrap table-container">
+<table class="table table-operacional table-operacional-pocket">
+    <thead>
+        <tr class="{% if tarefa.balcao %}balcao{% endif %}">
+            <th class="col-acao">Ação</th>
+            <th class="col-nf">NF</th>
+            <th class="col-status">Status</th>
+            <th class="col-setor">Setor</th>
+            <th class="col-rota">Rota</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for tarefa in tarefas %}
+        <tr>
+            <td class="id-cell col-acao" data-label="Ação">
+                {% if acesso.can_manage %}
+                <button
+                    type="button"
+                    class="icon-delete js-open-exclusao-modal"
+                    data-exclusao-url="{% url 'web-excluir-tarefa' tarefa.id %}"
+                    data-exclusao-target="Tarefa {{ tarefa.id }}"
+                    title="Excluir tarefa"
+                >
+                    🗑
+                </button>
+                {% endif %}
+                {% if tarefa.bloqueado %}
+                <span class="action-icon status-bloqueado" title="Em uso por {{ tarefa.usuario_nome|default:'Outro operador' }}">🔒</span>
+                {% else %}
+                <a
+                    class="action-icon {% if tarefa.status == 'EM_EXECUCAO' %}status-execucao{% elif tarefa.status == 'LIBERADO_COM_RESTRICAO' %}status-restricao{% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' %}status-ok{% else %}status-aberto{% endif %}"
+                    href="{% url 'web-separacao-exec' tarefa.id %}"
+                    title="{% if tarefa.em_uso_por_mim %}Continuar{% else %}Iniciar{% endif %}"
+                >
+                    {% if tarefa.status == 'LIBERADO_COM_RESTRICAO' %}⚠{% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' %}✔{% elif tarefa.status == 'EM_EXECUCAO' %}📦{% else %}▶{% endif %}
+                </a>
+                {% endif %}
+                {% if tarefa.nf_numero and tarefa.nf_numero != '-' %}
+                <a
+                    class="action-icon action-icon--detalhe status-aberto"
+                    href="{% url 'web-conferencia-detalhe' tarefa.nf_numero %}"
+                    title="Visualizar detalhe da NF"
+                >
+                    🔍
+                </a>
+                {% endif %}
+                <span class="id-text">{{ tarefa.id }}</span>
+            </td>
+            <td class="col-nf" data-label="NF">
+                {% if tarefa.nf_numero and tarefa.nf_numero != '-' %}
+                <span class="nf-chip">{{ tarefa.nf_numero }}</span>
+                {% else %}
+                <span class="text-danger">Sem NF</span>
+                {% endif %}
+                {% if tarefa.balcao %}<span class="badge-balcao">BALCAO</span>{% endif %}
+            </td>
+            <td class="col-status" data-label="Status">{{ tarefa.status }}</td>
+            <td class="col-setor" data-label="Setor">{{ tarefa.segmento }}</td>
+            <td class="col-rota" data-label="Rota">{{ tarefa.rota }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="5">Nenhuma tarefa disponível no momento.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% include 'partials/pagination_controls.html' %}

@@ -1,0 +1,68 @@
+<table class="table table-operacional table-operacional-pocket">
+    <thead>
+        <tr class="{% if nf.balcao %}balcao{% endif %}">
+            <th class="col-nf">NF</th>
+            <th class="col-cliente">Cliente</th>
+            <th class="col-rota">Rota</th>
+            <th class="col-status">Separação</th>
+            <th class="col-pendencia">Pend. conferência</th>
+            <th class="col-progresso">Progresso</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for nf in nfs %}
+        <tr>
+            <td class="id-cell col-nf" data-label="NF">
+                {% if acesso.can_manage %}
+                <button
+                    type="button"
+                    class="icon-delete js-open-exclusao-modal"
+                    data-exclusao-url="{% url 'web-excluir-conferencia' nf.id %}"
+                    data-exclusao-target="Conferência NF {{ nf.numero }}"
+                    title="Excluir conferência"
+                >
+                    🗑
+                </button>
+                {% endif %}
+                {% if nf.bloqueado %}
+                <span class="action-icon status-bloqueado" title="Em uso por {{ nf.usuario_em_uso }}">🔒</span>
+                {% elif not nf.conferencia_liberada %}
+                <span class="action-icon status-bloqueado" title="{{ nf.conferencia_bloqueio_motivo|default:'Pedido ainda não foi separado' }}">🚫</span>
+                {% else %}
+                <a
+                    class="action-icon {% if nf.status == 'EM_CONFERENCIA' %}status-execucao{% elif nf.status == 'OK' or nf.status == 'CONCLUIDO' or nf.status == 'CONCLUIDO_COM_RESTRICAO' %}status-ok{% elif nf.status == 'BLOQUEADA_COM_RESTRICAO' %}status-erro{% else %}status-aberto{% endif %}"
+                    href="{% url 'web-conferencia-exec' nf.id %}"
+                    title="{% if nf.em_uso_por_mim %}Continuar{% else %}Iniciar{% endif %}"
+                >
+                    {% if nf.status == 'BLOQUEADA_COM_RESTRICAO' %}⚠{% elif nf.status == 'CONCLUIDO' or nf.status == 'CONCLUIDO_COM_RESTRICAO' %}✔{% elif nf.status == 'EM_CONFERENCIA' %}⏳{% else %}▶{% endif %}
+                </a>
+                {% endif %}
+                <a
+                    class="action-icon action-icon--detalhe status-aberto"
+                    href="{% url 'web-conferencia-detalhe' nf.numero %}"
+                    title="Visualizar detalhe da NF"
+                >
+                    🔍
+                </a>
+                <span class="id-text">{{ nf.numero|default:'Sem NF' }}</span>
+            </td>
+            <td class="col-cliente" data-label="Cliente">
+                {{ nf.cliente }}
+                {% if nf.balcao %}<span class="badge-balcao">BALCAO</span>{% endif %}
+            </td>
+            <td class="col-rota" data-label="Rota">{{ nf.rota }}</td>
+            <td class="col-status" data-label="Status">
+                <span class="status-badge {% if nf.status_separacao == 'SEPARADO' %}status-badge--success{% else %}status-badge--warning{% endif %}">
+                    {{ nf.status_separacao }}
+                </span>
+            </td>
+            <td class="col-pendencia" data-label="Pendência">{{ nf.itens_pendentes_conferencia }}</td>
+            <td class="col-progresso" data-label="Progresso">{{ nf.progresso.conferido }}/{{ nf.progresso.esperado }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="6">Nenhuma NF pronta para conferência.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>

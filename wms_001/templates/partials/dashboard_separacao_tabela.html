@@ -1,0 +1,78 @@
+<div class="card table-card">
+    <div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Cod separação</th>
+                <th>NF</th>
+                <th>Rota</th>
+                <th>Cliente</th>
+                <th>Produto</th>
+                <th>Descrição</th>
+                <th>Qtd</th>
+                <th>Status</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for linha in linhas %}
+            <tr>
+                <td>
+                    {% if linha.nf and linha.nf != '-' %}
+                    <a class="action-icon action-icon--detalhe status-aberto" href="{% url 'web-dashboard-separacao' %}?data_inicial={{ filtros.date_from }}&data_final={{ filtros.date_to }}&busca={{ filtros.busca|urlencode }}&nf_detalhe={{ linha.nf }}#detalhe-nf" title="Visualizar detalhe da NF">🔍</a>
+                    {% endif %}
+                    <a href="{% url 'web-separacao-exec' linha.tarefa_id %}">{{ linha.tarefa_id }}</a>
+                </td>
+                <td class="nf-col">
+                    {% if linha.nf and linha.nf != '-' %}
+                    <span class="nf-chip">{{ linha.nf }}</span>
+                    {% else %}
+                    <span class="text-danger">Sem NF</span>
+                    {% endif %}
+                    {% if linha.balcao %} <span class="badge-balcao">BALCAO</span>{% endif %}
+                </td>
+                <td>{{ linha.rota }}</td>
+                <td>{{ linha.cliente }}</td>
+                <td>{{ linha.produto }}</td>
+                <td>{{ linha.descricao }}</td>
+                <td>{{ linha.quantidade }}</td>
+                <td>
+                    <span class="status-badge {{ linha.status_badge_class }}">
+                        {{ linha.status }}
+                    </span>
+                </td>
+                <td>
+                    {% if linha.pode_liberar %}
+                    <button
+                        type="button"
+                        class="btn-warning js-open-liberacao-modal"
+                        data-release-url="{% url 'web-liberar-tarefa-divergencia' linha.tarefa_id %}"
+                        data-release-target="Tarefa {{ linha.tarefa_id }}"
+                        data-release-status="{{ linha.status }}"
+                    >
+                        LIBERAR DIVERGÊNCIA
+                    </button>
+                    {% elif acesso.can_manage %}
+                    <button
+                        type="button"
+                        class="icon-delete js-open-exclusao-modal"
+                        data-exclusao-url="{% url 'web-excluir-tarefa' linha.tarefa_id %}"
+                        data-exclusao-target="Tarefa {{ linha.tarefa_id }}"
+                        title="Excluir tarefa"
+                    >
+                        🗑
+                    </button>
+                    {% else %}
+                    <span class="muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="9" class="empty-state">Nenhum item de separação encontrado.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>

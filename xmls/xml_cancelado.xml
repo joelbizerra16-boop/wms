@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000020" versao="4.00">
+      <ide>
+        <nNF>124</nNF>
+        <dhEmi>2026-04-23T11:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Fluxo Cancelado</xNome>
+        <IE>987654321</IE>
+        <enderDest>
+          <xBairro>Centro</xBairro>
+          <CEP>01002000</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD010</cProd>
+          <cEAN>789999</cEAN>
+          <xProd>Produto Cancelado</xProd>
+          <qCom>1.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>101</cStat>
+      <xMotivo>Cancelamento de NF-e homologado</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

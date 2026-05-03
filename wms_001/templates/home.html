@@ -1,0 +1,612 @@
+{% extends 'base.html' %}
+
+{% block title %}Home | WMS{% endblock %}
+
+{% block content %}
+<section class="home-intel">
+    <header class="home-hero">
+        <div class="home-hero__icon-wrap">
+            <i data-lucide="layout-dashboard"></i>
+        </div>
+        <div>
+            <span class="section-label">Painel Operacional Inteligente</span>
+            <h1>Home Operacional</h1>
+            <p>Leitura da operacao com atualizacao automatica e insights visuais em tempo real.</p>
+        </div>
+    </header>
+
+    <section class="summary-card summary-card--ok card-hover" id="resumoOperacionalCard">
+        <div class="summary-card__icon" id="resumoIcone">
+            <i data-lucide="shield-check"></i>
+        </div>
+        <div class="summary-card__content">
+            <h2>Resumo do dia</h2>
+            <p id="resumoOperacional">Carregando resumo operacional...</p>
+        </div>
+    </section>
+
+    <section class="kpi-grid" aria-label="Indicadores operacionais">
+        <article class="kpi-card kpi-card--neutral card-hover" data-bs-toggle="tooltip" title="Total de notas fiscais monitoradas no dia">
+            <div class="kpi-card__head">
+                <span>Total NFs</span>
+                <i data-lucide="package-search"></i>
+            </div>
+            <strong id="total_nfs">0</strong>
+        </article>
+
+        <article class="kpi-card kpi-card--info card-hover" data-bs-toggle="tooltip" title="NFs em separacao no dia atual">
+            <div class="kpi-card__head">
+                <span>Em separacao</span>
+                <i data-lucide="scan-line"></i>
+            </div>
+            <strong id="em_separacao">0</strong>
+        </article>
+
+        <article class="kpi-card kpi-card--warning card-hover" data-bs-toggle="tooltip" title="NFs em conferencia no dia atual">
+            <div class="kpi-card__head">
+                <span>Em conferencia</span>
+                <i data-lucide="clipboard-check"></i>
+            </div>
+            <strong id="em_conferencia">0</strong>
+        </article>
+
+        <article class="kpi-card kpi-card--success card-hover" data-bs-toggle="tooltip" title="NFs finalizadas no dia atual">
+            <div class="kpi-card__head">
+                <span>Finalizadas</span>
+                <i data-lucide="circle-check-big"></i>
+            </div>
+            <strong id="finalizadas">0</strong>
+        </article>
+    </section>
+
+    <section class="alerts-card card-hover" id="blocoAlertas" hidden>
+        <div class="alerts-card__left">
+            <i data-lucide="triangle-alert"></i>
+            <div>
+                <h2>Alertas Criticos</h2>
+                <ul id="listaAlertas"></ul>
+            </div>
+        </div>
+        <a href="{% url 'web-dashboard-conferencia' %}" class="btn btn-light alerts-card__action">Ver detalhes</a>
+    </section>
+
+    <div class="insights-grid">
+        <section class="panel-card card-hover">
+            <h2>Situacao Geral</h2>
+            <ul class="status-list" id="situacaoGeral">
+                <li><i data-lucide="loader-circle"></i><span>Carregando...</span></li>
+            </ul>
+        </section>
+
+        <section class="panel-card card-hover">
+            <h2>Setores</h2>
+            <div class="setores-grid" id="listaSetores">
+                <div class="setor-card">
+                    <span class="setor-nome">Carregando setores...</span>
+                    <span class="setor-valor">--</span>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <footer class="home-intel__footer">
+        <i data-lucide="clock-3"></i>
+        <span id="statusAtualizacao">Atualizando...</span>
+    </footer>
+</section>
+
+<style>
+.home-intel {
+    max-width: 1160px;
+    margin: 0 auto;
+    display: grid;
+    gap: 18px;
+}
+
+.home-hero {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.home-hero h1 {
+    margin: 2px 0 4px;
+    font-size: clamp(1.7rem, 2.4vw, 2.2rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.home-hero p {
+    margin: 0;
+    color: #64748b;
+    font-size: 0.95rem;
+}
+
+.home-hero__icon-wrap {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, #dbeafe, #eff6ff);
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+}
+
+.home-hero__icon-wrap i {
+    width: 26px;
+    height: 26px;
+}
+
+.card-hover {
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.card-hover:hover {
+    transform: scale(1.02);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
+.summary-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-left: 6px solid #16a34a;
+    border-radius: 14px;
+    padding: 16px 18px;
+}
+
+.summary-card--ok {
+    background: linear-gradient(90deg, #f0fdf4, #ffffff 35%);
+    border-left-color: #16a34a;
+}
+
+.summary-card--warn {
+    background: linear-gradient(90deg, #fffbeb, #ffffff 35%);
+    border-left-color: #f59e0b;
+}
+
+.summary-card--error {
+    background: linear-gradient(90deg, #fef2f2, #ffffff 35%);
+    border-left-color: #dc2626;
+}
+
+.summary-card__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    background: rgba(15, 23, 42, 0.06);
+}
+
+.summary-card__icon i {
+    width: 22px;
+    height: 22px;
+}
+
+.summary-card__content h2 {
+    margin: 0 0 4px;
+    font-size: 0.98rem;
+}
+
+.summary-card__content p {
+    margin: 0;
+    line-height: 1.55;
+}
+
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.kpi-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px 14px;
+}
+
+.kpi-card__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 0.83rem;
+    color: #64748b;
+}
+
+.kpi-card__head i {
+    width: 18px;
+    height: 18px;
+}
+
+.kpi-card strong {
+    display: block;
+    font-size: clamp(1.5rem, 2vw, 2rem);
+    line-height: 1;
+}
+
+.kpi-card--neutral {
+    border-top: 3px solid #475569;
+}
+
+.kpi-card--info {
+    border-top: 3px solid #2563eb;
+}
+
+.kpi-card--warning {
+    border-top: 3px solid #f59e0b;
+}
+
+.kpi-card--success {
+    border-top: 3px solid #16a34a;
+}
+
+.alerts-card {
+    background: linear-gradient(90deg, #fef2f2, #fff 40%);
+    border: 1px solid #fecaca;
+    border-left: 6px solid #dc2626;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.alerts-card__left {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.alerts-card__left i {
+    color: #dc2626;
+    width: 22px;
+    height: 22px;
+    margin-top: 2px;
+}
+
+.alerts-card h2 {
+    margin: 0 0 4px;
+    font-size: 0.98rem;
+}
+
+.alerts-card ul {
+    margin: 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 4px;
+}
+
+.alerts-card__action {
+    flex: 0 0 auto;
+}
+
+.insights-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.panel-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px 16px;
+}
+
+.panel-card h2 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+}
+
+.status-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 8px;
+}
+
+.status-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-list i {
+    width: 16px;
+    height: 16px;
+}
+
+.status-list__ok i {
+    color: #16a34a;
+}
+
+.status-list__warn i {
+    color: #f59e0b;
+}
+
+.setores-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.setor-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-radius: 10px;
+    padding: 12px 16px;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    transition: all 0.2s ease;
+}
+
+.setor-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.setor-nome {
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.setor-valor {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.setor-card.destaque {
+    background: #ecfdf5;
+    border-color: #10b981;
+}
+
+.home-intel__footer {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.home-intel__footer i {
+    width: 14px;
+    height: 14px;
+}
+
+@media (max-width: 980px) {
+    .kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .insights-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .home-hero {
+        align-items: flex-start;
+    }
+
+    .kpi-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .alerts-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+</style>
+
+<script>
+(function () {
+    const totalNfEl = document.getElementById('total_nfs');
+    const emSeparacaoEl = document.getElementById('em_separacao');
+    const emConferenciaEl = document.getElementById('em_conferencia');
+    const finalizadasEl = document.getElementById('finalizadas');
+    const resumoEl = document.getElementById('resumoOperacional');
+    const resumoCardEl = document.getElementById('resumoOperacionalCard');
+    const resumoIconeEl = document.getElementById('resumoIcone');
+    const blocoAlertasEl = document.getElementById('blocoAlertas');
+    const listaAlertasEl = document.getElementById('listaAlertas');
+    const situacaoEl = document.getElementById('situacaoGeral');
+    const setoresEl = document.getElementById('listaSetores');
+    const statusAtualizacaoEl = document.getElementById('statusAtualizacao');
+
+    function toInt(value) {
+        const n = Number(value || 0);
+        return Number.isFinite(n) ? Math.round(n) : 0;
+    }
+
+    function setResumoStatus(status) {
+        resumoCardEl.classList.remove('summary-card--ok', 'summary-card--warn', 'summary-card--error');
+        if (status === 'warn') {
+            resumoCardEl.classList.add('summary-card--warn');
+            resumoIconeEl.innerHTML = '<i data-lucide="shield-alert"></i>';
+        } else if (status === 'error') {
+            resumoCardEl.classList.add('summary-card--error');
+            resumoIconeEl.innerHTML = '<i data-lucide="shield-x"></i>';
+        } else {
+            resumoCardEl.classList.add('summary-card--ok');
+            resumoIconeEl.innerHTML = '<i data-lucide="shield-check"></i>';
+        }
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    function montarResumo(data) {
+        const total = toInt(data.total_nfs);
+        const separacao = toInt(data.em_separacao);
+        const conferencia = toInt(data.em_conferencia);
+        const finalizadas = toInt(data.finalizadas);
+        const dataRef = data.data_referencia || new Date().toLocaleDateString('pt-BR');
+
+        const partes = [];
+        partes.push(`Hoje (${dataRef}) existem ${total} NFs monitoradas.`);
+        partes.push(
+            separacao > 0
+                ? `${separacao} ${separacao === 1 ? 'NF esta' : 'NFs estao'} em separacao no momento.`
+                : 'Não há tarefas em separação no momento.'
+        );
+        partes.push(
+            conferencia > 0
+                ? `${conferencia} ${conferencia === 1 ? 'NF esta' : 'NFs estao'} em conferencia.`
+                : 'Nao ha pendencias em conferencia.'
+        );
+        partes.push(
+            total > 0 && finalizadas === total
+                ? 'Todas as tarefas foram finalizadas.'
+                : finalizadas > 0
+                ? `${finalizadas} ${finalizadas === 1 ? 'tarefa foi finalizada' : 'tarefas foram finalizadas'}.`
+                : 'Ainda nao ha tarefas finalizadas hoje.'
+        );
+
+        const temPendencia = separacao > 0 || conferencia > 0;
+        if (temPendencia) {
+            partes.push('A operacao segue ativa e exige monitoramento.');
+            setResumoStatus('warn');
+        } else {
+            partes.push('Operacao esta fluindo normalmente.');
+            setResumoStatus('ok');
+        }
+
+        resumoEl.textContent = partes.join(' ');
+    }
+
+    function montarAlertas(data) {
+        const alertas = [];
+        const pendSeparacao = toInt(data.em_separacao);
+        const pendConferencia = toInt(data.em_conferencia);
+        const prioridadesAltas = toInt(data.alertas_alta);
+
+        if (prioridadesAltas > 0) {
+            alertas.push(`${prioridadesAltas} ${prioridadesAltas === 1 ? 'NF com prioridade alta' : 'NFs com prioridade alta'}.`);
+        }
+        if (pendSeparacao > 0) {
+            alertas.push(`${pendSeparacao} ${pendSeparacao === 1 ? 'pedido aguardando separacao' : 'pedidos aguardando separacao'}.`);
+        }
+        if (pendConferencia > 0) {
+            alertas.push(`${pendConferencia} ${pendConferencia === 1 ? 'pedido aguardando conferencia' : 'pedidos aguardando conferencia'}.`);
+        }
+
+        if (!alertas.length) {
+            blocoAlertasEl.hidden = true;
+            listaAlertasEl.innerHTML = '';
+            return;
+        }
+
+        blocoAlertasEl.hidden = false;
+        listaAlertasEl.innerHTML = alertas.map((item) => `<li>🚨 ${item}</li>`).join('');
+    }
+
+    function montarSituacao(data) {
+        const percentualSeparado = Number(data.percentual_separado || 0);
+        const pendConferencia = toInt(data.em_conferencia);
+        const pendSeparacao = toInt(data.em_separacao);
+        const total = toInt(data.total_nfs);
+        const finalizadas = toInt(data.finalizadas);
+        const operacaoConcluida = total > 0 && pendSeparacao === 0 && pendConferencia === 0 && finalizadas === total;
+        const operacaoNormal = pendSeparacao === 0 && pendConferencia === 0;
+
+        situacaoEl.innerHTML = `
+            <li class="status-list__ok"><i data-lucide="circle-check-big"></i><span>Separacao ${percentualSeparado.toFixed(0)}% concluida</span></li>
+            <li class="${pendConferencia > 0 ? 'status-list__warn' : 'status-list__ok'}"><i data-lucide="${pendConferencia > 0 ? 'triangle-alert' : 'shield-check'}"></i><span>Conferencia ${pendConferencia > 0 ? `com ${pendConferencia} pendencia(s)` : 'sem pendencias'}</span></li>
+            <li class="${operacaoNormal ? 'status-list__ok' : 'status-list__warn'}"><i data-lucide="${operacaoNormal ? 'activity' : 'siren'}"></i><span>Operacao ${operacaoConcluida ? 'concluida' : (operacaoNormal ? 'normal' : 'com atencao')}</span></li>
+        `;
+    }
+
+    function classeSetor(nomeSetor, total) {
+        if ((nomeSetor || '').toUpperCase().includes('NAO ENCONTRADO')) return 'destaque';
+        return '';
+    }
+
+    function montarSetores(data) {
+        const setores = Array.isArray(data.dados_setor) ? data.dados_setor : [];
+        if (!setores.length) {
+            setoresEl.innerHTML = '<div class="setor-card"><span class="setor-nome">Sem dados de setor no momento.</span><span class="setor-valor">0</span></div>';
+            return;
+        }
+
+        setoresEl.innerHTML = setores
+            .map((item) => {
+                const total = Number(item.separado || 0) + Number(item.pendente || 0);
+                return `
+                    <div class="setor-card ${classeSetor(item.setor, total)}">
+                        <span class="setor-nome">${item.setor}</span>
+                        <span class="setor-valor">${total.toFixed(0)}</span>
+                    </div>
+                `;
+            })
+            .join('');
+    }
+
+    function initTooltips() {
+        if (!window.bootstrap) return;
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((el) => {
+            if (window.bootstrap.Tooltip.getInstance(el)) return;
+            new window.bootstrap.Tooltip(el);
+        });
+    }
+
+    let atualizandoDashboard = false;
+    async function atualizarDashboard() {
+        if (atualizandoDashboard) return;
+        atualizandoDashboard = true;
+        let data = null;
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+            const response = await fetch('/api/dashboard/', {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.erro || 'Falha ao atualizar home');
+            }
+        } finally {
+            atualizandoDashboard = false;
+        }
+
+        totalNfEl.textContent = toInt(data.total_nfs);
+        emSeparacaoEl.textContent = toInt(data.em_separacao);
+        emConferenciaEl.textContent = toInt(data.em_conferencia);
+        finalizadasEl.textContent = toInt(data.finalizadas);
+
+        montarResumo(data);
+        montarAlertas(data);
+        montarSituacao(data);
+        montarSetores(data);
+
+        if (window.lucide) window.lucide.createIcons();
+        initTooltips();
+        statusAtualizacaoEl.textContent = `Atualizado as ${new Date().toLocaleTimeString()}`;
+    }
+
+    async function cicloAtualizacao() {
+        try {
+            await atualizarDashboard();
+        } catch (error) {
+            console.log(error);
+            setResumoStatus('error');
+            resumoEl.textContent = `Erro: verificar backend (${error.message || 'falha de comunicação'})`;
+            statusAtualizacaoEl.textContent = 'Erro ao atualizar';
+        }
+    }
+
+    cicloAtualizacao();
+    setInterval(cicloAtualizacao, 5000);
+})();
+</script>
+{% endblock %}

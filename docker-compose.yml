@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16
+    container_name: wms_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wms_db
+      POSTGRES_USER: wms_user
+      POSTGRES_PASSWORD: Wms@2026!Secure#Base
+      POSTGRES_INITDB_ARGS: --encoding=UTF-8
+      TZ: America/Sao_Paulo
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  web:
+    build: .
+    container_name: wms_web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: wms_db
+      DB_USER: wms_user
+      DB_PASSWORD: Wms@2026!Secure#Base
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DEBUG: 'False'
+      SECURE_SSL_REDIRECT: 'False'
+    ports:
+      - '8000:8000'
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

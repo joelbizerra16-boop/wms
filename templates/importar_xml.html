@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+
+{% block title %}Importar XML | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Entrada de NF</span>
+        <h1>Importar XML</h1>
+        <p>Envie XMLs em massa para pré-processamento. O sistema registra a chave NF e mantém a liberação para separação sob controle.</p>
+    </div>
+</div>
+
+<div class="card">
+    <form method="post" enctype="multipart/form-data" id="importar-xml-form">
+        {% csrf_token %}
+        <div class="balcao-row">
+            <span class="balcao-row__label">Pedido Balcao</span>
+            <label class="balcao-inline" for="balcao-toggle">
+                <span class="switch">
+                    <input id="balcao-toggle" type="checkbox" name="balcao">
+                    <span class="slider"></span>
+                </span>
+                <span class="balcao-inline__text">Pedido Balcao (retirada na empresa)</span>
+            </label>
+        </div>
+        <label for="xml_files">Arquivos XML</label>
+        <input id="xml_files" name="xml_files" type="file" accept=".xml,text/xml" multiple required>
+        <small id="xml-files-help" class="text-muted">Máximo de 200 arquivos por envio no navegador.</small>
+        <div class="actions-row" style="margin-top:14px;">
+            <button type="submit" class="btn-warning" id="btn-enviar-xml">Enviar para fila</button>
+            <a href="{% url 'web-fila-entradas-nf' %}" class="btn btn-light">Abrir fila de NFs</a>
+        </div>
+        <div id="importacao-loader" style="display:none; margin-top:10px;">Importação em andamento...</div>
+    </form>
+</div>
+
+{% if resultados %}
+<div class="metrics-grid">
+    <div class="metric-card metric-card--success">
+        <span class="metric-card__label">Importados</span>
+        <div class="metric-card__value">{{ resultados.sucesso }}</div>
+    </div>
+    <div class="metric-card metric-card--warning">
+        <span class="metric-card__label">Duplicados</span>
+        <div class="metric-card__value">{{ resultados.duplicadas }}</div>
+    </div>
+    <div class="metric-card metric-card--danger">
+        <span class="metric-card__label">Erros</span>
+        <div class="metric-card__value">{{ resultados.erros }}</div>
+    </div>
+    <div class="metric-card metric-card--accent">
+        <span class="metric-card__label">Fluxo</span>
+        <div class="metric-card__value">Pré-entrada</div>
+    </div>
+</div>
+
+<div class="card table-card">
+    <h2 class="section-title">Resultado do processamento</h2>
+    <div class="table-wrap">
+    <table class="processing-results-table">
+        <thead>
+            <tr>
+                <th>Arquivo</th>
+                <th>NF</th>
+                <th>Chave NFe</th>
+                <th>Status</th>
+                <th>Mensagem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for detalhe in resultados.detalhes %}
+            <tr>
+                <td>{{ detalhe.arquivo|default:'-' }}</td>
+                <td><span class="nf-chip">{{ detalhe.nf|default:'-' }}</span></td>
+                <td>{{ detalhe.chave_nfe|default:'-' }}</td>
+                <td>
+                    <span class="status-badge {% if detalhe.status == 'sucesso' %}status-badge--success{% elif detalhe.status == 'duplicada' %}status-badge--warning{% else %}status-badge--danger{% endif %}">
+                        {{ detalhe.status }}
+                    </span>
+                </td>
+                <td>{{ detalhe.mensagem }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" class="empty-state">Nenhum arquivo processado.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+<script>
+    (function () {
+        const form = document.getElementById('importar-xml-form');
+        if (!form) return;
+        const input = document.getElementById('xml_files');
+        const button = document.getElementById('btn-enviar-xml');
+        const loader = document.getElementById('importacao-loader');
+
+        form.addEventListener('submit', function (event) {
+            const files = input && input.files ? input.files.length : 0;
+            if (files > 200) {
+                event.preventDefault();
+                alert('Máximo de 200 arquivos por envio.');
+                return;
+            }
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Processando...';
+            }
+            if (loader) loader.style.display = 'block';
+        });
+    })();
+</script>
+{% endblock %}

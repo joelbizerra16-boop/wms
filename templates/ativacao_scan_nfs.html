@@ -1,0 +1,323 @@
+{% extends 'base.html' %}
+
+{% block title %}Ativação por Scan | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<audio id="beep-success" preload="auto" src="/static/sounds/beep-success.mp3"></audio>
+<audio id="beep-error" preload="auto" src="/static/sounds/beep-error.mp3"></audio>
+
+<div class="page-header">
+    <div>
+        <span class="section-label">Conferência de entrada</span>
+        <h1>Ativação por Scan</h1>
+        <p>Bipe a NF física para incluir na lista e confirmar o envio para separação.</p>
+    </div>
+</div>
+
+<div class="card">
+    <label for="scanner">Scanner NF</label>
+    <input type="text" id="scanner" autofocus placeholder="Bipar NF (chave ou número)">
+    <p id="scan-feedback" class="muted" style="margin-top:10px;">Aguardando leitura...</p>
+</div>
+
+<div class="card table-card">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Número NF</th>
+                    <th>Chave NF</th>
+                    <th>Tipo</th>
+                    <th>Status</th>
+                    <th>Data</th>
+                    <th>Ação</th>
+                </tr>
+            </thead>
+            <tbody id="scan-list-body">
+                {% for entrada in entradas_scan %}
+                <tr class="linha-sucesso" data-entrada-id="{{ entrada.id }}">
+                    <td>{{ entrada.numero_nf|default:'-' }}</td>
+                    <td>{{ entrada.chave_nf }}</td>
+                    <td>{% if entrada.tipo == 'BALCAO' %}<span class="status-badge status-badge--info">Balcão</span>{% else %}<span class="status-badge status-badge--neutral">Normal</span>{% endif %}</td>
+                    <td>
+                        <span class="status-badge status-badge--warning">{{ entrada.get_status_display }}</span>
+                    </td>
+                    <td>{{ entrada.data_importacao|date:"d/m/Y H:i:s" }}</td>
+                    <td><button type="button" class="btn-remover" data-remove-id="{{ entrada.id }}">🗑️</button></td>
+                </tr>
+                {% empty %}
+                <tr id="scan-empty-row">
+                    <td colspan="6" class="empty-state">Nenhuma NF escaneada nesta sessão.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="scan-toast-container" class="toast-container"></div>
+
+<div class="scan-confirm-bar">
+    <div class="scan-confirm-bar__left">
+        <strong>NFs escaneadas:</strong>
+        <span id="scan-count">{{ entradas_scan|length }}</span>
+    </div>
+    <div class="scan-confirm-bar__actions">
+        <a href="{% url 'web-fila-entradas-nf' %}" class="btn btn-light">Ver fila completa</a>
+        <form method="post" action="{% url 'web-confirmar-scan-entradas' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn-primary">Confirmar e Enviar para Separação</button>
+        </form>
+    </div>
+</div>
+
+<style>
+.linha-sucesso {
+    background-color: #e6f9ed;
+    border-left: 4px solid #22c55e;
+}
+.linha-erro {
+    background-color: #fdecea;
+    border-left: 4px solid #ef4444;
+}
+.scan-new-row {
+    animation: scanFadeIn 0.35s ease;
+}
+@keyframes scanFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.btn-remover {
+    min-height: 34px;
+    height: 34px;
+    border-radius: 8px;
+    padding: 0 10px;
+    background: #ef4444;
+    color: #fff;
+    border: 0;
+    cursor: pointer;
+}
+.scan-confirm-bar {
+    position: sticky;
+    bottom: 10px;
+    z-index: 20;
+    background: #fff;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    border-radius: 12px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.scan-confirm-bar__actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.toast--warning {
+    background: #f59e0b;
+}
+</style>
+
+<script>
+(function () {
+    const scanner = document.getElementById('scanner');
+    const feedback = document.getElementById('scan-feedback');
+    const tbody = document.getElementById('scan-list-body');
+    const scanCount = document.getElementById('scan-count');
+    const toastContainer = document.getElementById('scan-toast-container');
+    const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
+    const successAudio = document.getElementById('beep-success');
+    const errorAudio = document.getElementById('beep-error');
+    const scanEndpoint = '/api/scan-nf/';
+    const removeEndpoint = '/api/scan-nf/remover/';
+    let scanTimer = null;
+
+    function setFeedback(message, type) {
+        feedback.textContent = message;
+        if (type === 'error') {
+            feedback.style.color = '#dc2626';
+            return;
+        }
+        if (type === 'warning') {
+            feedback.style.color = '#b45309';
+            return;
+        }
+        feedback.style.color = '#15803d';
+    }
+
+    function updateCount() {
+        const total = tbody.querySelectorAll('tr[data-entrada-id]').length;
+        scanCount.textContent = String(total);
+    }
+
+    function showToast(message, type) {
+        const toast = document.createElement('div');
+        toast.className = `toast is-visible ${type === 'error' ? 'toast--error' : type === 'warning' ? 'toast--warning' : 'toast--success'}`;
+        toast.textContent = message;
+        toastContainer.appendChild(toast);
+        setTimeout(() => {
+            toast.classList.remove('is-visible');
+            setTimeout(() => toast.remove(), 220);
+        }, 1700);
+    }
+
+    function safePlay(audioEl) {
+        if (!audioEl) return;
+        audioEl.currentTime = 0;
+        const promise = audioEl.play();
+        if (promise && typeof promise.catch === 'function') {
+            promise.catch(() => {});
+        }
+    }
+
+    function playSuccess() {
+        safePlay(successAudio);
+    }
+
+    function playError() {
+        safePlay(errorAudio);
+    }
+
+    function appendRow(entrada) {
+        const existing = tbody.querySelector(`tr[data-entrada-id="${entrada.id}"]`);
+        if (existing) {
+            existing.classList.add('linha-erro');
+            setTimeout(() => existing.classList.remove('linha-erro'), 1000);
+            return false;
+        }
+
+        const empty = document.getElementById('scan-empty-row');
+        if (empty) empty.remove();
+
+        const tr = document.createElement('tr');
+        tr.className = 'linha-sucesso scan-new-row';
+        tr.setAttribute('data-entrada-id', String(entrada.id));
+        tr.innerHTML = `
+            <td>${entrada.numero_nf || '-'}</td>
+            <td>${entrada.chave_nf}</td>
+            <td>${entrada.tipo === 'BALCAO' ? '<span class="status-badge status-badge--info">Balcão</span>' : '<span class="status-badge status-badge--neutral">Normal</span>'}</td>
+            <td><span class="status-badge status-badge--warning">Aguardando</span></td>
+            <td>${entrada.data_importacao}</td>
+            <td><button type="button" class="btn-remover" data-remove-id="${entrada.id}">🗑️</button></td>
+        `;
+        tbody.prepend(tr);
+        setTimeout(() => tr.classList.remove('scan-new-row'), 450);
+        return true;
+    }
+
+    async function removerNF(id) {
+        const response = await fetch(removeEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ entrada_id: id }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+            setFeedback(data.erro || 'Falha ao remover NF da lista.', 'error');
+            showToast(data.erro || 'Falha ao remover NF.', 'error');
+            playError();
+            return;
+        }
+        const row = tbody.querySelector(`tr[data-entrada-id="${id}"]`);
+        if (row) row.remove();
+        if (!tbody.querySelector('tr[data-entrada-id]')) {
+            const empty = document.createElement('tr');
+            empty.id = 'scan-empty-row';
+            empty.innerHTML = '<td colspan="6" class="empty-state">Nenhuma NF escaneada nesta sessão.</td>';
+            tbody.appendChild(empty);
+        }
+        updateCount();
+        setFeedback(data.mensagem || 'NF removida da lista.', 'success');
+        showToast(data.mensagem || 'NF removida.', 'success');
+    }
+
+    tbody.addEventListener('click', function (event) {
+        const btn = event.target.closest('[data-remove-id]');
+        if (!btn) return;
+        removerNF(btn.getAttribute('data-remove-id'));
+    });
+
+    function normalizeScanValue(value) {
+        const clean = (value || '').trim();
+        if (!clean) return '';
+        return clean;
+    }
+
+    async function enviarCodigo(codigo) {
+        const response = await fetch(scanEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ codigo }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+            const retorno = data.tipo_retorno || 'error';
+            const detalhes = data.detalhes || null;
+            let mensagem = data.erro || 'NF não encontrada na base de dados.';
+            if (detalhes) {
+                mensagem += ` NF ${detalhes.numero_nf || '-'} | Status: ${detalhes.status_atual || '-'} | Último processamento: ${detalhes.data_ultimo_processamento || '-'}`;
+            }
+            setFeedback(mensagem, retorno);
+            showToast(data.erro || 'Falha na validação da NF.', retorno);
+            if (retorno === 'warning') {
+                playError();
+            } else {
+                playError();
+            }
+            const erroRow = document.createElement('tr');
+            erroRow.className = 'linha-erro scan-new-row';
+            erroRow.innerHTML = `<td colspan="6">${retorno === 'warning' ? '⚠️' : '❌'} ${mensagem}</td>`;
+            tbody.prepend(erroRow);
+            setTimeout(() => erroRow.remove(), 1200);
+            return;
+        }
+        const inserted = appendRow(data.entrada);
+        if (data.duplicada || !inserted) {
+            setFeedback(data.mensagem || 'NF já escaneada.', 'warning');
+            showToast(data.mensagem || 'NF já escaneada.', 'warning');
+            playError();
+        } else {
+            setFeedback(data.mensagem || 'NF adicionada com sucesso.', 'success');
+            showToast(data.mensagem || 'NF adicionada com sucesso.', 'success');
+            playSuccess();
+        }
+        updateCount();
+    }
+
+    function processarInputAtual() {
+        const codigo = normalizeScanValue(scanner.value);
+        if (!codigo) return;
+        enviarCodigo(codigo).finally(function () {
+            scanner.value = '';
+            scanner.focus();
+        });
+    }
+
+    scanner.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        processarInputAtual();
+    });
+
+    scanner.addEventListener('input', function () {
+        const value = normalizeScanValue(scanner.value);
+        if (!value) return;
+        if (scanTimer) clearTimeout(scanTimer);
+        // scanner normalmente envia em burst; processa automaticamente sem Enter
+        scanTimer = setTimeout(processarInputAtual, value.length >= 20 ? 80 : 180);
+    });
+})();
+</script>
+{% endblock %}

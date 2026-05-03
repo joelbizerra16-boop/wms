@@ -1,0 +1,55 @@
+﻿{% extends 'base.html' %}
+{% load custom_filters %}
+
+{% block title %}Ranking de Performance | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Painel de Produtividade WMS</span>
+        <h1>Ranking de Desempenho</h1>
+    </div>
+</div>
+
+{% include 'produtividade/_submenu.html' %}
+{% include 'produtividade/_filtros.html' %}
+
+<div class="grid-2">
+    <div class="card">
+        <h3 style="margin-top:0;">Top Conferentes (Bipagens)</h3>
+        <div class="choice-list">
+            {% for row in ranking.top_conferentes %}
+            <div class="choice-item"><strong>{{ row.usuario }}</strong><span class="muted">{{ row.total_bipagens }} bipagens registradas</span></div>
+            {% empty %}<div class="empty-state">Sem dados.</div>{% endfor %}
+        </div>
+    </div>
+    <div class="card">
+        <h3 style="margin-top:0;">Top Separadores (Tarefas)</h3>
+        <div class="choice-list">
+            {% for row in ranking.top_separadores %}
+            <div class="choice-item"><strong>{{ row.usuario }}</strong><span class="muted">{{ row.total_tarefas }} tarefas concluídas</span></div>
+            {% empty %}<div class="empty-state">Sem dados.</div>{% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <h3 style="margin-top:0;">Maior Tempo de Sessão</h3>
+        <div class="choice-list">
+            {% for row in ranking.maior_tempo_logado %}
+            <div class="choice-item"><strong>{{ row.usuario }}</strong><span class="muted">{{ row.tempo_total_logado|format_duration }} conectado</span></div>
+            {% empty %}<div class="empty-state">Sem dados.</div>{% endfor %}
+        </div>
+    </div>
+    <div class="card">
+        <h3 style="margin-top:0;">Melhor Eficiência Operacional</h3>
+        <div class="choice-list">
+            {% for row in ranking.melhor_eficiencia %}
+            <div class="choice-item"><strong>{{ row.usuario }}</strong><span class="muted">{{ row.produtividade|floatformat:2 }} tarefas/h</span></div>
+            {% empty %}<div class="empty-state">Sem dados.</div>{% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

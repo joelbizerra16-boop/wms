@@ -1,0 +1,7 @@
+<div class="card section">
+    <div class="actions-row">
+        <a href="{% url 'web-produtividade-dashboard' %}" class="btn {% if request.path == '/produtividade/dashboard/' %}btn-primary{% else %}btn-light{% endif %}">Dashboard de Produtividade</a>
+        <a href="{% url 'web-produtividade-relatorio' %}" class="btn {% if request.path == '/produtividade/relatorio/' %}btn-primary{% else %}btn-light{% endif %}">Relatório de Atividades</a>
+        <a href="{% url 'web-produtividade-ranking' %}" class="btn {% if request.path == '/produtividade/ranking/' %}btn-primary{% else %}btn-light{% endif %}">Ranking de Performance</a>
+    </div>
+</div>

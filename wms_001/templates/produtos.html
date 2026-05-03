@@ -1,0 +1,302 @@
+{% extends 'base.html' %}
+
+{% block title %}Produtos | WMS{% endblock %}
+{% block container_class %}container-fluid px-5{% endblock %}
+
+{% block content %}
+<section class="box cadastro-shell produtos-page page-container">
+    <style>
+        .produtos-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn-toggle-cards {
+            background: #1d4ed8;
+            color: #fff;
+            border: none;
+            width: 52px;
+            height: 52px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 8px 20px rgba(29, 78, 216, 0.22);
+        }
+
+        .btn-toggle-cards:hover {
+            transform: scale(1.05);
+            background: #1e40af;
+        }
+
+        .btn-toggle-cards:focus-visible {
+            outline: 3px solid rgba(59, 130, 246, 0.35);
+            outline-offset: 2px;
+        }
+
+        .produtos-cards-collapse {
+            overflow: hidden;
+            max-height: 0;
+            opacity: 0;
+            transform: translateY(-6px);
+            transition: max-height 0.35s ease, opacity 0.25s ease, transform 0.25s ease;
+        }
+
+        .produtos-cards-collapse.is-open {
+            max-height: 1200px;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .produto-form-card--editing {
+            border: 1px solid #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+        }
+
+        @media (max-width: 768px) {
+            .btn-toggle-cards {
+                width: 45px;
+                height: 45px;
+                font-size: 22px;
+            }
+        }
+    </style>
+    <div class="main-container">
+        <div class="page-header">
+            <div class="produtos-header">
+                <div>
+                <h1>Produtos</h1>
+                <p>Cadastro de produtos com importação, busca e paginação.</p>
+                </div>
+                <button
+                    type="button"
+                    id="toggleCardsBtn"
+                    class="btn-toggle-cards"
+                    aria-label="Mostrar importação e cadastro"
+                    aria-expanded="false"
+                    title="Mostrar importação e cadastro"
+                >+</button>
+            </div>
+        </div>
+
+        <div id="produtosCardsCollapse" class="produtos-cards-collapse">
+        <div class="cadastro-top-grid cadastro-top-grid--produtos">
+            <div class="card cadastro-card card-flex">
+                <h2 class="section-title">Importação</h2>
+                <form method="post" enctype="multipart/form-data" class="cadastro-import-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="acao" value="upload">
+                    <div>
+                        <input type="file" name="arquivo" class="form-control" accept=".xlsx,.xls,.csv" required>
+                    </div>
+                    <div class="mt-auto">
+                        <button type="submit" class="btn btn-primary w-100">Importar Planilha</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card cadastro-card card-flex" id="produtoFormCard">
+                <h2 class="section-title">Novo produto</h2>
+                <form method="post" class="cadastro-form-shell">
+                    {% csrf_token %}
+                    <input type="hidden" name="acao" value="cadastrar">
+                    <input type="hidden" name="produto_id" id="produto_id">
+
+                    <div class="cadastro-form-grid">
+                        <div>
+                            <label for="cod_prod">Código</label>
+                            <input id="cod_prod" name="cod_prod" type="text" class="form-control" required>
+                        </div>
+                        <div>
+                            <label for="codigo">Código interno</label>
+                            <input id="codigo" name="codigo" type="text" class="form-control">
+                        </div>
+                        <div>
+                            <label for="descricao">Descrição</label>
+                            <input id="descricao" name="descricao" type="text" class="form-control" required>
+                        </div>
+                        <div>
+                            <label for="embalagem">Embalagem</label>
+                            <input id="embalagem" name="embalagem" type="text" class="form-control">
+                        </div>
+                        <div>
+                            <label for="ean">Código de Barras (EAN)</label>
+                            <input id="ean" name="ean" type="text" class="form-control">
+                        </div>
+                        <div>
+                            <label for="setor">Setor</label>
+                            <select id="setor" name="setor" class="form-select" required>
+                                <option value="">Selecione</option>
+                                {% for valor, label in setores_produto %}
+                                <option value="{{ valor }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="cadastro-form-actions mt-auto">
+                        <button type="submit" id="btnSalvarProduto" class="btn btn-primary">Salvar produto</button>
+                        <button type="button" id="btnCancelarEdicao" class="btn btn-light" style="display:none;">Cancelar edição</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        </div>
+
+        <div class="card cadastro-card cadastro-listagem-card">
+            <h2 class="section-title">Listagem</h2>
+
+        <form method="get" class="toolbar cadastro-toolbar">
+            <input type="text" name="q" value="{{ busca }}" placeholder="Buscar por código ou descrição">
+            <label class="balcao-inline">
+                <input type="checkbox" name="incompletos" value="1" {% if apenas_incompletos %}checked{% endif %}>
+                <span class="balcao-inline__text">Somente incompletos</span>
+            </label>
+            <button type="submit" class="btn btn-primary">Buscar</button>
+        </form>
+
+        <div class="content-scroll">
+            <div class="table-wrap table-responsive tabela-container">
+                <table class="table">
+                <thead>
+                    <tr>
+                        <th>Ações</th>
+                        <th>COD_PROD</th>
+                        <th>Descrição</th>
+                        <th>Embalagem</th>
+                        <th>EAN</th>
+                        <th>Setor</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for produto in produtos %}
+                    <tr>
+                        <td>
+                            <button
+                                type="button"
+                                class="btn btn-sm btn-light btn-editar-produto"
+                                title="Editar produto"
+                                data-id="{{ produto.id }}"
+                                data-cod-prod="{{ produto.cod_prod }}"
+                                data-codigo="{{ produto.codigo|default:'' }}"
+                                data-descricao="{{ produto.descricao }}"
+                                data-embalagem="{{ produto.embalagem|default:produto.unidade|default:'' }}"
+                                data-ean="{{ produto.cod_ean|default:'' }}"
+                                data-setor="{{ produto.setor|default:'' }}"
+                            >
+                                ✏️
+                            </button>
+                        </td>
+                        <td>{{ produto.cod_prod }}</td>
+                        <td>{{ produto.descricao }}</td>
+                        <td>{{ produto.embalagem|default:produto.unidade|default:"-" }}</td>
+                        <td>{{ produto.cod_ean|default:"-" }}</td>
+                        <td>{{ produto.setor|default:"-" }}</td>
+                        <td>
+                            {% if produto.incompleto %}
+                            <span class="status-badge status-badge--warning">Incompleto</span>
+                            {% else %}
+                            <span class="status-badge status-badge--success">Completo</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7">Nenhum produto cadastrado.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="toolbar cadastro-pagination">
+            <span class="muted">Página {{ produtos.number }} de {{ produtos.paginator.num_pages }}</span>
+            <div class="toolbar">
+                {% if produtos.has_previous %}
+                <a class="btn btn-light" href="?q={{ busca|urlencode }}&incompletos={% if apenas_incompletos %}1{% endif %}&page={{ produtos.previous_page_number }}">Anterior</a>
+                {% endif %}
+                {% if produtos.has_next %}
+                <a class="btn btn-light" href="?q={{ busca|urlencode }}&incompletos={% if apenas_incompletos %}1{% endif %}&page={{ produtos.next_page_number }}">Próxima</a>
+                {% endif %}
+            </div>
+        </div>
+        </div>
+    </div>
+</section>
+<script>
+(() => {
+    const toggleCardsBtn = document.getElementById('toggleCardsBtn');
+    const cardsCollapse = document.getElementById('produtosCardsCollapse');
+    const formCard = document.getElementById('produtoFormCard');
+    const inputProdutoId = document.getElementById('produto_id');
+    const inputCodigo = document.getElementById('cod_prod');
+    const inputCodigoInterno = document.getElementById('codigo');
+    const inputDescricao = document.getElementById('descricao');
+    const inputEmbalagem = document.getElementById('embalagem');
+    const inputEan = document.getElementById('ean');
+    const inputSetor = document.getElementById('setor');
+    const btnSalvar = document.getElementById('btnSalvarProduto');
+    const btnCancelar = document.getElementById('btnCancelarEdicao');
+
+    function ativarModoEdicao() {
+        btnSalvar.textContent = 'Atualizar produto';
+        btnCancelar.style.display = 'inline-flex';
+        formCard.classList.add('produto-form-card--editing');
+    }
+
+    function limparFormulario() {
+        inputProdutoId.value = '';
+        inputCodigo.value = '';
+        inputCodigoInterno.value = '';
+        inputDescricao.value = '';
+        inputEmbalagem.value = '';
+        inputEan.value = '';
+        inputSetor.value = '';
+        btnSalvar.textContent = 'Salvar produto';
+        btnCancelar.style.display = 'none';
+        formCard.classList.remove('produto-form-card--editing');
+    }
+
+    function setCardsOpen(open) {
+        cardsCollapse.classList.toggle('is-open', open);
+        toggleCardsBtn.textContent = open ? '−' : '+';
+        toggleCardsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        toggleCardsBtn.setAttribute('aria-label', open ? 'Ocultar importação e cadastro' : 'Mostrar importação e cadastro');
+        toggleCardsBtn.title = open ? 'Ocultar importação e cadastro' : 'Mostrar importação e cadastro';
+    }
+
+    if (toggleCardsBtn && cardsCollapse) {
+        setCardsOpen(false);
+        toggleCardsBtn.addEventListener('click', () => {
+            const aberto = cardsCollapse.classList.contains('is-open');
+            setCardsOpen(!aberto);
+        });
+    }
+
+    document.querySelectorAll('.btn-editar-produto').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            inputProdutoId.value = btn.dataset.id || '';
+            inputCodigo.value = btn.dataset.codProd || '';
+            inputCodigoInterno.value = btn.dataset.codigo || '';
+            inputDescricao.value = btn.dataset.descricao || '';
+            inputEmbalagem.value = btn.dataset.embalagem || '';
+            inputEan.value = btn.dataset.ean || '';
+            inputSetor.value = btn.dataset.setor || '';
+            ativarModoEdicao();
+            setCardsOpen(true);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    });
+
+    btnCancelar.addEventListener('click', limparFormulario);
+})();
+</script>
+{% endblock %}

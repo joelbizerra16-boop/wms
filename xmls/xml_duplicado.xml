@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000010" versao="4.00">
+      <ide>
+        <nNF>123</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Fluxo Autorizado</xNome>
+        <IE>123456789</IE>
+        <enderDest>
+          <xBairro>Centro</xBairro>
+          <CEP>01001000</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD001</cProd>
+          <cEAN>789123</cEAN>
+          <xProd>Produto A</xProd>
+          <qCom>2.00</qCom>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>PRD002</cProd>
+          <cEAN>789456</cEAN>
+          <xProd>Produto B</xProd>
+          <qCom>1.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

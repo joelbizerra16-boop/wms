@@ -1,0 +1,43 @@
+<div class="card section">
+    <form method="get" class="filter-form" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
+        <div>
+            <label for="date_from">Data inicial</label>
+            <input id="date_from" type="date" name="date_from" value="{{ filtros.date_from|date:'Y-m-d' }}">
+        </div>
+        <div>
+            <label for="date_to">Data final</label>
+            <input id="date_to" type="date" name="date_to" value="{{ filtros.date_to|date:'Y-m-d' }}">
+        </div>
+        <div>
+            <label for="setor">Área / Setor</label>
+            <select id="setor" name="setor">
+                <option value="">Todos</option>
+                {% for valor, label in setores_filtro %}
+                <option value="{{ valor }}" {% if filtros.setor == valor %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="perfil">Tipo de usuário</label>
+            <select id="perfil" name="perfil">
+                <option value="">Todos</option>
+                {% for valor, label in perfis_filtro %}
+                <option value="{{ valor }}" {% if filtros.perfil == valor %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="usuario_id">Usuário</label>
+            <select id="usuario_id" name="usuario_id">
+                <option value="">Todos</option>
+                {% for u in usuarios_filtro %}
+                <option value="{{ u.id }}" {% if filtros.usuario_id == u.id|stringformat:'s' %}selected{% endif %}>{{ u.nome|default:u.username }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-primary">Aplicar filtros</button>
+            <a href="{{ request.path }}" class="btn btn-light">Limpar</a>
+        </div>
+    </form>
+</div>

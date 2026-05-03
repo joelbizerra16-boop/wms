@@ -1,0 +1,114 @@
+<div class="modal" id="exclusao-modal" aria-hidden="true">
+    <div class="modal__dialog">
+        <div class="modal__header">
+            <div>
+                <h3 class="modal__title">Excluir registro</h3>
+                <p class="muted">Informe o motivo da exclusão para auditoria.</p>
+            </div>
+            <button type="button" class="modal__close" id="exclusao-modal-close">×</button>
+        </div>
+        <div class="modal__body">
+            <div class="modal__meta">
+                <strong id="exclusao-modal-target">-</strong>
+            </div>
+            <div>
+                <label for="exclusao-motivo">Motivo</label>
+                <input id="exclusao-motivo" type="text" placeholder="Informe o motivo..." required>
+            </div>
+            <div class="modal__actions">
+                <button type="button" class="btn-light" id="exclusao-modal-cancel">Cancelar</button>
+                <button type="button" class="btn-danger" id="exclusao-modal-confirm">Confirmar exclusão</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const modal = document.getElementById('exclusao-modal');
+    const modalTarget = document.getElementById('exclusao-modal-target');
+    const motivoInput = document.getElementById('exclusao-motivo');
+    const closeBtn = document.getElementById('exclusao-modal-close');
+    const cancelBtn = document.getElementById('exclusao-modal-cancel');
+    const confirmBtn = document.getElementById('exclusao-modal-confirm');
+
+    if (!modal || !modalTarget || !motivoInput || !confirmBtn) {
+        return;
+    }
+
+    let endpoint = '';
+
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) {
+            return parts.pop().split(';').shift();
+        }
+        return '';
+    }
+
+    function openModal(url, target) {
+        endpoint = url;
+        modalTarget.textContent = target || 'Registro';
+        motivoInput.value = '';
+        confirmBtn.disabled = true;
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+        motivoInput.focus();
+    }
+
+    function closeModal() {
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+        endpoint = '';
+    }
+
+    async function confirmarExclusao() {
+        const motivo = (motivoInput.value || '').trim();
+        if (!motivo) {
+            alert('Informe o motivo da exclusão.');
+            motivoInput.focus();
+            return;
+        }
+        if (!endpoint) {
+            closeModal();
+            return;
+        }
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                'X-CSRFToken': getCookie('csrftoken'),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: new URLSearchParams({ motivo }).toString(),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            alert(data.error || data.erro || 'Falha ao excluir.');
+            return;
+        }
+        alert(data.message || 'Registro excluído com sucesso.');
+        window.location.reload();
+    }
+
+    document.querySelectorAll('.js-open-exclusao-modal').forEach((trigger) => {
+        trigger.addEventListener('click', function () {
+            openModal(this.dataset.exclusaoUrl, this.dataset.exclusaoTarget);
+        });
+    });
+
+    closeBtn && closeBtn.addEventListener('click', closeModal);
+    cancelBtn && cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+    confirmBtn.addEventListener('click', confirmarExclusao);
+    motivoInput.addEventListener('input', function () {
+        confirmBtn.disabled = (motivoInput.value || '').trim().length < 5;
+    });
+})();
+</script>

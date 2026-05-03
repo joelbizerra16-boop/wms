@@ -1,0 +1,83 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}WMS{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="{% if acesso.is_operacional %}sidebar-operacional{% endif %}">
+    <header class="site-header" id="sidebar">
+        {% include 'components/sidebar.html' %}
+    </header>
+    <main class="app-main {% block container_class %}container{% endblock %}">
+        {% if messages %}
+        <ul class="messages">
+            {% for message in messages %}
+            <li class="{{ message.tags }}">{{ message }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        <div class="page-stack">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+    if (window.lucide) {
+        window.lucide.createIcons();
+    }
+    document.querySelectorAll('[data-submenu-toggle]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const group = btn.closest('.nav-group');
+            if (!group) return;
+            group.classList.toggle('nav-group--open');
+        });
+    });
+    (function () {
+        const body = document.body;
+        const sidebar = document.getElementById('sidebar');
+        const isOperacional = body.classList.contains('sidebar-operacional');
+        document.querySelectorAll('.site-nav a').forEach(function (link) {
+            link.classList.add('menu-link');
+        });
+        const btn = document.getElementById('toggleMenu');
+        const key = 'wms-sidebar-collapsed';
+        if (isOperacional) {
+            body.classList.remove('sidebar-collapsed');
+            window.localStorage.setItem(key, '0');
+            window.localStorage.setItem('sidebar', 'open');
+            return;
+        }
+        if (!btn) return;
+        if (window.innerWidth > 980) {
+            const persisted = window.localStorage.getItem(key);
+            if (persisted === '1' || persisted === 'collapsed') {
+                body.classList.add('sidebar-collapsed');
+            }
+        }
+        btn.addEventListener('click', function () {
+            if (window.innerWidth <= 980) return;
+            body.classList.toggle('sidebar-collapsed');
+            const collapsed = body.classList.contains('sidebar-collapsed');
+            window.localStorage.setItem(key, collapsed ? '1' : '0');
+            window.localStorage.setItem('sidebar', collapsed ? 'collapsed' : 'open');
+        });
+
+        document.querySelectorAll('.menu-link').forEach(function (link) {
+            link.addEventListener('click', function () {
+                if (window.innerWidth <= 980 || !sidebar) return;
+                if (body.classList.contains('sidebar-collapsed')) {
+                    body.classList.remove('sidebar-collapsed');
+                    window.localStorage.setItem(key, '0');
+                    window.localStorage.setItem('sidebar', 'open');
+                }
+            });
+        });
+    })();
+    </script>
+</body>
+</html>

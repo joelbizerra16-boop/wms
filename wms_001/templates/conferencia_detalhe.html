@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+
+{% block title %}Detalhe Conferencia NF | WMS{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Detalhe operacional</span>
+        <h1>Detalhe das NFs</h1>
+        <p>Visão consolidada da separação e conferência por item.</p>
+    </div>
+</div>
+
+{% if nao_encontrados %}
+<div class="feedback-box feedback-box--warning" style="margin-bottom:16px;">
+    Algumas NFs não foram encontradas: {{ nao_encontrados|join:", " }}
+</div>
+{% endif %}
+
+{% for detalhe in detalhes %}
+<div class="card">
+    <div class="actions-row" style="justify-content:space-between; margin-bottom:12px;">
+        <div>
+            <h2 style="margin:0;">NF {{ detalhe.nf.numero }}</h2>
+        </div>
+        <div class="actions-row">
+            <a class="btn btn-primary" href="{% url 'web-conferencia-exec' detalhe.nf.id %}">Abrir conferência</a>
+            {% if acesso.can_manage and detalhe.pode_liberar_divergencia %}
+            <button
+                type="button"
+                class="btn-warning js-open-liberacao-modal"
+                data-release-url="{% url 'web-liberar-nf-divergencia' detalhe.nf.id %}"
+                data-release-target="NF {{ detalhe.nf.numero }}"
+                data-release-status="{{ detalhe.status_nf }}"
+            >
+                LIBERAR DIVERGÊNCIA
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="detail-list">
+        <div class="detail-item">
+            <span class="detail-item__label">NF</span>
+            <span class="detail-item__value">{{ detalhe.nf.numero }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Cliente</span>
+            <span class="detail-item__value">{{ detalhe.nf.cliente.nome }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Rota</span>
+            <span class="detail-item__value">{{ detalhe.nf.rota.nome }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Pendência de separação</span>
+            <span class="detail-item__value">{{ detalhe.pendencias_separacao }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-item__label">Status operacional</span>
+            <span class="detail-item__value"><span class="status-badge {{ detalhe.status_nf_badge_class }}">{{ detalhe.status_nf }}</span></span>
+        </div>
+    </div>
+    {% if detalhe.pendencias_separacao %}
+    <div class="feedback-box feedback-box--warning" style="margin-top:16px;">Separação pendente em {{ detalhe.pendencias_separacao }} itens.</div>
+    {% endif %}
+</div>
+
+<div class="card table-card">
+    <div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Produto</th>
+                <th>Descrição</th>
+                <th>Setor</th>
+                <th>Qtd NF</th>
+                <th>Separado</th>
+                <th>Conferido</th>
+                <th>Falta</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for linha in detalhe.linhas %}
+            <tr>
+                <td>{{ linha.produto }}</td>
+                <td>{{ linha.descricao }}</td>
+                <td>
+                    {% if linha.setor == 'FILTRO' or linha.setor == 'FILTROS' %}
+                    <span class="status-badge status-badge--info">FILTRO</span>
+                    {% elif linha.setor == 'LUBRIFICANTE' %}
+                    <span class="status-badge status-badge--warning">LUBRIFICANTE</span>
+                    {% elif linha.setor == 'AGREGADO' %}
+                    <span class="status-badge status-badge--success">AGREGADO</span>
+                    {% elif linha.setor %}
+                    <span class="status-badge status-badge--neutral">{{ linha.setor }}</span>
+                    {% else %}
+                    <span class="status-badge status-badge--neutral">NAO DEFINIDO</span>
+                    {% endif %}
+                </td>
+                <td>{{ linha.qtd_nf }}</td>
+                <td>{{ linha.separado }}</td>
+                <td>{{ linha.conferido }}</td>
+                <td>{{ linha.falta }}</td>
+                <td>
+                    <span class="status-badge {% if linha.status == 'OK' %}status-badge--success{% elif linha.status == 'FALTA SEPARAR' %}status-badge--danger{% elif linha.status == 'AGUARDANDO' %}status-badge--warning{% else %}status-badge--info{% endif %}">
+                        {{ linha.status }}
+                    </span>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" class="empty-state">Nenhum item encontrado para a NF.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endfor %}
+{% include 'partials/liberacao_divergencia_modal.html' %}
+{% endblock %}

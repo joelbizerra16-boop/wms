@@ -1,0 +1,91 @@
+<div class="modal" id="liberacao-divergencia-modal" aria-hidden="true">
+    <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="liberacao-divergencia-title">
+        <div class="modal__header">
+            <div>
+                <span class="section-label">Autorização gerencial</span>
+                <h2 class="modal__title" id="liberacao-divergencia-title">Liberar divergência</h2>
+                <p class="muted">A liberação exige a senha do usuário atual e um motivo obrigatório para auditoria.</p>
+            </div>
+            <button type="button" class="modal__close js-close-liberacao-modal" aria-label="Fechar">×</button>
+        </div>
+
+        <form method="post" id="liberacao-divergencia-form" class="modal__body">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+
+            <div class="modal__meta">
+                <strong id="liberacao-divergencia-target">-</strong>
+                <span class="muted">Status atual: <span id="liberacao-divergencia-status">-</span></span>
+                <span class="muted">Usuário autorizador: {{ usuario.username }}</span>
+            </div>
+
+            <div>
+                <label for="liberacao-senha">Senha do gestor</label>
+                <input id="liberacao-senha" name="senha" type="password" autocomplete="current-password" required>
+            </div>
+
+            <div>
+                <label for="liberacao-motivo">Motivo da liberação</label>
+                <textarea id="liberacao-motivo" name="motivo" rows="4" required></textarea>
+            </div>
+
+            <div class="modal__actions">
+                <button type="button" class="btn btn-light js-close-liberacao-modal">Cancelar</button>
+                <button type="submit" class="btn-danger">Confirmar liberação</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function () {
+    const modal = document.getElementById('liberacao-divergencia-modal');
+    if (!modal) {
+        return;
+    }
+
+    const form = document.getElementById('liberacao-divergencia-form');
+    const targetEl = document.getElementById('liberacao-divergencia-target');
+    const statusEl = document.getElementById('liberacao-divergencia-status');
+    const senhaInput = document.getElementById('liberacao-senha');
+    const motivoInput = document.getElementById('liberacao-motivo');
+
+    function openModal(button) {
+        form.action = button.getAttribute('data-release-url');
+        targetEl.textContent = button.getAttribute('data-release-target') || '-';
+        statusEl.textContent = button.getAttribute('data-release-status') || '-';
+        senhaInput.value = '';
+        motivoInput.value = '';
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+        senhaInput.focus();
+    }
+
+    function closeModal() {
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+    }
+
+    document.querySelectorAll('.js-open-liberacao-modal').forEach(function (button) {
+        button.addEventListener('click', function () {
+            openModal(button);
+        });
+    });
+
+    modal.querySelectorAll('.js-close-liberacao-modal').forEach(function (button) {
+        button.addEventListener('click', closeModal);
+    });
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.classList.contains('is-open')) {
+            closeModal();
+        }
+    });
+})();
+</script>

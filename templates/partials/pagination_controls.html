@@ -1,0 +1,22 @@
+{% if is_paginated %}
+<div class="toolbar cadastro-pagination list-pagination">
+    <span class="muted">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    <div class="toolbar pagination-links">
+        {% if page_obj.has_previous %}
+        <a class="btn btn-light" href="?page={{ page_obj.previous_page_number }}{{ pagination_query }}">Anterior</a>
+        {% endif %}
+
+        {% for numero in page_obj.paginator.page_range %}
+            {% if numero == page_obj.number %}
+            <span class="btn btn-primary" aria-current="page">{{ numero }}</span>
+            {% else %}
+            <a class="btn btn-light" href="?page={{ numero }}{{ pagination_query }}">{{ numero }}</a>
+            {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+        <a class="btn btn-light" href="?page={{ page_obj.next_page_number }}{{ pagination_query }}">Próxima</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

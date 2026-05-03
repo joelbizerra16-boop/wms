@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+
+{% block title %}Relatório de Liberações | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Auditoria gerencial</span>
+        <h1>Relatório de Liberações</h1>
+        <p>Histórico completo das liberações de divergência com usuário, motivo e transição de status.</p>
+    </div>
+</div>
+
+<div class="card">
+    <form method="get" class="filter-form" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+        <div>
+            <label for="data">Data</label>
+            <input id="data" type="date" name="data" value="{{ filtros.data }}">
+        </div>
+        <div>
+            <label for="usuario">Usuário</label>
+            <input id="usuario" type="text" name="usuario" value="{{ filtros.usuario }}">
+        </div>
+        <div>
+            <label for="busca">Busca global</label>
+            <input id="busca" type="text" name="busca" value="{{ filtros.busca }}" placeholder="Buscar NF...">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-primary">Filtrar</button>
+            <a href="/relatorio/liberacoes/" class="btn btn-light">Limpar</a>
+        </div>
+    </form>
+</div>
+
+<div class="card table-card">
+    <div class="table-wrap table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Usuário</th>
+                    <th>NF</th>
+                    <th>Tarefa</th>
+                    <th>De</th>
+                    <th>Para</th>
+                    <th>Motivo</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for linha in linhas %}
+                <tr>
+                    <td>{{ linha.data|date:'d/m/Y H:i' }}</td>
+                    <td>{{ linha.usuario }}</td>
+                    <td class="nf-col">
+                        {% if linha.nf and linha.nf != '-' and ',' not in linha.nf %}
+                        <span class="nf-chip">{{ linha.nf }}</span>
+                        {% elif linha.nf and linha.nf != '-' %}
+                        <span class="nf-chip">{{ linha.nf }}</span>
+                        {% else %}
+                        <span class="text-danger">Sem NF</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ linha.tarefa }}</td>
+                    <td>{{ linha.status_anterior }}</td>
+                    <td>{{ linha.status_novo }}</td>
+                    <td>{{ linha.motivo }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="empty-state">Nenhuma liberação encontrada para os filtros informados.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include 'partials/pagination_controls.html' %}
+{% endblock %}

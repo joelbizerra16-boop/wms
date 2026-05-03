@@ -1,0 +1,79 @@
+<div class="card table-card">
+    <div class="table-wrap table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>NF</th>
+                <th>Cliente</th>
+                <th>Rota</th>
+                <th>Itens</th>
+                <th>Conf</th>
+                <th>Falt</th>
+                <th>Sep pend</th>
+                <th>Status</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for linha in linhas %}
+            <tr>
+                <td>
+                    <a class="action-icon action-icon--detalhe status-aberto" href="{% url 'web-dashboard-conferencia' %}?data_inicial={{ filtros.date_from }}&data_final={{ filtros.date_to }}&busca={{ filtros.busca|urlencode }}&nf_detalhe={{ linha.numero }}#detalhe-nf" title="Visualizar detalhe da NF">🔍</a>
+                    <span class="nf-chip">{{ linha.numero }}</span>
+                    {% if linha.balcao %}<span class="badge-balcao">BALCAO</span>{% endif %}
+                </td>
+                <td>{{ linha.cliente }}</td>
+                <td>{{ linha.rota }}</td>
+                <td>{{ linha.itens }}</td>
+                <td>{{ linha.conferidos }}</td>
+                <td>{{ linha.faltantes }}</td>
+                <td>
+                    <span class="status-badge {% if linha.separacao_pendente == 'SIM' %}status-badge--warning{% else %}status-badge--success{% endif %}">
+                        {{ linha.separacao_pendente }}
+                    </span>
+                </td>
+                <td>
+                    <span class="status-badge {{ linha.status_badge_class }}">
+                        {{ linha.status }}
+                    </span>
+                </td>
+                <td>
+                    <div class="actions-row">
+                    {% if linha.pode_liberar %}
+                    <button
+                        type="button"
+                        class="btn-warning js-open-liberacao-modal"
+                        data-release-url="{% url 'web-liberar-nf-divergencia' linha.nf_id %}"
+                        data-release-target="NF {{ linha.numero }}"
+                        data-release-status="{{ linha.status }}"
+                    >
+                        LIBERAR DIVERGÊNCIA
+                    </button>
+                    {% endif %}
+                    {% if acesso.can_manage %}
+                    <button
+                        type="button"
+                        class="icon-delete js-open-exclusao-modal"
+                        data-exclusao-url="{% url 'web-excluir-conferencia' linha.nf_id %}"
+                        data-exclusao-target="Conferência NF {{ linha.numero }}"
+                        title="Excluir tarefa"
+                    >
+                        🗑
+                    </button>
+                    {% endif %}
+                    {% if not linha.pode_liberar and not acesso.can_manage %}
+                    <span class="muted">-</span>
+                    {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="9" class="empty-state">Nenhuma NF encontrada.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% include 'partials/pagination_controls.html' %}

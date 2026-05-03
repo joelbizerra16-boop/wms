@@ -1,0 +1,149 @@
+<div class="site-header__inner">
+    <div class="sidebar-header">
+        {% if acesso.is_gestor %}
+        <a href="{% url 'home' %}" class="brand brand--link" title="Ir para tela inicial">
+            <div class="brand__mark">W</div>
+            <div class="brand__text">
+                <span class="brand__title">WMS</span>
+                <span class="brand__subtitle">Operação logística em tempo real</span>
+            </div>
+        </a>
+        {% else %}
+        <div class="brand" title="Navegação restrita ao perfil gestor">
+            <div class="brand__mark">W</div>
+            <div class="brand__text">
+                <span class="brand__title">WMS</span>
+                <span class="brand__subtitle">Operação logística em tempo real</span>
+            </div>
+        </div>
+        {% endif %}
+        {% if not acesso.is_operacional %}
+        <button id="toggleMenu" class="toggle-btn" type="button" title="Expandir/recolher menu">☰</button>
+        {% endif %}
+    </div>
+
+    <nav class="site-nav site-nav--erp">
+        {% if acesso.can_manage %}
+        <div class="nav-group nav-item dropdown {% if '/dashboard/' in request.path %}nav-group--open{% endif %}">
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/dashboard/' in request.path %}active{% endif %}" data-submenu-toggle>
+                <i data-lucide="layout-dashboard"></i>
+                <span>Dashboard</span>
+            </button>
+            <div class="nav-group__menu dropdown-menu">
+                <a href="{% url 'web-dashboard-separacao' %}" class="{% if request.path == '/dashboard/separacao/' %}active{% endif %}">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dash Separação</span>
+                </a>
+                <a href="{% url 'web-dashboard-conferencia' %}" class="{% if request.path == '/dashboard/conferencia/' %}active{% endif %}">
+                    <i data-lucide="clipboard-list"></i>
+                    <span>Dash Conferência</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="nav-group nav-item dropdown {% if '/relatorio/' in request.path or '/produtividade/' in request.path %}nav-group--open{% endif %}">
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/relatorio/' in request.path or '/produtividade/' in request.path %}active{% endif %}" data-submenu-toggle>
+                <i data-lucide="bar-chart-3"></i>
+                <span>Relatório</span>
+            </button>
+            <div class="nav-group__menu dropdown-menu">
+                <a href="{% url 'web-relatorio-liberacoes' %}" class="{% if request.path == '/relatorio/liberacoes/' %}active{% endif %}">
+                    <i data-lucide="file-text"></i>
+                    <span>Liberações</span>
+                </a>
+                <a href="{% url 'web-produtividade-relatorio' %}" class="{% if request.path == '/produtividade/relatorio/' %}active{% endif %}">
+                    <i data-lucide="activity"></i>
+                    <span>Produtividade</span>
+                </a>
+                <a href="{% url 'web-produtividade-ranking' %}" class="{% if request.path == '/produtividade/ranking/' %}active{% endif %}">
+                    <i data-lucide="trophy"></i>
+                    <span>Ranking</span>
+                </a>
+                {% if acesso.can_manage and user.is_staff %}
+                <a href="{% url 'usuarios_logados' %}" class="{% if request.path == '/usuarios/logados/' %}active{% endif %}">
+                    <i data-lucide="users"></i>
+                    <span>Usuários Online</span>
+                </a>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="nav-group nav-item dropdown {% if '/importar/' in request.path %}nav-group--open{% endif %}">
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/importar/' in request.path %}active{% endif %}" data-submenu-toggle>
+                <i data-lucide="file-up"></i>
+                <span>Importar</span>
+            </button>
+            <div class="nav-group__menu dropdown-menu">
+                <a href="{% url 'web-importar-xml' %}" class="{% if '/importar/' in request.path %}active{% endif %}">
+                    <i data-lucide="upload"></i>
+                    <span>Importar XML</span>
+                </a>
+                <a href="{% url 'web-fila-entradas-nf' %}" class="{% if request.path == '/importar/fila/' %}active{% endif %}">
+                    <i data-lucide="list-checks"></i>
+                    <span>Fila de NFs</span>
+                </a>
+                <a href="{% url 'web-ativacao-scan-nf' %}" class="{% if request.path == '/importar/ativacao-scan/' %}active{% endif %}">
+                    <i data-lucide="scan-barcode"></i>
+                    <span>Ativação por Scan</span>
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if acesso.can_separacao or acesso.can_conferencia %}
+        <div class="nav-group nav-item dropdown {% if '/separacao/' in request.path or '/conferencia/' in request.path %}nav-group--open{% endif %}">
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/separacao/' in request.path or '/conferencia/' in request.path %}active{% endif %}" data-submenu-toggle>
+                <i data-lucide="activity"></i>
+                <span>Operação</span>
+            </button>
+            <div class="nav-group__menu dropdown-menu">
+                {% if acesso.can_separacao %}
+                <a href="{% url 'web-separacao-lista' %}" class="{% if '/separacao/' in request.path %}active{% endif %}">
+                    <i data-lucide="scan-line"></i>
+                    <span>Separação</span>
+                </a>
+                {% endif %}
+                {% if acesso.can_conferencia %}
+                <a href="{% url 'web-conferencia-lista' %}" class="{% if '/conferencia/' in request.path %}active{% endif %}">
+                    <i data-lucide="clipboard-check"></i>
+                    <span>Conferência</span>
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if acesso.can_manage %}
+        <div class="nav-group nav-item dropdown {% if '/clientes/' in request.path or '/produtos/' in request.path or '/rotas/' in request.path or '/usuarios/' in request.path %}nav-group--open{% endif %}">
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/clientes/' in request.path or '/produtos/' in request.path or '/rotas/' in request.path or '/usuarios/' in request.path %}active{% endif %}" data-submenu-toggle>
+                <i data-lucide="database"></i>
+                <span>Cadastro</span>
+            </button>
+            <div class="nav-group__menu dropdown-menu nav-group__menu--cadastro">
+                <a href="{% url 'web-clientes' %}" class="{% if '/clientes/' in request.path %}active{% endif %}">
+                    <i data-lucide="user"></i>
+                    <span>Cliente</span>
+                </a>
+                <a href="{% url 'web-produtos' %}" class="{% if '/produtos/' in request.path %}active{% endif %}">
+                    <i data-lucide="package"></i>
+                    <span>Produtos</span>
+                </a>
+                <a href="{% url 'web-rotas' %}" class="{% if '/rotas/' in request.path %}active{% endif %}">
+                    <i data-lucide="map"></i>
+                    <span>Rotas</span>
+                </a>
+                <a href="{% url 'web-usuarios' %}" class="{% if '/usuarios/' in request.path %}active{% endif %}">
+                    <i data-lucide="users"></i>
+                    <span>Usuários</span>
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        <a class="menu-link" href="{% url 'logout' %}"><i data-lucide="log-out"></i><span>Logout</span></a>
+    </nav>
+
+    <div class="site-header__user">
+        {{ usuario.nome|default:usuario.username }}
+    </div>
+</div>
