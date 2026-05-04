@@ -1,22 +1,19 @@
 services:
   - type: web
-    name: wms-001
+    name: wms
     env: python
-    plan: free
     buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput && python manage.py collectstatic --noinput
     startCommand: gunicorn config.wsgi:application
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.prod
-      - key: PYTHON_VERSION
-        value: 3.13.2
       - key: DEBUG
         value: False
-      - key: SECRET_KEY
-        generateValue: true
       - key: ALLOWED_HOSTS
         value: .onrender.com
       - key: CSRF_TRUSTED_ORIGINS
         value: https://*.onrender.com
       - key: DATABASE_URL
-        value: postgresql://USER.PROJECT_REF:SENHA@aws-REGIAO.pooler.supabase.com:6543/postgres
+        value: postgresql://postgres.qvsfsccdvuujqxceogfz:JOELRAFA010103@aws-1-us-east-1.pooler.supabase.com:6543/postgres
+      - key: SECRET_KEY
+        value: sua_chave_secreta_forte_aqui
