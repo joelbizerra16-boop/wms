@@ -3,7 +3,8 @@ import traceback
 from decimal import Decimal
 
 from django.db import OperationalError, connection, transaction
-from django.db.models import F, Max, Q, Sum
+from django.db.models import F, IntegerField, Max, Q, Sum
+from django.db.models.functions import Cast
 from django.utils import timezone
 
 from apps.logs.models import Log, UserActivityLog
@@ -31,6 +32,10 @@ def _tarefa_lock_queryset():
         .select_related('rota')
         .prefetch_related('itens__produto', 'itens__nf')
     )
+
+
+def _itens_pendentes_lock_queryset():
+    return TarefaItem.objects.select_for_update(skip_locked=True).select_related('produto')
 
 def _obter_tarefa_ou_erro(queryset, tarefa_id):
     tarefa = queryset.filter(id=tarefa_id).first()
@@ -207,7 +212,7 @@ def listar_itens_tarefa_para_exibicao(tarefa):
         .annotate(
             quantidade_total=Sum('quantidade_total'),
             quantidade_separada=Sum('quantidade_separada'),
-            possui_restricao=Max('possui_restricao'),
+            possui_restricao=Max(Cast('possui_restricao', IntegerField())),
             data_bipagem=Max('data_bipagem'),
             bipado_por_nome=Max('bipado_por__nome'),
             bipado_por_username=Max('bipado_por__username'),
@@ -390,12 +395,21 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                 raise SeparacaoError('Tarefa já concluída.')
 
             # Em ambiente multiusuario, trava e recalcula sempre a partir do banco.
-            itens_pendentes = list(
-                TarefaItem.objects.select_for_update()
+            itens_pendentes_ids = list(
+                TarefaItem.objects
                 .filter(tarefa=tarefa_local, quantidade_separada__lt=F('quantidade_total'))
-                .select_related('produto', 'nf', 'grupo_agregado')
                 .order_by('nf__data_emissao', 'nf__numero', 'created_at')
+                .values_list('id', flat=True)
             )
+            itens_pendentes_map = {
+                item.id: item
+                for item in _itens_pendentes_lock_queryset().filter(id__in=itens_pendentes_ids)
+            }
+            itens_pendentes = [
+                itens_pendentes_map[item_id]
+                for item_id in itens_pendentes_ids
+                if item_id in itens_pendentes_map
+            ]
             if not itens_pendentes:
                 raise SeparacaoError('Tarefa sem itens pendentes para bipagem')
 
