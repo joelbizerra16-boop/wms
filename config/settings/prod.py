@@ -1,5 +1,7 @@
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 from decouple import Csv, config
+from urllib.parse import urlparse
 
 from .base import *
 
@@ -18,6 +20,20 @@ CSRF_TRUSTED_ORIGINS = config(
 	cast=Csv(),
 )
 
+parsed_database_url = urlparse(DATABASE_URL)
+database_host = parsed_database_url.hostname or ''
+database_port = parsed_database_url.port
+
+if not database_host.endswith('pooler.supabase.com'):
+	raise ImproperlyConfigured(
+		'DATABASE_URL invalida para producao: use o Supabase pooler aws-REGIAO.pooler.supabase.com na porta 6543.'
+	)
+
+if database_port != 6543:
+	raise ImproperlyConfigured(
+		'DATABASE_URL invalida para producao: o Supabase pooler deve usar a porta 6543.'
+	)
+
 DATABASES = {
 	'default': dj_database_url.config(
 		default=DATABASE_URL,
@@ -34,7 +50,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=True, cast=bool)
+SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=3600, cast=int)
