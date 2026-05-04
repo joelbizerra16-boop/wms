@@ -1,4 +1,5 @@
 import time
+import traceback
 from decimal import Decimal
 
 from django.db import OperationalError, connection, transaction
@@ -38,6 +39,27 @@ TAREFA_NAO_ACEITA_ERRO = 'Aceite a tarefa antes de iniciar a bipagem'
 STATUS_TAREFA_DISPONIVEL = (Tarefa.Status.ABERTO, Tarefa.Status.EM_EXECUCAO)
 SQLITE_LOCK_RETRY_MAX = 3
 SQLITE_LOCK_RETRY_DELAY_BASE_SECONDS = 0.12
+
+
+def _registrar_log_seguro(usuario, acao, detalhe):
+    try:
+        Log.objects.create(usuario=usuario, acao=acao, detalhe=detalhe)
+    except Exception as exc:
+        print(f'ERRO LOG SEPARACAO: {exc}')
+        traceback.print_exc()
+
+
+def _registrar_atividade_segura(usuario, tipo, tarefa, timestamp):
+    try:
+        UserActivityLog.objects.create(
+            usuario=usuario,
+            tipo=tipo,
+            tarefa=tarefa,
+            timestamp=timestamp,
+        )
+    except Exception as exc:
+        print(f'ERRO ATIVIDADE SEPARACAO: {exc}')
+        traceback.print_exc()
 
 
 SETOR_CATEGORIA_MAP = {
@@ -253,6 +275,45 @@ def listar_itens_tarefa_para_exibicao(tarefa):
     return linhas
 
 
+def listar_itens_tarefa_para_exibicao_seguro(tarefa):
+    try:
+        return listar_itens_tarefa_para_exibicao(tarefa)
+    except Exception as exc:
+        print(f'ERRO ITENS SEPARACAO: {exc}')
+        traceback.print_exc()
+
+    itens_rel = getattr(tarefa, 'itens', None)
+    itens = itens_rel.select_related('produto', 'nf', 'grupo_agregado', 'tarefa__rota').all() if itens_rel else []
+    linhas = []
+    for item in itens:
+        produto = getattr(item, 'produto', None)
+        quantidade_total = getattr(item, 'quantidade_total', None) or Decimal('0')
+        quantidade_separada = getattr(item, 'quantidade_separada', None) or Decimal('0')
+        possui_restricao = bool(getattr(item, 'possui_restricao', False))
+        linhas.append(
+            {
+                'produto': getattr(produto, 'cod_prod', '') or '',
+                'descricao': getattr(produto, 'descricao', '') or '',
+                'setor': getattr(produto, 'setor', '') or '',
+                'grupo_agregado': getattr(getattr(item, 'grupo_agregado', None), 'nome', '') or '',
+                'categoria': getattr(produto, 'categoria', '') or '',
+                'rota': getattr(getattr(tarefa, 'rota', None), 'nome', '') or '',
+                'nf_numero': getattr(getattr(item, 'nf', None), 'numero', None),
+                'agrupado': False,
+                'quantidade_total': quantidade_total,
+                'quantidade_separada': quantidade_separada,
+                'status': status_item_tarefa(tarefa.status, quantidade_separada, quantidade_total, possui_restricao),
+                'bipado_por': (
+                    getattr(getattr(item, 'bipado_por', None), 'nome', None)
+                    or getattr(getattr(item, 'bipado_por', None), 'username', '')
+                    or ''
+                ),
+                'data_bipagem': getattr(item, 'data_bipagem', None),
+            }
+        )
+    return linhas
+
+
 def iniciar_tarefa(tarefa_id, usuario):
     try:
         if usuario is None or not usuario.setores.exists():
@@ -285,13 +346,8 @@ def iniciar_tarefa(tarefa_id, usuario):
                 tarefa.data_inicio = timezone.now()
                 tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
                 identificador = f'NF {tarefa.nf.numero}' if tarefa.nf_id else f'rota {tarefa.rota.nome}'
-                Log.objects.create(usuario=usuario, acao='INICIO SEPARACAO', detalhe=f'Tarefa {tarefa.id} iniciada para {identificador}.')
-                UserActivityLog.objects.create(
-                    usuario=usuario,
-                    tipo=UserActivityLog.Tipo.TAREFA_INICIO,
-                    tarefa=tarefa,
-                    timestamp=timezone.now(),
-                )
+                _registrar_log_seguro(usuario, 'INICIO SEPARACAO', f'Tarefa {tarefa.id} iniciada para {identificador}.')
+                _registrar_atividade_segura(usuario, UserActivityLog.Tipo.TAREFA_INICIO, tarefa, timezone.now())
                 return tarefa
 
         tarefa = _executar_com_retry_sqlite_lock(_executar)

@@ -18,7 +18,7 @@ from apps.nf.services.consistencia_service import separacao_concluida_nf
 from apps.nf.services.status_service import atualizar_status_nf
 from apps.tarefas.models import Tarefa, TarefaItem
 from apps.tarefas.services.separacao_service import (
-    listar_itens_tarefa_para_exibicao,
+    listar_itens_tarefa_para_exibicao_seguro,
     sincronizar_conclusao_automatica_tarefa,
     status_item_tarefa,
 )
@@ -276,7 +276,7 @@ class StatusTarefaAPIView(APIView):
             if tarefa.nf_id and tarefa.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
                 return Response({'erro': 'Tarefa indisponivel'}, status=status.HTTP_404_NOT_FOUND)
 
-            itens_brutos = listar_itens_tarefa_para_exibicao(tarefa)
+            itens_brutos = listar_itens_tarefa_para_exibicao_seguro(tarefa)
             print(f'ITENS EXIBICAO: {len(itens_brutos)}')
             itens = [
                 {

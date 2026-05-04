@@ -10,6 +10,7 @@ class HealthCheckTests(SimpleTestCase):
 
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import F
@@ -416,6 +417,30 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(response_finalizar.status_code, 302)
 		tarefa_fluxo.refresh_from_db()
 		self.assertEqual(tarefa_fluxo.status, Tarefa.Status.CONCLUIDO)
+
+	@patch('apps.core.views_web.listar_itens_tarefa_para_exibicao_seguro')
+	def test_tela_separacao_abre_com_fallback_seguro_de_itens(self, mock_listar_itens):
+		self.tarefa.status = Tarefa.Status.EM_EXECUCAO
+		self.tarefa.usuario = self.usuario
+		self.tarefa.usuario_em_execucao = self.usuario
+		self.tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
+		mock_listar_itens.return_value = []
+
+		response = self.client.get(f'/separacao/{self.tarefa.id}/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Sem itens pendentes para esta tarefa.')
+
+	@patch('apps.core.views_status.listar_itens_tarefa_para_exibicao_seguro')
+	def test_status_tarefa_api_retorna_200_com_fallback_seguro(self, mock_listar_itens):
+		mock_listar_itens.return_value = []
+
+		response = self.client.get(f'/api/status/tarefa/{self.tarefa.id}/')
+
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertEqual(payload['tarefa_id'], self.tarefa.id)
+		self.assertEqual(payload['itens'], [])
 
 	def test_tela_separacao_exibe_itens_nao_encontrados_da_tarefa(self):
 		produto_ne = Produto.objects.create(

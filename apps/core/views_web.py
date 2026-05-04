@@ -46,7 +46,7 @@ from apps.tarefas.services.separacao_service import (
     finalizar_tarefa,
     iniciar_tarefa,
     liberar_execucao_tarefa,
-    listar_itens_tarefa_para_exibicao,
+    listar_itens_tarefa_para_exibicao_seguro,
     listar_tarefas_disponiveis,
 )
 from apps.core.nf_utils import resolve_nf_numero
@@ -861,7 +861,7 @@ def separacao_exec_web(request, tarefa_id):
         messages.warning(request, 'Tarefa já finalizada e removida da fila operacional.')
         return redirect('web-separacao-lista')
     try:
-        itens_exibicao = listar_itens_tarefa_para_exibicao(tarefa)
+        itens_exibicao = listar_itens_tarefa_para_exibicao_seguro(tarefa)
         print(f'ITENS EXIBICAO: {len(itens_exibicao)}')
         return _render(
             request,
