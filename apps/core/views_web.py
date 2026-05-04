@@ -342,6 +342,8 @@ def _resumo_tarefa_separacao(itens_exibicao):
     total_itens = len(itens_exibicao)
     separados = sum(1 for item in itens_exibicao if item['status'] == 'SEPARADO')
     return {
+        'total': total_itens,
+        'separado': separados,
         'total_itens': total_itens,
         'separados': separados,
         'pendentes': max(total_itens - separados, 0),
@@ -780,10 +782,22 @@ def separacao_exec_web(request, tarefa_id):
         )
         return HttpResponseForbidden(str(exc))
 
+    print('==== DEBUG SEPARACAO ====')
     print(f'TAREFA ID: {tarefa_id}')
     print(f'USUARIO: {request.user}')
     print(f'SETORES USUARIO: {list(request.user.setores.values_list("nome", flat=True))}')
     print(f'SETOR TAREFA: {tarefa.setor}')
+    print(f'STATUS TAREFA: {tarefa.status}')
+
+    itens_rel = getattr(tarefa, 'itens', None)
+    if itens_rel:
+        try:
+            print(f'QTD ITENS TAREFA: {itens_rel.count()}')
+        except Exception as exc:
+            print(f'ERRO AO CONTAR ITENS: {exc}')
+            raise
+    else:
+        print('TAREFA SEM ITENS')
 
     if request.method == 'GET' and tarefa.status == Tarefa.Status.ABERTO:
         try:
@@ -848,6 +862,7 @@ def separacao_exec_web(request, tarefa_id):
         return redirect('web-separacao-lista')
     try:
         itens_exibicao = listar_itens_tarefa_para_exibicao(tarefa)
+        print(f'ITENS EXIBICAO: {len(itens_exibicao)}')
         return _render(
             request,
             'separacao_exec.html',
@@ -865,6 +880,7 @@ def separacao_exec_web(request, tarefa_id):
             },
         )
     except Exception as exc:
+        print(f'ERRO REAL: {exc}')
         logger.exception('Erro separacao GET: tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(request.user, 'id', None), str(exc))
         raise
 

@@ -344,6 +344,11 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(payload['em_conferencia'], 1)
 
 	def test_tela_separacao_contém_script_de_polling(self):
+		self.tarefa.status = Tarefa.Status.EM_EXECUCAO
+		self.tarefa.usuario = self.usuario
+		self.tarefa.usuario_em_execucao = self.usuario
+		self.tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
+
 		response = self.client.get(f'/separacao/{self.tarefa.id}/')
 
 		self.assertEqual(response.status_code, 200)

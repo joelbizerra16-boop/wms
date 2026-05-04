@@ -28,6 +28,13 @@ from apps.usuarios.models import Usuario
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _task_item_status(item):
     return status_item_tarefa(item.tarefa.status, item.quantidade_separada, item.quantidade_total, item.possui_restricao)
 
@@ -239,41 +246,72 @@ class StatusTarefaAPIView(APIView):
             id=tarefa_id,
             ativo=True,
         )
-        sincronizar_conclusao_automatica_tarefa(tarefa)
-        tarefa.refresh_from_db()
-        if tarefa.nf_id and tarefa.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
-            return Response({'erro': 'Tarefa indisponivel'}, status=status.HTTP_404_NOT_FOUND)
+        print('==== DEBUG STATUS TAREFA ====')
+        print(f'ID: {tarefa_id}')
+        print(f'USER: {request.user}')
+        print(f'TAREFA: {tarefa}')
+        print(f'SETOR: {tarefa.setor}')
+        print(f'STATUS: {tarefa.status}')
 
-        itens = [
-            {
-                'produto': item['produto'],
-                'descricao': item['descricao'],
-                'categoria': item['categoria'],
-                'setor': item.get('setor') or '',
-                'grupo_agregado': item.get('grupo_agregado') or '',
-                'rota': item['rota'],
-                'nf_numero': item['nf_numero'],
-                'agrupado': item['agrupado'],
-                'quantidade_total': float(item['quantidade_total']),
-                'quantidade_separada': float(item['quantidade_separada']),
-                'status': item['status'],
-                'bipado_por': item.get('bipado_por') or '',
-                'data_bipagem': item['data_bipagem'].isoformat() if item.get('data_bipagem') else '',
-            }
-            for item in listar_itens_tarefa_para_exibicao(tarefa)
-        ]
-        return Response(
-            {
-                'tarefa_id': tarefa.id,
-                'status': tarefa.status,
-                'produto': itens[0]['produto'] if itens else '',
-                'descricao': itens[0]['descricao'] if itens else '',
-                'separado': itens[0]['quantidade_separada'] if itens else 0,
-                'total': itens[0]['quantidade_total'] if itens else 0,
-                'itens': itens,
-            },
-            status=status.HTTP_200_OK,
-        )
+        try:
+            setores = list(request.user.setores.values_list('nome', flat=True))
+            print(f'SETORES USUARIO: {setores}')
+        except Exception as exc:
+            print(f'ERRO SETORES: {exc}')
+            raise
+
+        itens_rel = getattr(tarefa, 'itens', None)
+        if itens_rel:
+            try:
+                print(f'QTD ITENS REL: {itens_rel.count()}')
+            except Exception as exc:
+                print(f'ERRO ITENS REL: {exc}')
+                raise
+        else:
+            print('TAREFA SEM ITENS')
+
+        try:
+            sincronizar_conclusao_automatica_tarefa(tarefa)
+            tarefa.refresh_from_db()
+            if tarefa.nf_id and tarefa.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
+                return Response({'erro': 'Tarefa indisponivel'}, status=status.HTTP_404_NOT_FOUND)
+
+            itens_brutos = listar_itens_tarefa_para_exibicao(tarefa)
+            print(f'ITENS EXIBICAO: {len(itens_brutos)}')
+            itens = [
+                {
+                    'produto': item.get('produto') or '',
+                    'descricao': item.get('descricao') or '',
+                    'categoria': item.get('categoria') or '',
+                    'setor': item.get('setor') or '',
+                    'grupo_agregado': item.get('grupo_agregado') or '',
+                    'rota': item.get('rota') or '',
+                    'nf_numero': item.get('nf_numero'),
+                    'agrupado': bool(item.get('agrupado')),
+                    'quantidade_total': _safe_float(item.get('quantidade_total')),
+                    'quantidade_separada': _safe_float(item.get('quantidade_separada')),
+                    'status': item.get('status') or '',
+                    'bipado_por': item.get('bipado_por') or '',
+                    'data_bipagem': item['data_bipagem'].isoformat() if getattr(item.get('data_bipagem'), 'isoformat', None) else '',
+                }
+                for item in itens_brutos
+            ]
+            return Response(
+                {
+                    'tarefa_id': tarefa.id,
+                    'status': tarefa.status,
+                    'produto': itens[0]['produto'] if itens else '',
+                    'descricao': itens[0]['descricao'] if itens else '',
+                    'separado': itens[0]['quantidade_separada'] if itens else 0,
+                    'total': itens[0]['quantidade_total'] if itens else 0,
+                    'itens': itens,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as exc:
+            print(f'ERRO REAL: {exc}')
+            logger.exception('Erro real status tarefa: tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(request.user, 'id', None), str(exc))
+            raise
 
 
 class DashboardResumoAPIView(APIView):
