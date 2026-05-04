@@ -785,6 +785,14 @@ def separacao_exec_web(request, tarefa_id):
     print(f'SETORES USUARIO: {list(request.user.setores.values_list("nome", flat=True))}')
     print(f'SETOR TAREFA: {tarefa.setor}')
 
+    if request.method == 'GET' and tarefa.status == Tarefa.Status.ABERTO:
+        try:
+            iniciar_tarefa(tarefa.id, request.user)
+            return redirect('web-separacao-exec', tarefa_id=tarefa.id)
+        except SeparacaoError as exc:
+            messages.error(request, str(exc))
+            return redirect('web-separacao-lista')
+
     if tarefa.status in {
         Tarefa.Status.CONCLUIDO,
         Tarefa.Status.CONCLUIDO_COM_RESTRICAO,

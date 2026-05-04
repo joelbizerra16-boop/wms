@@ -365,6 +365,53 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(self.tarefa.status, Tarefa.Status.EM_EXECUCAO)
 		self.assertEqual(self.tarefa.usuario_id, self.usuario.id)
 
+	def test_tela_separacao_inicia_no_get_e_permite_bipar_e_finalizar(self):
+		produto_fluxo = Produto.objects.create(
+			cod_prod='SEP001',
+			descricao='Produto fluxo separacao',
+			cod_ean='789SEP001',
+			categoria=Produto.Categoria.FILTROS,
+		)
+		tarefa_fluxo = Tarefa.objects.create(
+			nf=self.nf,
+			tipo=Tarefa.Tipo.FILTRO,
+			setor=Setor.Codigo.FILTROS,
+			rota=self.rota,
+			status=Tarefa.Status.ABERTO,
+		)
+		TarefaItem.objects.create(
+			tarefa=tarefa_fluxo,
+			nf=self.nf,
+			produto=produto_fluxo,
+			quantidade_total='1.00',
+			quantidade_separada='0.00',
+		)
+
+		response_inicio = self.client.get(f'/separacao/{tarefa_fluxo.id}/')
+
+		self.assertEqual(response_inicio.status_code, 302)
+		self.assertEqual(response_inicio['Location'], f'/separacao/{tarefa_fluxo.id}/')
+		tarefa_fluxo.refresh_from_db()
+		self.assertEqual(tarefa_fluxo.status, Tarefa.Status.EM_EXECUCAO)
+
+		response_exec = self.client.get(f'/separacao/{tarefa_fluxo.id}/')
+		self.assertEqual(response_exec.status_code, 200)
+		self.assertContains(response_exec, 'SEP001')
+
+		response_bipar = self.client.post(
+			f'/separacao/{tarefa_fluxo.id}/',
+			{'acao': 'bipar', 'codigo': '789SEP001'},
+		)
+		self.assertEqual(response_bipar.status_code, 302)
+
+		response_finalizar = self.client.post(
+			f'/separacao/{tarefa_fluxo.id}/',
+			{'acao': 'finalizar', 'status_final': Tarefa.Status.CONCLUIDO},
+		)
+		self.assertEqual(response_finalizar.status_code, 302)
+		tarefa_fluxo.refresh_from_db()
+		self.assertEqual(tarefa_fluxo.status, Tarefa.Status.CONCLUIDO)
+
 	def test_tela_separacao_exibe_itens_nao_encontrados_da_tarefa(self):
 		produto_ne = Produto.objects.create(
 			cod_prod='NE999',
