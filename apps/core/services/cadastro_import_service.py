@@ -36,7 +36,10 @@ def _clean_text(value):
         return ''
     if pd.isna(value):
         return ''
-    return str(value).strip()
+    text = str(value).strip()
+    if text.lower() in {'nan', 'none', '<na>'}:
+        return ''
+    return text
 
 
 def _digits_only(value):
@@ -74,8 +77,8 @@ def _read_excel_or_csv(file_or_path):
         name = str(getattr(file_or_path, 'name', '')).lower()
 
     if name.endswith('.csv'):
-        return pd.read_csv(file_or_path)
-    return pd.read_excel(file_or_path)
+        return pd.read_csv(file_or_path, dtype=str, keep_default_na=False)
+    return pd.read_excel(file_or_path, dtype=str, keep_default_na=False)
 
 
 def _is_valid_ean(ean):
