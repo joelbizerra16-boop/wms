@@ -351,6 +351,20 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, '/api/separacao/bipar/')
 		self.assertContains(response, 'setInterval')
 
+	def test_tela_separacao_inicia_tarefa_via_post_para_usuario_multi_setor(self):
+		self.usuario.definir_setores([Setor.Codigo.FILTROS, Setor.Codigo.LUBRIFICANTE])
+
+		response = self.client.post(
+			f'/separacao/{self.tarefa.id}/',
+			{'acao': 'iniciar'},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(response['Location'], f'/separacao/{self.tarefa.id}/')
+		self.tarefa.refresh_from_db()
+		self.assertEqual(self.tarefa.status, Tarefa.Status.EM_EXECUCAO)
+		self.assertEqual(self.tarefa.usuario_id, self.usuario.id)
+
 	def test_tela_separacao_exibe_itens_nao_encontrados_da_tarefa(self):
 		produto_ne = Produto.objects.create(
 			cod_prod='NE999',

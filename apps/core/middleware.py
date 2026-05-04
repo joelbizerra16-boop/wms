@@ -1,4 +1,7 @@
-from django.http import HttpResponse
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class CatchAllExceptionsMiddleware:
@@ -11,4 +14,5 @@ class CatchAllExceptionsMiddleware:
             return response
         except Exception as e:
             print(f"ERRO GLOBAL: {e}")
-            return HttpResponse("Erro interno. Contate o suporte.")
+            logger.exception('ERRO GLOBAL: %s', e)
+            raise

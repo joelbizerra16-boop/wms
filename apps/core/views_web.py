@@ -179,9 +179,9 @@ def _usuario_pode_gerir_separacao(user):
 
 
 def _setores_usuario_normalizados(usuario):
+    if usuario is None or not usuario.setores.exists():
+        return set()
     setores = list(usuario.setores.values_list('nome', flat=True))
-    if not setores and getattr(usuario, 'setor', None) and usuario.setor != Setor.Codigo.NAO_ENCONTRADO:
-        setores = [usuario.setor]
     normalizados = set()
     for setor in setores:
         valor = (setor or '').strip().upper()
@@ -814,7 +814,7 @@ def separacao_exec_web(request, tarefa_id):
             messages.error(request, str(exc))
         except Exception as exc:
             logger.exception('Erro separacao POST: tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(request.user, 'id', None), str(exc))
-            messages.error(request, 'Erro interno. Contate o suporte.')
+            raise
         return redirect('web-separacao-exec', tarefa_id=tarefa.id)
 
     try:
@@ -854,8 +854,7 @@ def separacao_exec_web(request, tarefa_id):
         )
     except Exception as exc:
         logger.exception('Erro separacao GET: tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(request.user, 'id', None), str(exc))
-        messages.error(request, 'Erro interno. Contate o suporte.')
-        return redirect('web-separacao-lista')
+        raise
 
 
 @require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)

@@ -62,9 +62,9 @@ def _usuario_pode_ver_todos_setores(usuario):
 
 
 def _setores_usuario(usuario):
+    if usuario is None or not usuario.setores.exists():
+        return set()
     setores = list(usuario.setores.values_list('nome', flat=True))
-    if not setores and getattr(usuario, 'setor', None) and usuario.setor != Setor.Codigo.NAO_ENCONTRADO:
-        setores = [usuario.setor]
     return {_normalizar_setor_operacional(valor) for valor in setores if _normalizar_setor_operacional(valor)}
 
 
@@ -254,42 +254,51 @@ def listar_itens_tarefa_para_exibicao(tarefa):
 
 
 def iniciar_tarefa(tarefa_id, usuario):
-    tarefa = (
-        Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
-        .prefetch_related('itens__produto', 'itens__nf')
-        .get(id=tarefa_id)
-    )
-    _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
-    _validar_setor_tarefa(tarefa, usuario)
-    _validar_execucao_tarefa(tarefa, usuario, exigir_aceite=False)
-    def _executar():
-        with transaction.atomic():
-            tarefa = (
-                Tarefa.objects.select_for_update()
-                .select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
-                .prefetch_related('itens__produto', 'itens__nf')
-                .get(id=tarefa_id)
-            )
-            _validar_execucao_tarefa(tarefa, usuario, exigir_aceite=False)
-            if tarefa.status in {Tarefa.Status.FECHADO_COM_RESTRICAO, Tarefa.Status.LIBERADO_COM_RESTRICAO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}:
-                raise SeparacaoError('Tarefa com restricao nao pode ser reiniciada')
-            tarefa.status = Tarefa.Status.EM_EXECUCAO
-            tarefa.usuario = usuario
-            tarefa.usuario_em_execucao = usuario
-            tarefa.data_inicio = timezone.now()
-            tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
-            identificador = f'NF {tarefa.nf.numero}' if tarefa.nf_id else f'rota {tarefa.rota.nome}'
-            Log.objects.create(usuario=usuario, acao='INICIO SEPARACAO', detalhe=f'Tarefa {tarefa.id} iniciada para {identificador}.')
-            UserActivityLog.objects.create(
-                usuario=usuario,
-                tipo=UserActivityLog.Tipo.TAREFA_INICIO,
-                tarefa=tarefa,
-                timestamp=timezone.now(),
-            )
-            return tarefa
+    try:
+        if usuario is None or not usuario.setores.exists():
+            raise SeparacaoError(USUARIO_SEM_SETOR_ERRO)
 
-    tarefa = _executar_com_retry_sqlite_lock(_executar)
-    return _dados_tarefa(tarefa)
+        tarefa = _obter_tarefa_ou_erro(
+            Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao').prefetch_related('itens__produto', 'itens__nf'),
+            tarefa_id,
+        )
+        _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
+        _validar_setor_tarefa(tarefa, usuario)
+        _validar_execucao_tarefa(tarefa, usuario, exigir_aceite=False)
+
+        def _executar():
+            with transaction.atomic():
+                tarefa = _obter_tarefa_ou_erro(
+                    Tarefa.objects.select_for_update()
+                    .select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
+                    .prefetch_related('itens__produto', 'itens__nf'),
+                    tarefa_id,
+                )
+                _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
+                _validar_setor_tarefa(tarefa, usuario)
+                _validar_execucao_tarefa(tarefa, usuario, exigir_aceite=False)
+                if tarefa.status in {Tarefa.Status.FECHADO_COM_RESTRICAO, Tarefa.Status.LIBERADO_COM_RESTRICAO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}:
+                    raise SeparacaoError('Tarefa com restricao nao pode ser reiniciada')
+                tarefa.status = Tarefa.Status.EM_EXECUCAO
+                tarefa.usuario = usuario
+                tarefa.usuario_em_execucao = usuario
+                tarefa.data_inicio = timezone.now()
+                tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
+                identificador = f'NF {tarefa.nf.numero}' if tarefa.nf_id else f'rota {tarefa.rota.nome}'
+                Log.objects.create(usuario=usuario, acao='INICIO SEPARACAO', detalhe=f'Tarefa {tarefa.id} iniciada para {identificador}.')
+                UserActivityLog.objects.create(
+                    usuario=usuario,
+                    tipo=UserActivityLog.Tipo.TAREFA_INICIO,
+                    tarefa=tarefa,
+                    timestamp=timezone.now(),
+                )
+                return tarefa
+
+        tarefa = _executar_com_retry_sqlite_lock(_executar)
+        return _dados_tarefa(tarefa)
+    except Exception as exc:
+        print(f'ERRO SEPARACAO: {exc}')
+        raise
 
 
 def bipar_tarefa(tarefa_id, codigo, usuario):
