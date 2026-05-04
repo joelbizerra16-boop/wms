@@ -22,6 +22,16 @@ from apps.usuarios.session_utils import usuario_esta_logado
 class SeparacaoError(Exception):
     pass
 
+
+def _tarefa_lock_queryset():
+    # PostgreSQL rejects FOR UPDATE on nullable OUTER JOINs, so lock only the
+    # tarefa row itself and keep nullable relations lazy-loaded.
+    return (
+        Tarefa.objects.select_for_update()
+        .select_related('rota')
+        .prefetch_related('itens__produto', 'itens__nf')
+    )
+
 def _obter_tarefa_ou_erro(queryset, tarefa_id):
     tarefa = queryset.filter(id=tarefa_id).first()
     if tarefa is None:
@@ -330,9 +340,7 @@ def iniciar_tarefa(tarefa_id, usuario):
         def _executar():
             with transaction.atomic():
                 tarefa = _obter_tarefa_ou_erro(
-                    Tarefa.objects.select_for_update()
-                    .select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
-                    .prefetch_related('itens__produto', 'itens__nf'),
+                    _tarefa_lock_queryset(),
                     tarefa_id,
                 )
                 _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
@@ -372,9 +380,7 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
     def _executar():
         with transaction.atomic():
             tarefa_local = (
-                Tarefa.objects.select_for_update()
-                .select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
-                .prefetch_related('itens__produto', 'itens__nf')
+                _tarefa_lock_queryset()
                 .get(id=tarefa_id)
             )
             _validar_nf_cancelada(tarefa_local, usuario, 'SEPARACAO BLOQUEADA')
@@ -498,7 +504,7 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
         with transaction.atomic():
             tarefa_local = (
                 Tarefa.objects.select_for_update()
-                .select_related('nf', 'usuario', 'usuario_em_execucao')
+                .select_related('rota')
                 .prefetch_related('itens__nf')
                 .get(id=tarefa_id)
             )
@@ -690,7 +696,7 @@ def liberar_execucao_tarefa(tarefa_id, usuario):
         raise SeparacaoError(TAREFA_EM_EXECUCAO_ERRO)
     def _executar():
         with transaction.atomic():
-            tarefa_local = Tarefa.objects.select_for_update().select_related('usuario', 'usuario_em_execucao').get(id=tarefa_id)
+            tarefa_local = Tarefa.objects.select_for_update().select_related('rota').get(id=tarefa_id)
             _validar_setor_tarefa(tarefa_local, usuario)
             usuario_execucao_local_id = tarefa_local.usuario_em_execucao_id or tarefa_local.usuario_id
             if tarefa_local.status != Tarefa.Status.EM_EXECUCAO:
