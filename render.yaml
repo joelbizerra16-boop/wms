@@ -3,7 +3,7 @@ services:
     name: wms-001
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt ; python manage.py migrate --noinput ; python manage.py collectstatic --noinput
+    buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput && python manage.py collectstatic --noinput
     startCommand: gunicorn config.wsgi:application
     envVars:
       - key: DJANGO_SETTINGS_MODULE
@@ -11,7 +11,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.13.2
       - key: DEBUG
-        value: false
+        value: False
       - key: SECRET_KEY
         generateValue: true
       - key: ALLOWED_HOSTS
