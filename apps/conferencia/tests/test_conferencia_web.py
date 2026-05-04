@@ -22,6 +22,14 @@ class ConferenciaWebTests(TestCase):
             is_active=True,
         )
         self.client.login(username='conferente_web', password='123456')
+        self.usuario_sem_acesso = Usuario.objects.create_user(
+            username='conferente_sem_acesso',
+            nome='Conferente Sem Acesso',
+            perfil=Usuario.Perfil.CONFERENTE,
+            setores=[Setor.Codigo.AGREGADO],
+            password='123456',
+            is_active=True,
+        )
 
         self.rota = Rota.objects.create(nome='Rota Web', cep_inicial='01000000', cep_final='01999999')
         self.cliente = Cliente.objects.create(nome='Cliente Web', inscricao_estadual='123123123')
@@ -140,3 +148,12 @@ class ConferenciaWebTests(TestCase):
         self.assertEqual(response.status_code, 302)
         conferencia.refresh_from_db()
         self.assertEqual(conferencia.status, Conferencia.Status.CONCLUIDO_COM_RESTRICAO)
+
+    def test_usuario_sem_setor_da_nf_recebe_403_na_execucao(self):
+        self.client.logout()
+        self.client.login(username='conferente_sem_acesso', password='123456')
+
+        response = self.client.get(f'/conferencia/{self.nf.id}/')
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('Usuário sem acesso ao setor', response.content.decode('utf-8'))

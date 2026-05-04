@@ -1,4 +1,5 @@
 from django.contrib import messages
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Prefetch
 from django.http import Http404, HttpResponseForbidden
@@ -39,6 +40,7 @@ def _obter_conferencia_contexto(nf_id, usuario):
         ),
         id=nf_id,
     )
+    _validar_acesso_nf_por_setor(nf, usuario)
     atualizar_status_nf(nf)
     conferencia_em_uso = nf.conferencias.filter(status=Conferencia.Status.EM_CONFERENCIA).select_related('conferente').first()
     if conferencia_em_uso and not usuario_esta_logado(conferencia_em_uso.conferente):
@@ -56,7 +58,8 @@ def _obter_conferencia_contexto(nf_id, usuario):
 def _item_atual(conferencia):
     if conferencia is None:
         return None
-    itens = list(conferencia.itens.select_related('produto').all())
+    itens_relacao = getattr(conferencia, 'itens', None)
+    itens = list(itens_relacao.select_related('produto').all()) if itens_relacao else []
     for item in itens:
         if item.status == ConferenciaItem.Status.AGUARDANDO:
             return item
@@ -69,7 +72,8 @@ def _item_atual(conferencia):
 def _totais_nf(conferencia):
     if conferencia is None:
         return {'esperado': 0, 'conferido': 0, 'pendentes': 0, 'divergencias': 0}
-    itens = list(conferencia.itens.all())
+    itens_relacao = getattr(conferencia, 'itens', None)
+    itens = list(itens_relacao.all()) if itens_relacao else []
     return {
         'esperado': sum(item.qtd_esperada for item in itens),
         'conferido': sum(item.qtd_conferida for item in itens),
@@ -91,7 +95,8 @@ def _set_feedback(request, *, tipo, mensagem, atual=None):
 
 
 def _criar_itens_conferencia(conferencia):
-    if conferencia.itens.exists():
+    itens_relacao = getattr(conferencia, 'itens', None)
+    if itens_relacao and itens_relacao.exists():
         return
     for item_nf in conferencia.nf.itens.select_related('produto').all():
         ConferenciaItem.objects.create(
@@ -115,6 +120,29 @@ def _conferencia_finalizada(conferencia):
     if conferencia is None:
         return False
     return conferencia.status in {Conferencia.Status.OK, Conferencia.Status.CONCLUIDO_COM_RESTRICAO}
+
+
+def _setores_nf(nf):
+    itens_relacao = getattr(nf, 'itens', None)
+    itens = itens_relacao.select_related('produto').all() if itens_relacao else []
+    setores = set()
+    for item_nf in itens:
+        categoria = ((getattr(getattr(item_nf, 'produto', None), 'categoria', None) or '').strip().upper())
+        if categoria == 'FILTRO':
+            categoria = 'FILTROS'
+        if categoria:
+            setores.add(categoria)
+    return setores
+
+
+def _validar_acesso_nf_por_setor(nf, usuario):
+    if getattr(usuario, 'is_superuser', False):
+        return
+    setores_nf = _setores_nf(nf)
+    if not setores_nf:
+        return
+    if not usuario.setores.filter(nome__in=setores_nf).exists():
+        raise PermissionDenied('Usuário sem acesso ao setor')
 
 
 @transaction.atomic
@@ -166,10 +194,14 @@ def conferencia_lista_web(request):
 def aceitar_conferencia_web(request, nf_id):
     if request.method != 'POST':
         return redirect('web-conferencia-exec', nf_id=nf_id)
-    nf = get_object_or_404(
-        NotaFiscal.objects.select_related('cliente', 'rota').prefetch_related('itens__produto', 'conferencias'),
-        id=nf_id,
-    )
+    try:
+        nf = get_object_or_404(
+            NotaFiscal.objects.select_related('cliente', 'rota').prefetch_related('itens__produto', 'conferencias'),
+            id=nf_id,
+        )
+        _validar_acesso_nf_por_setor(nf, request.user)
+    except PermissionDenied as exc:
+        return HttpResponseForbidden(str(exc))
     conferencia_recente = nf.conferencias.exclude(status=Conferencia.Status.CANCELADA).order_by('-created_at').first()
     if _conferencia_finalizada(conferencia_recente):
         return HttpResponseForbidden('Conferência já finalizada.')
@@ -188,7 +220,16 @@ def aceitar_conferencia_web(request, nf_id):
 
 @require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 def conferir_nf(request, nf_id):
-    nf, conferencia, conferencia_ativa, conferencia_em_uso = _obter_conferencia_contexto(nf_id, request.user)
+    try:
+        nf, conferencia, conferencia_ativa, conferencia_em_uso = _obter_conferencia_contexto(nf_id, request.user)
+    except PermissionDenied as exc:
+        return HttpResponseForbidden(str(exc))
+
+    print(f'TAREFA ID: {nf_id}')
+    print(f'USUARIO: {request.user}')
+    print(f'SETORES USUARIO: {list(request.user.setores.values_list("nome", flat=True))}')
+    print(f'SETOR TAREFA: {sorted(_setores_nf(nf))}')
+
     conferencia_ja_finalizada = _conferencia_finalizada(conferencia)
     validacao_fluxo = avaliar_liberacao_conferencia(nf)
     if conferencia_em_uso and conferencia_em_uso.conferente_id != request.user.id:
@@ -243,7 +284,10 @@ def conferir_nf(request, nf_id):
             _set_feedback(request, tipo='erro', mensagem=str(exc))
         return redirect('web-conferencia-exec', nf_id=nf.id)
 
-    nf, conferencia, conferencia_ativa, conferencia_em_uso = _obter_conferencia_contexto(nf_id, request.user)
+    try:
+        nf, conferencia, conferencia_ativa, conferencia_em_uso = _obter_conferencia_contexto(nf_id, request.user)
+    except PermissionDenied as exc:
+        return HttpResponseForbidden(str(exc))
     item = _item_atual(conferencia_ativa or conferencia)
     return _render(
         request,

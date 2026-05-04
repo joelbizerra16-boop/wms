@@ -219,12 +219,8 @@ def _obter_tarefa_permitida(request, tarefa_id):
         if _usuario_sem_setor_operacional(request.user):
             raise PermissionDenied('Usuário sem setor vinculado. Contate o administrador.')
         tarefa = get_object_or_404(base_qs.filter(ativo=True), id=tarefa_id)
-        setores_usuario = _setores_usuario_normalizados(request.user)
-        setor_tarefa = (getattr(tarefa, 'setor', None) or '').strip().upper()
-        if setor_tarefa == 'FILTRO':
-            setor_tarefa = 'FILTROS'
-        if setores_usuario and setor_tarefa not in setores_usuario:
-            raise PermissionDenied('Tarefa não pertence ao setor do usuário.')
+        if not request.user.setores.filter(nome=tarefa.setor).exists():
+            raise PermissionDenied('Usuário sem acesso ao setor')
 
     usuario_responsavel = (tarefa.usuario_em_execucao_id or tarefa.usuario_id) == request.user.id
     tarefa_sem_responsavel = (tarefa.usuario_em_execucao_id or tarefa.usuario_id) is None
@@ -308,7 +304,9 @@ def _cabecalho_tarefa_separacao(tarefa):
 
     nfs = []
     vistos = set()
-    for item in tarefa.itens.select_related('nf', 'nf__cliente').all():
+    itens = getattr(tarefa, 'itens', None)
+    itens = itens.select_related('nf', 'nf__cliente').all() if itens else []
+    for item in itens:
         if not item.nf_id or item.nf_id in vistos:
             continue
         vistos.add(item.nf_id)
@@ -781,6 +779,12 @@ def separacao_exec_web(request, tarefa_id):
             str(exc),
         )
         return HttpResponseForbidden(str(exc))
+
+    print(f'TAREFA ID: {tarefa_id}')
+    print(f'USUARIO: {request.user}')
+    print(f'SETORES USUARIO: {list(request.user.setores.values_list("nome", flat=True))}')
+    print(f'SETOR TAREFA: {tarefa.setor}')
+
     if tarefa.status in {
         Tarefa.Status.CONCLUIDO,
         Tarefa.Status.CONCLUIDO_COM_RESTRICAO,

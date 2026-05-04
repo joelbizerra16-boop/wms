@@ -522,6 +522,14 @@ class VisibilidadePorSetorTests(TestCase):
 		self.assertContains(response, str(self.tarefa.id))
 		self.assertContains(response, str(self.tarefa_agregado.id))
 
+	def test_usuario_sem_setor_da_tarefa_recebe_403_na_execucao(self):
+		self.client.login(username='separador_setor', password='123456')
+
+		response = self.client.get(f'/separacao/{self.tarefa_agregado.id}/')
+
+		self.assertEqual(response.status_code, 403)
+		self.assertIn('Usuário sem acesso ao setor', response.content.decode('utf-8'))
+
 	def test_dashboard_resumo_separacao_consistente_com_listagem(self):
 		self.client.login(username='gestor_setor', password='123456')
 		resp_lista = self.client.get('/separacao/')
