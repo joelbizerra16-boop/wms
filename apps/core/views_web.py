@@ -812,6 +812,9 @@ def separacao_exec_web(request, tarefa_id):
                 return redirect('web-separacao-lista')
         except SeparacaoError as exc:
             messages.error(request, str(exc))
+        except Exception as exc:
+            logger.exception('Erro separacao POST: tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(request.user, 'id', None), str(exc))
+            messages.error(request, 'Erro interno. Contate o suporte.')
         return redirect('web-separacao-exec', tarefa_id=tarefa.id)
 
     try:
@@ -831,23 +834,28 @@ def separacao_exec_web(request, tarefa_id):
     }:
         messages.warning(request, 'Tarefa já finalizada e removida da fila operacional.')
         return redirect('web-separacao-lista')
-    itens_exibicao = listar_itens_tarefa_para_exibicao(tarefa)
-    return _render(
-        request,
-        'separacao_exec.html',
-        {
-            'tarefa': tarefa,
-            'itens_exibicao': itens_exibicao,
-            'item_atual': _item_atual_separacao(itens_exibicao),
-            'resumo_tarefa': _resumo_tarefa_separacao(itens_exibicao),
-            'cabecalho_tarefa': _cabecalho_tarefa_separacao(tarefa),
-            'status_finalizacao': [
-	            Tarefa.Status.CONCLUIDO,
-	            Tarefa.Status.CONCLUIDO_COM_RESTRICAO,
-	            Tarefa.Status.FECHADO_COM_RESTRICAO,
-            ],
-        },
-    )
+    try:
+        itens_exibicao = listar_itens_tarefa_para_exibicao(tarefa)
+        return _render(
+            request,
+            'separacao_exec.html',
+            {
+                'tarefa': tarefa,
+                'itens_exibicao': itens_exibicao,
+                'item_atual': _item_atual_separacao(itens_exibicao),
+                'resumo_tarefa': _resumo_tarefa_separacao(itens_exibicao),
+                'cabecalho_tarefa': _cabecalho_tarefa_separacao(tarefa),
+                'status_finalizacao': [
+	                Tarefa.Status.CONCLUIDO,
+	                Tarefa.Status.CONCLUIDO_COM_RESTRICAO,
+	                Tarefa.Status.FECHADO_COM_RESTRICAO,
+                ],
+            },
+        )
+    except Exception as exc:
+        logger.exception('Erro separacao GET: tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(request.user, 'id', None), str(exc))
+        messages.error(request, 'Erro interno. Contate o suporte.')
+        return redirect('web-separacao-lista')
 
 
 @require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
@@ -1099,7 +1107,7 @@ def rotas_web(request):
 @require_profiles(Usuario.Perfil.GESTOR)
 def usuarios_web(request):
     Setor.garantir_setores_padrao()
-    setores_disponiveis = list(Setor.objects.order_by('nome').values_list('nome', flat=True))
+    setores_disponiveis = list(Setor.objects.order_by('nome'))
 
     if request.method == 'POST':
         form = UsuarioForm(request.POST)
@@ -1176,24 +1184,30 @@ def editar_usuario_web(request, user_id):
         if senha:
             usuario.set_password(senha)
 
-        setores_selecionados = request.POST.getlist('setores')
+        setores_ids = request.POST.getlist('setores')
+        setores_map = {str(setor.id): setor for setor in Setor.objects.filter(id__in=setores_ids)}
+        setores_selecionados = [setores_map[setor_id] for setor_id in setores_ids if setor_id in setores_map]
+
         if not setores_selecionados:
-            messages.error(request, 'Selecione pelo menos um setor para o usuário.')
-            return redirect('editar_usuario', user_id=usuario.id)
-        usuario.setor = setores_selecionados[0]
+            setor_padrao, _ = Setor.objects.get_or_create(nome=Setor.Codigo.NAO_ENCONTRADO)
+            setores_selecionados = [setor_padrao]
+
+        usuario.setor = setores_selecionados[0].nome
 
         try:
             usuario.full_clean()
             usuario.save()
-            usuario.definir_setores(setores_selecionados)
+            usuario.setores.set(setores_selecionados)
             messages.success(request, 'Usuário atualizado com sucesso.')
             return redirect('web-usuarios')
         except ValidationError as exc:
             messages.error(request, '; '.join(exc.messages))
 
-    setores_usuario = set(usuario.setores.values_list('nome', flat=True))
+    setores_usuario = set(usuario.setores.values_list('id', flat=True))
     if not setores_usuario and usuario.setor:
-        setores_usuario = {usuario.setor}
+        setor_padrao = Setor.objects.filter(nome=usuario.setor).first()
+        if setor_padrao:
+            setores_usuario = {setor_padrao.id}
 
     return _render(
         request,

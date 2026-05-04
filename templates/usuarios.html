@@ -43,8 +43,8 @@
                     <div class="setores-container">
                         {% for setor in setores %}
                         <label class="setor-item">
-                            <input type="checkbox" name="setores" value="{{ setor }}">
-                            <span>{{ setor }}</span>
+                            <input type="checkbox" name="setores" value="{{ setor.id }}">
+                            <span>{{ setor.nome }}</span>
                         </label>
                         {% endfor %}
                     </div>

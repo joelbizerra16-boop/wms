@@ -262,7 +262,7 @@
         <section class="nf-strip">
             <div class="nf-item"><span>NF</span><div class="nf-box"><strong id="tarefa-nf" class="nf-destaque">{{ cabecalho_tarefa.nf_numero }}</strong></div></div>
             <div class="nf-item"><span>Cliente</span><strong id="tarefa-cliente">{{ cabecalho_tarefa.cliente_nome }}</strong></div>
-            <div class="nf-item"><span>Rota</span><strong>{{ tarefa.rota.nome }}</strong></div>
+            <div class="nf-item"><span>Rota</span><strong>{{ tarefa.rota.nome|default:"-" }}</strong></div>
             <div class="nf-item"><span>Status</span><strong id="tarefa-status" class="status-pill {% if tarefa.status == 'EM_EXECUCAO' %}warn{% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' %}ok{% else %}danger{% endif %}">{{ tarefa.status }}</strong></div>
         </section>
 

@@ -76,12 +76,12 @@ LOGGING = {
 	},
 	'root': {
 		'handlers': ['console'],
-		'level': LOG_LEVEL,
+		'level': 'ERROR',
 	},
 	'loggers': {
 		'django': {
 			'handlers': ['console'],
-			'level': LOG_LEVEL,
+			'level': 'ERROR',
 			'propagate': False,
 		},
 	},

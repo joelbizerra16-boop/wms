@@ -21,6 +21,11 @@ from apps.usuarios.session_utils import usuario_esta_logado
 class SeparacaoError(Exception):
     pass
 
+def _obter_tarefa_ou_erro(queryset, tarefa_id):
+    tarefa = queryset.filter(id=tarefa_id).first()
+    if tarefa is None:
+        raise SeparacaoError('Tarefa nao encontrada')
+    return tarefa
 
 NF_CANCELADA_ERRO = 'NF cancelada não pode ser processada'
 TAREFA_SETOR_ERRO = 'Tarefa não pertence ao setor do usuário'

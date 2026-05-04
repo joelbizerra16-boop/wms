@@ -42,7 +42,7 @@
                     <div class="setores-container">
                         {% for setor in setores %}
                         <label class="setor-item">
-                            <input type="checkbox" name="setores" value="{{ setor.nome }}" {% if setor.nome in setores_usuario %}checked{% endif %}>
+                            <input type="checkbox" name="setores" value="{{ setor.id }}" {% if setor.id in setores_usuario %}checked{% endif %}>
                             <span>{{ setor.nome }}</span>
                         </label>
                         {% endfor %}
