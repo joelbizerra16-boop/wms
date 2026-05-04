@@ -20,8 +20,8 @@ services:
       - key: DJANGO_SUPERUSER_USERNAME
         value: admin
       - key: DJANGO_SUPERUSER_EMAIL
-        value: admin@wms.local
+        value: admin@wms.com
       - key: DJANGO_SUPERUSER_PASSWORD
-        generateValue: true
+        value: 123456
       - key: LOG_LEVEL
         value: INFO
