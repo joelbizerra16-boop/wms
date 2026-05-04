@@ -44,6 +44,7 @@ DATABASES = {
 if 'postgresql' in DATABASES['default']['ENGINE']:
 	DATABASES['default'].setdefault('OPTIONS', {})
 	DATABASES['default']['OPTIONS']['sslmode'] = 'require'
+	DATABASES['default']['CONN_HEALTH_CHECKS'] = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
@@ -56,3 +57,32 @@ CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=3600, cast=int)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
+
+LOG_LEVEL = config('LOG_LEVEL', default='INFO')
+
+LOGGING = {
+	'version': 1,
+	'disable_existing_loggers': False,
+	'formatters': {
+		'verbose': {
+			'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+		},
+	},
+	'handlers': {
+		'console': {
+			'class': 'logging.StreamHandler',
+			'formatter': 'verbose',
+		},
+	},
+	'root': {
+		'handlers': ['console'],
+		'level': LOG_LEVEL,
+	},
+	'loggers': {
+		'django': {
+			'handlers': ['console'],
+			'level': LOG_LEVEL,
+			'propagate': False,
+		},
+	},
+}

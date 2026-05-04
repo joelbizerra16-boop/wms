@@ -2,7 +2,7 @@ services:
   - type: web
     name: wms
     env: python
-    buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput && python manage.py collectstatic --noinput
+    buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput && python manage.py create_render_superuser && python manage.py collectstatic --noinput
     startCommand: gunicorn config.wsgi:application
     envVars:
       - key: DJANGO_SETTINGS_MODULE
@@ -16,4 +16,12 @@ services:
       - key: DATABASE_URL
         value: postgresql://postgres.qvsfsccdvuujqxceogfz:JOELRAFA010103@aws-1-us-east-1.pooler.supabase.com:6543/postgres
       - key: SECRET_KEY
-        value: sua_chave_secreta_forte_aqui
+        generateValue: true
+      - key: DJANGO_SUPERUSER_USERNAME
+        value: admin
+      - key: DJANGO_SUPERUSER_EMAIL
+        value: admin@wms.local
+      - key: DJANGO_SUPERUSER_PASSWORD
+        generateValue: true
+      - key: LOG_LEVEL
+        value: INFO
