@@ -448,6 +448,8 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, 'inputmode="text"', html=False)
 		self.assertContains(response, 'let scannerBuffer =', html=False)
 		self.assertContains(response, 'Scanner pronto', html=False)
+		self.assertNotContains(response, 'Separado / Total', html=False)
+		self.assertNotContains(response, 'item-atual-quantidade', html=False)
 		self.assertNotContains(response, '>Finalizar<', html=False)
 		self.assertNotContains(response, '<h1>Separação</h1>', html=False)
 
@@ -528,6 +530,8 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, 'inputmode="text"', html=False)
 		self.assertContains(response, 'let scannerBuffer =', html=False)
 		self.assertContains(response, 'Scanner pronto', html=False)
+		self.assertNotContains(response, 'Conferido / Total', html=False)
+		self.assertNotContains(response, 'item-atual-quantidade', html=False)
 		self.assertContains(response, 'conferencia-feedback', html=False)
 		self.assertNotContains(response, '>Finalizar<', html=False)
 		self.assertNotContains(response, '<h1>Conferência</h1>', html=False)

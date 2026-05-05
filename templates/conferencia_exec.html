@@ -362,10 +362,6 @@
                     <span>Produto</span>
                     <div class="item-produto" id="item-atual-produto">{{ item.produto.cod_prod }}</div>
                 </div>
-                <div class="item-card">
-                    <span>Conferido / Total</span>
-                    <div class="item-quantidade" id="item-atual-quantidade">{{ item.qtd_conferida|floatformat:0 }} / {{ item.qtd_esperada|floatformat:0 }}</div>
-                </div>
             </div>
 
             <form method="post" id="form-bipagem" class="scan-form">
@@ -408,7 +404,6 @@
         const feedbackEl = document.getElementById('conferencia-feedback');
         const itemAtualProdutoEl = document.getElementById('item-atual-produto');
         const itemAtualDescricaoEl = document.getElementById('item-atual-descricao');
-        const itemAtualQuantidadeEl = document.getElementById('item-atual-quantidade');
         const progressTextEl = document.getElementById('progress-text');
         const progressPercentEl = document.getElementById('progress-percent');
         const progressFillEl = document.getElementById('progress-fill');
@@ -528,7 +523,6 @@
                 if (itemAtual) {
                     if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = itemAtual.produto || '';
                     if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = itemAtual.descricao || '';
-                    if (itemAtualQuantidadeEl) itemAtualQuantidadeEl.textContent = `${formatNumber(itemAtual.conferido)} / ${formatNumber(itemAtual.esperado)}`;
                 }
                 setScannerStatus('scanner');
             } finally {

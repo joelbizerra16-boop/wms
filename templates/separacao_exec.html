@@ -315,10 +315,6 @@
                     <span>Produto</span>
                     <div class="item-produto" id="item-atual-produto">{{ item_atual.produto }}</div>
                 </div>
-                <div class="item-card">
-                    <span>Separado / Total</span>
-                    <div class="item-quantidade" id="item-atual-quantidade">{{ item_atual.quantidade_separada|floatformat:0 }} / {{ item_atual.quantidade_total|floatformat:0 }}</div>
-                </div>
             </div>
 
             {% if tarefa.status != 'ABERTO' %}
@@ -357,7 +353,6 @@
         const scannerStatusEl = document.getElementById('scanner-status');
         const itemAtualProdutoEl = document.getElementById('item-atual-produto');
         const itemAtualDescricaoEl = document.getElementById('item-atual-descricao');
-        const itemAtualQuantidadeEl = document.getElementById('item-atual-quantidade');
         const itemAtualSetorEl = document.getElementById('item-atual-setor');
         const progressTextEl = document.getElementById('progress-text');
         const progressPercentEl = document.getElementById('progress-percent');
@@ -536,7 +531,6 @@
                 if (currentItem) {
                     if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = currentItem.produto || '';
                     if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = currentItem.descricao || '';
-                    if (itemAtualQuantidadeEl) itemAtualQuantidadeEl.textContent = `${formatNumber(currentItem.quantidade_separada)} / ${formatNumber(currentItem.quantidade_total)}`;
                     if (itemAtualSetorEl) itemAtualSetorEl.textContent = currentItem.setor || '-';
                 }
             } finally {
