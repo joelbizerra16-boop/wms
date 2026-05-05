@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
 from apps.nf.models import EntradaNF
-from apps.nf.services.xml_storage_service import ensure_entrada_xml_available
+from apps.nf.services.xml_storage_service import ensure_entrada_xml_available, has_entrada_xml_backup, store_entrada_xml_backup
 
 
 class Command(BaseCommand):
@@ -24,6 +24,7 @@ class Command(BaseCommand):
         verificadas = 0
         sincronizadas = 0
         ausentes = 0
+        backups_criados = 0
         for entrada in entradas:
             xml_name = (getattr(entrada.xml, 'name', '') or '').strip()
             if not xml_name:
@@ -38,6 +39,13 @@ class Command(BaseCommand):
             verificadas += 1
             ok = ensure_entrada_xml_available(entrada)
             if ok:
+                if not has_entrada_xml_backup(entrada):
+                    try:
+                        with entrada.xml.open('rb') as stream:
+                            if store_entrada_xml_backup(entrada, stream):
+                                backups_criados += 1
+                    except Exception:
+                        pass
                 if not exists:
                     sincronizadas += 1
                     self.stdout.write(self.style.SUCCESS(f'Entrada {entrada.id}: XML sincronizado ({xml_name}).'))
@@ -47,4 +55,5 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f'Entradas verificadas: {verificadas}'))
         self.stdout.write(self.style.SUCCESS(f'XMLs sincronizados: {sincronizadas}'))
+        self.stdout.write(self.style.SUCCESS(f'Backups persistentes criados: {backups_criados}'))
         self.stdout.write(self.style.WARNING(f'XMLs ainda ausentes: {ausentes}'))

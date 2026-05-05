@@ -32,7 +32,11 @@ from apps.nf.services.importador_xml import (
     extrair_resumo_nfe_xml,
     importar_xml_nfe,
 )
-from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, open_entrada_xml
+from apps.nf.services.xml_storage_service import (
+    XMLStorageUnavailableError,
+    open_entrada_xml,
+    store_entrada_xml_backup,
+)
 from apps.nf.services.limpeza_importacao_service import (
     LimpezaImportacaoError,
     executar_limpeza_importacao_controlada,
@@ -410,6 +414,8 @@ def importar_xml_web(request):
                                 'tipo': tipo_entrada,
                             },
                         )
+                        if created or not entrada.xml_backup_gzip:
+                            store_entrada_xml_backup(entrada, xml_file)
                         if created:
                             resultados['sucesso'] += 1
                             resultados['detalhes'].append(

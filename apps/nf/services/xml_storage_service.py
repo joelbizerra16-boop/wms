@@ -1,8 +1,9 @@
 import logging
+import gzip
 from pathlib import Path
 
 from django.conf import settings
-from django.core.files import File
+from django.core.files.base import ContentFile
 
 from apps.logs.models import Log
 
@@ -11,6 +12,39 @@ logger = logging.getLogger(__name__)
 
 class XMLStorageUnavailableError(FileNotFoundError):
     pass
+
+
+def _read_file_bytes(xml_file):
+    try:
+        xml_file.seek(0)
+    except Exception:
+        pass
+    content = xml_file.read()
+    if isinstance(content, str):
+        content = content.encode('utf-8')
+    if not isinstance(content, (bytes, bytearray)):
+        content = bytes(content or b'')
+    try:
+        xml_file.seek(0)
+    except Exception:
+        pass
+    return bytes(content)
+
+
+def has_entrada_xml_backup(entrada):
+    return bool(getattr(entrada, 'xml_backup_gzip', None))
+
+
+def store_entrada_xml_backup(entrada, xml_file, save=True):
+    content = _read_file_bytes(xml_file)
+    if not content:
+        return False
+
+    compressed = gzip.compress(content)
+    entrada.xml_backup_gzip = compressed
+    if save:
+        entrada.save(update_fields=['xml_backup_gzip', 'updated_at'])
+    return True
 
 
 def _safe_register_inconsistency(user, detail):
@@ -34,6 +68,33 @@ def _candidate_paths(xml_name):
     ]
 
 
+def _recover_xml_from_backup(entrada, user=None):
+    compressed = getattr(entrada, 'xml_backup_gzip', None)
+    if not compressed:
+        return False
+
+    try:
+        content = gzip.decompress(bytes(compressed))
+    except Exception as exc:
+        _safe_register_inconsistency(
+            user,
+            f'Backup XML invalido para entrada {entrada.id}, chave {entrada.chave_nf}: {exc}',
+        )
+        return False
+
+    xml_name = (getattr(entrada.xml, 'name', '') or '').strip()
+    if not xml_name:
+        xml_name = f'xmls/{entrada.chave_nf}.xml'
+
+    entrada.xml.save(xml_name, ContentFile(content), save=False)
+    entrada.save(update_fields=['xml', 'updated_at'])
+    _safe_register_inconsistency(
+        user,
+        f'XML da entrada {entrada.id} restaurado do backup persistente no banco.',
+    )
+    return True
+
+
 def _recover_xml_to_storage(entrada, user=None):
     xml_name = (getattr(entrada.xml, 'name', '') or '').strip()
     if not xml_name:
@@ -42,9 +103,10 @@ def _recover_xml_to_storage(entrada, user=None):
     for candidate in _candidate_paths(xml_name):
         if not candidate.exists() or not candidate.is_file():
             continue
-        with candidate.open('rb') as stream:
-            entrada.xml.save(xml_name, File(stream), save=False)
-        entrada.save(update_fields=['xml', 'updated_at'])
+        content = candidate.read_bytes()
+        entrada.xml.save(xml_name, ContentFile(content), save=False)
+        entrada.xml_backup_gzip = gzip.compress(content)
+        entrada.save(update_fields=['xml', 'xml_backup_gzip', 'updated_at'])
         _safe_register_inconsistency(
             user,
             f'XML da entrada {entrada.id} recuperado de arquivo legado local: {candidate}',
@@ -62,11 +124,20 @@ def ensure_entrada_xml_available(entrada, user=None):
 
     try:
         if entrada.xml.storage.exists(xml_name):
+            if not has_entrada_xml_backup(entrada):
+                try:
+                    with entrada.xml.open('rb') as stream:
+                        store_entrada_xml_backup(entrada, stream)
+                except Exception:
+                    logger.exception('Falha ao registrar backup persistente do XML da entrada %s.', entrada.id)
             return True
     except Exception as exc:
         detail = f'Falha ao consultar storage do XML da entrada {entrada.id} ({xml_name}): {exc}'
         _safe_register_inconsistency(user, detail)
         return False
+
+    if _recover_xml_from_backup(entrada, user=user):
+        return True
 
     if _recover_xml_to_storage(entrada, user=user):
         return True

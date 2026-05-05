@@ -10,6 +10,7 @@ class HealthCheckTests(SimpleTestCase):
 
 
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -968,6 +969,36 @@ class LimpezaImportacaoWebTests(TestCase):
 		self.assertTrue(Log.objects.filter(usuario=self.admin, acao='XML STORAGE INCONSISTENTE').exists())
 		self.assertTrue(Log.objects.filter(usuario=self.admin, acao='LIBERACAO ENTRADA SEM XML').exists())
 		self.assertContains(response, 'liberada sem o arquivo XML', html=False)
+
+	def test_importacao_persiste_backup_do_xml_e_restabelece_arquivo_na_liberacao(self):
+		self.client.login(username='admin_limpeza', password='123456')
+		xml_path = Path(__file__).resolve().parents[2] / 'xmls' / 'xml_autorizado.xml'
+		arquivo = SimpleUploadedFile(
+			xml_path.name,
+			xml_path.read_bytes(),
+			content_type='text/xml',
+		)
+
+		response_importacao = self.client.post('/importar/', {'xml_files': [arquivo]}, follow=True)
+
+		self.assertEqual(response_importacao.status_code, 200)
+		entrada = EntradaNF.objects.get(chave_nf='35111111111111111111550010000000011000000010')
+		self.assertTrue(entrada.xml_backup_gzip)
+		self.assertEqual(entrada.status, EntradaNF.Status.AGUARDANDO)
+		xml_name = entrada.xml.name
+		entrada.xml.delete(save=False)
+		self.assertFalse(entrada.xml.storage.exists(xml_name))
+
+		response_liberacao = self.client.post(f'/importar/fila/{entrada.id}/liberar/', follow=True)
+
+		self.assertEqual(response_liberacao.status_code, 200)
+		entrada.refresh_from_db()
+		self.assertEqual(entrada.status, EntradaNF.Status.LIBERADO)
+		self.assertTrue(entrada.xml.storage.exists(entrada.xml.name))
+		self.assertTrue(NotaFiscal.objects.filter(chave_nfe=entrada.chave_nf).exists())
+		self.assertTrue(
+			Log.objects.filter(usuario=self.admin, acao='XML STORAGE INCONSISTENTE', detalhe__icontains='backup persistente').exists()
+		)
 
 	def test_bloqueia_limpeza_sem_base_maior_que_60_dias(self):
 		self.client.login(username='admin_limpeza', password='123456')

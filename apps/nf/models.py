@@ -108,6 +108,7 @@ class EntradaNF(BaseModel):
 	chave_nf = models.CharField(max_length=44, unique=True, db_index=True, verbose_name='chave NF')
 	numero_nf = models.CharField(max_length=20, blank=True, default='', db_index=True, verbose_name='numero NF')
 	xml = models.FileField(upload_to='xmls/', verbose_name='arquivo XML')
+	xml_backup_gzip = models.BinaryField(null=True, blank=True, editable=False, verbose_name='backup XML compactado')
 	status = models.CharField(max_length=20, choices=Status.choices, default=Status.AGUARDANDO, db_index=True)
 	tipo = models.CharField(max_length=20, choices=Tipo.choices, default=Tipo.NORMAL, db_index=True)
 	data_importacao = models.DateTimeField(auto_now_add=True, db_index=True)
