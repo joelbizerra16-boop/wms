@@ -116,6 +116,36 @@
         .feedback.ok { background: #dcfce7; border-color: #bbf7d0; color: #166534; }
         .feedback.warn { background: #fef3c7; border-color: #fde68a; color: #92400e; }
         .feedback.error { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+        .scanner-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-size: 0.84rem;
+            font-weight: 700;
+        }
+        .scanner-status::before {
+            content: '';
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: currentColor;
+        }
+        .scanner-status.manual {
+            border-color: #fcd34d;
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .scanner-status.offline {
+            border-color: #fecaca;
+            background: #fef2f2;
+            color: #b91c1c;
+        }
 
         .op-panel {
             background: var(--card);
@@ -276,6 +306,7 @@
         {% endif %}
 
         <div id="separacao-feedback" class="feedback" style="display:none;"></div>
+        <div id="scanner-status" class="scanner-status">Scanner pronto</div>
 
         <section class="op-panel">
             {% if item_atual %}
@@ -302,7 +333,7 @@
                 {% csrf_token %}
                 <input type="hidden" name="acao" value="bipar">
                 <label for="codigo">Bipagem</label>
-                <input id="codigo" name="codigo" type="text" class="scan-input" autofocus placeholder="BIPAR CODIGO" autocomplete="off" {% if tarefa.status == 'ABERTO' %}disabled{% endif %}>
+                <input id="codigo" name="codigo" type="text" class="scan-input" placeholder="BIPAR CODIGO" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="done" {% if tarefa.status == 'ABERTO' %}disabled{% endif %}>
             </form>
             {% else %}
             <div class="feedback warn">Sem itens pendentes para esta tarefa.</div>
@@ -341,7 +372,7 @@
             </div>
 
             <div class="restricao-field">
-                <input id="motivo_restricao" name="motivo_restricao" type="text" form="form-restricao-finalizacao" placeholder="Motivo da restrição (quando houver)">
+                <input id="motivo_restricao" name="motivo_restricao" type="text" form="form-restricao-finalizacao" placeholder="Motivo da restrição (quando houver)" inputmode="none" autocomplete="off">
             </div>
         </section>
     </main>
@@ -356,6 +387,7 @@
         const codigoInput = document.getElementById('codigo');
         const statusEl = document.getElementById('tarefa-status');
         const feedbackEl = document.getElementById('separacao-feedback');
+        const scannerStatusEl = document.getElementById('scanner-status');
         const itemAtualProdutoEl = document.getElementById('item-atual-produto');
         const itemAtualDescricaoEl = document.getElementById('item-atual-descricao');
         const itemAtualQuantidadeEl = document.getElementById('item-atual-quantidade');
@@ -364,6 +396,9 @@
         const progressPercentEl = document.getElementById('progress-percent');
         const progressFillEl = document.getElementById('progress-fill');
         let redirecionandoConclusao = false;
+        let scannerBuffer = '';
+        let scannerTimer = null;
+        const scannerTimeoutMs = 120;
 
         function getCookie(name) {
             const value = `; ${document.cookie}`;
@@ -386,6 +421,21 @@
             feedbackEl.className = `feedback ${type === 'erro' ? 'error' : 'ok'}`;
             feedbackEl.textContent = message;
         }
+        function setScannerStatus(mode) {
+            if (!scannerStatusEl) return;
+            scannerStatusEl.classList.remove('manual', 'offline');
+            if (mode === 'manual') {
+                scannerStatusEl.classList.add('manual');
+                scannerStatusEl.textContent = 'Digitacao manual ativa';
+                return;
+            }
+            if (mode === 'offline') {
+                scannerStatusEl.classList.add('offline');
+                scannerStatusEl.textContent = 'Scanner indisponivel';
+                return;
+            }
+            scannerStatusEl.textContent = 'Scanner pronto';
+        }
         function updateProgress(separado, total) {
             const s = Number(separado || 0);
             const t = Number(total || 0);
@@ -396,15 +446,76 @@
         }
         function isDone(status) { return status === 'SEPARADO'; }
         function tarefaConcluida(status) { return status === 'CONCLUIDO' || status === 'CONCLUIDO_COM_RESTRICAO'; }
-        function focusInput() {
-            if (!codigoInput || codigoInput.disabled) return;
-            codigoInput.focus();
-            codigoInput.select();
+        function scannerPronto() {
+            return Boolean(form && codigoInput && !codigoInput.disabled);
+        }
+        function isEditableElement(element) {
+            if (!element) return false;
+            const tagName = (element.tagName || '').toUpperCase();
+            return element.isContentEditable || tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+        }
+        function clearScannerBuffer() {
+            scannerBuffer = '';
+            if (scannerTimer) {
+                clearTimeout(scannerTimer);
+                scannerTimer = null;
+            }
+        }
+        function scheduleScannerTimeout() {
+            if (scannerTimer) clearTimeout(scannerTimer);
+            scannerTimer = setTimeout(clearScannerBuffer, scannerTimeoutMs);
+        }
+        async function processarCodigo(codigo, origem) {
+            if (!scannerPronto()) return;
+            const valor = (codigo || '').trim();
+            if (!valor) {
+                setFeedback('Informe o código para bipagem.', 'erro');
+                if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
+                return;
+            }
+
+            codigoInput.value = valor;
+            if (origem === 'scanner' && document.activeElement !== codigoInput) {
+                codigoInput.blur();
+            }
+
+            try {
+                const response = await fetch('/api/separacao/bipar/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify({ tarefa_id: tarefaId, codigo: valor }),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.mensagem || data.erro || 'Falha na bipagem.');
+                if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
+
+                if (tarefaConcluida(data.status_tarefa)) {
+                    setFeedback('Separação concluída com sucesso.', 'ok');
+                    if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
+                    bloquearBipagem();
+                    redirecionandoConclusao = true;
+                    setTimeout(function () { window.location.href = "{% url 'web-separacao-lista' %}"; }, 800);
+                    return;
+                }
+
+                setFeedback(`Item separado: ${formatNumber(data.separado)} / ${formatNumber(data.esperado)}`, 'ok');
+                codigoInput.value = '';
+                await refreshTaskStatus();
+            } catch (error) {
+                setFeedback(error.message, 'erro');
+                if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
+            }
         }
         function bloquearBipagem() {
             if (!codigoInput) return;
             codigoInput.disabled = true;
             codigoInput.placeholder = 'Separacao finalizada';
+            clearScannerBuffer();
+            setScannerStatus('offline');
         }
 
         async function refreshTaskStatus() {
@@ -415,6 +526,8 @@
             if (tarefaConcluida(data.status)) {
                 bloquearBipagem();
                 if (redirecionandoConclusao) return;
+            } else {
+                setScannerStatus('scanner');
             }
 
             let totalEsperado = 0;
@@ -432,52 +545,60 @@
                 if (itemAtualQuantidadeEl) itemAtualQuantidadeEl.textContent = `${formatNumber(currentItem.quantidade_separada)} / ${formatNumber(currentItem.quantidade_total)}`;
                 if (itemAtualSetorEl) itemAtualSetorEl.textContent = currentItem.setor || '-';
             }
-            focusInput();
         }
 
         if (form) {
             form.addEventListener('submit', async function (event) {
                 event.preventDefault();
-                const codigo = (codigoInput.value || '').trim();
-                if (!codigo) {
-                    setFeedback('Informe o código para bipagem.', 'erro');
-                    if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
-                    focusInput();
-                    return;
-                }
-                try {
-                    const response = await fetch('/api/separacao/bipar/', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': getCookie('csrftoken'),
-                            'X-Requested-With': 'XMLHttpRequest',
-                        },
-                        body: JSON.stringify({ tarefa_id: tarefaId, codigo: codigo }),
-                    });
-                    const data = await response.json();
-                    if (!response.ok) throw new Error(data.mensagem || data.erro || 'Falha na bipagem.');
-                    if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
-
-                    if (tarefaConcluida(data.status_tarefa)) {
-                        setFeedback('Separação concluída com sucesso.', 'ok');
-                        if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
-                        bloquearBipagem();
-                        redirecionandoConclusao = true;
-                        setTimeout(function () { window.location.href = "{% url 'web-separacao-lista' %}"; }, 800);
-                        return;
-                    }
-
-                    setFeedback(`Item separado: ${formatNumber(data.separado)} / ${formatNumber(data.esperado)}`, 'ok');
-                    codigoInput.value = '';
-                    await refreshTaskStatus();
-                } catch (error) {
-                    setFeedback(error.message, 'erro');
-                    if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
-                    focusInput();
-                }
+                setScannerStatus('manual');
+                await processarCodigo(codigoInput.value, 'manual');
             });
         }
+
+        if (codigoInput) {
+            codigoInput.addEventListener('focus', function () {
+                setScannerStatus('manual');
+            });
+            codigoInput.addEventListener('blur', function () {
+                if (!codigoInput.disabled) setScannerStatus('scanner');
+            });
+        }
+
+        document.addEventListener('keydown', function (event) {
+            if (!scannerPronto()) return;
+            if (event.ctrlKey || event.altKey || event.metaKey) return;
+
+            const activeElement = document.activeElement;
+            const manualNoCampo = activeElement === codigoInput;
+            const outroCampoEditavel = isEditableElement(activeElement) && !manualNoCampo;
+            if (outroCampoEditavel) return;
+
+            if (event.key === 'Enter') {
+                if (manualNoCampo) return;
+                if (!scannerBuffer) return;
+                event.preventDefault();
+                const codigoLido = scannerBuffer;
+                clearScannerBuffer();
+                setScannerStatus('scanner');
+                processarCodigo(codigoLido, 'scanner');
+                return;
+            }
+
+            if (manualNoCampo) return;
+            if (event.key.length !== 1) return;
+
+            scannerBuffer += event.key;
+            scheduleScannerTimeout();
+            event.preventDefault();
+        });
+
+        document.addEventListener('pointerdown', function (event) {
+            if (!codigoInput) return;
+            if (event.target === codigoInput) return;
+            if (document.activeElement === codigoInput) {
+                codigoInput.blur();
+            }
+        });
 
         postForms.forEach(function (postForm) {
             if (postForm.id === 'bipagem-separacao-form') return;
@@ -491,9 +612,9 @@
         });
 
         updateProgress({{ resumo_tarefa.separado|default:0 }}, {{ resumo_tarefa.total|default:0 }});
+        if (!scannerPronto()) setScannerStatus('offline');
         refreshTaskStatus().catch(function () {});
         setInterval(function () { refreshTaskStatus().catch(function () {}); }, 3000);
-        focusInput();
     })();
     </script>
 </body>

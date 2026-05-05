@@ -426,12 +426,21 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(payload['em_conferencia'], 1)
 
 	def test_tela_separacao_contém_script_de_polling(self):
+		self.tarefa.status = Tarefa.Status.EM_EXECUCAO
+		self.tarefa.usuario = self.usuario
+		self.tarefa.usuario_em_execucao = self.usuario
+		self.tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
+
 		response = self.client.get(f'/separacao/{self.tarefa.id}/')
 
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, '/api/tarefa-status/')
 		self.assertContains(response, '/api/separacao/bipar/')
 		self.assertContains(response, 'setInterval')
+		self.assertNotContains(response, 'autofocus')
+		self.assertContains(response, 'inputmode="text"', html=False)
+		self.assertContains(response, 'let scannerBuffer =', html=False)
+		self.assertContains(response, 'Scanner pronto', html=False)
 
 	def test_tela_separacao_nao_permite_fechamento_com_restricao_no_fluxo_operacional(self):
 		self.tarefa.status = Tarefa.Status.EM_EXECUCAO
@@ -480,6 +489,10 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, '1 / 3')
 
 	def test_tela_conferencia_contém_script_de_polling(self):
+		TarefaItem.objects.filter(tarefa=self.tarefa).update(quantidade_separada=F('quantidade_total'))
+		self.tarefa.status = Tarefa.Status.CONCLUIDO
+		self.tarefa.save(update_fields=['status', 'updated_at'])
+
 		response = self.client.get(f'/conferencia/{self.nf.id}/')
 
 		self.assertEqual(response.status_code, 200)
@@ -487,6 +500,10 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, '/api/status/nf/${nfId}/')
 		self.assertContains(response, '/api/conferencia/bipar/')
 		self.assertContains(response, 'setInterval')
+		self.assertNotContains(response, 'autofocus')
+		self.assertContains(response, 'inputmode="text"', html=False)
+		self.assertContains(response, 'let scannerBuffer =', html=False)
+		self.assertContains(response, 'Scanner pronto', html=False)
 
 
 @override_settings(ROOT_URLCONF='config.urls')
