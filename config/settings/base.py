@@ -26,6 +26,7 @@ DJANGO_APPS = [
 
 THIRD_PARTY_APPS = [
     'corsheaders',
+    'storages',
     'rest_framework',
     'rest_framework.authtoken',
     'django_filters',
@@ -114,6 +115,15 @@ WHITENOISE_MAX_AGE = config('WHITENOISE_MAX_AGE', default=31536000, cast=int)
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': STATICFILES_STORAGE,
+    },
+}
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

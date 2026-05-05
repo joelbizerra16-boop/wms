@@ -296,9 +296,9 @@ class SeparacaoRealAPITests(TestCase):
         )
 
         self.assertEqual(response_sem_motivo.status_code, 400)
-        self.assertEqual(response_sem_motivo.data, {'erro': 'Motivo da restricao e obrigatorio'})
-        self.assertEqual(response_com_motivo.status_code, 200)
-        self.assertEqual(response_com_motivo.data['status'], Tarefa.Status.FECHADO_COM_RESTRICAO)
+        self.assertIn('nao envia para conferencia', response_sem_motivo.data['erro'])
+        self.assertEqual(response_com_motivo.status_code, 400)
+        self.assertIn('nao envia para conferencia', response_com_motivo.data['erro'])
 
     def test_item_com_restricao_bloqueia_nf_inteira(self):
         self._autenticar(self.usuario_ne)
@@ -314,10 +314,11 @@ class SeparacaoRealAPITests(TestCase):
             format='json',
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
+        self.tarefa_rota_ne.refresh_from_db()
         self.nf.refresh_from_db()
-        self.assertEqual(self.nf.status, NotaFiscal.Status.BLOQUEADA_COM_RESTRICAO)
-        self.assertTrue(self.nf.bloqueada)
+        self.assertEqual(self.tarefa_rota_ne.status, Tarefa.Status.EM_EXECUCAO)
+        self.assertNotEqual(self.nf.status, NotaFiscal.Status.BLOQUEADA_COM_RESTRICAO)
 
     def test_tarefa_liberada_permita_concluir_com_pendencia(self):
         self._autenticar(self.usuario_ne)

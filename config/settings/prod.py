@@ -50,6 +50,24 @@ STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+USE_S3_MEDIA_STORAGE = config('USE_S3_MEDIA_STORAGE', default=False, cast=bool)
+if USE_S3_MEDIA_STORAGE:
+	AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
+	AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
+	AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL')
+	AWS_S3_ADDRESSING_STYLE = config('AWS_S3_ADDRESSING_STYLE', default='path')
+	AWS_S3_SIGNATURE_VERSION = config('AWS_S3_SIGNATURE_VERSION', default='s3v4')
+	AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+	AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+	AWS_DEFAULT_ACL = None
+	AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default=True, cast=bool)
+	AWS_S3_FILE_OVERWRITE = False
+	AWS_LOCATION = config('AWS_LOCATION', default='media')
+	STORAGES['default'] = {
+		'BACKEND': 'apps.core.storage_backends.MediaS3Storage',
+	}
+	DEFAULT_FILE_STORAGE = 'apps.core.storage_backends.MediaS3Storage'
+
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True

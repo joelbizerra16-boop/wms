@@ -32,6 +32,7 @@ from apps.nf.services.importador_xml import (
     extrair_resumo_nfe_xml,
     importar_xml_nfe,
 )
+from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, open_entrada_xml
 from apps.nf.services.limpeza_importacao_service import (
     LimpezaImportacaoError,
     executar_limpeza_importacao_controlada,
@@ -49,6 +50,7 @@ from apps.tarefas.services.separacao_service import (
     listar_itens_tarefa_para_exibicao_seguro,
     listar_tarefas_disponiveis,
 )
+from apps.tarefas.separacao_views import OPERACIONAL_STATUS_BLOQUEADO, OPERACIONAL_STATUS_BLOQUEADO_ERRO
 from apps.core.nf_utils import resolve_nf_numero
 from apps.core.services.cadastro_import_service import importar_clientes_arquivo, importar_produtos_arquivo, importar_rotas_arquivo
 from apps.usuarios.access import build_access_context, require_profiles
@@ -660,7 +662,7 @@ def confirmar_scan_entradas_web(request):
     for entrada in entradas:
         data_emissao = None
         try:
-            with entrada.xml.open('rb') as arquivo_xml:
+            with open_entrada_xml(entrada, user=request.user) as arquivo_xml:
                 documento = analisar_xml_nfe(arquivo_xml)
                 data_emissao = documento.data_emissao
         except Exception:
@@ -680,7 +682,7 @@ def confirmar_scan_entradas_web(request):
         if entrada.status != EntradaNF.Status.AGUARDANDO:
             continue
         try:
-            with entrada.xml.open('rb') as arquivo_xml:
+            with open_entrada_xml(entrada, user=request.user) as arquivo_xml:
                 resultado = importar_xml_nfe(
                     arquivo_xml,
                     usuario=request.user,
@@ -701,6 +703,9 @@ def confirmar_scan_entradas_web(request):
         except ImportacaoXMLError:
             entrada.status = EntradaNF.Status.PROCESSADO
             entrada.save(update_fields=['status', 'updated_at'])
+            erros += 1
+        except XMLStorageUnavailableError as exc:
+            logger.error('Falha ao abrir XML da entrada %s durante confirmacao em lote: %s', entrada.id, str(exc))
             erros += 1
         except Exception:
             erros += 1
@@ -728,7 +733,7 @@ def liberar_entrada_nf_web(request, entrada_id):
         return redirect('web-fila-entradas-nf')
 
     try:
-        with entrada.xml.open('rb') as arquivo_xml:
+        with open_entrada_xml(entrada, user=request.user) as arquivo_xml:
             resultado = importar_xml_nfe(
                 arquivo_xml,
                 usuario=request.user,
@@ -741,6 +746,8 @@ def liberar_entrada_nf_web(request, entrada_id):
             request,
             f"Entrada {entrada.chave_nf} liberada com sucesso ({resultado.get('mensagem', 'processada')}).",
         )
+    except XMLStorageUnavailableError as exc:
+        messages.error(request, f'XML indisponível para a entrada {entrada.chave_nf}: {str(exc)}')
     except ImportacaoXMLError as exc:
         messages.error(request, f'Falha ao liberar entrada {entrada.chave_nf}: {str(exc)}')
     except IntegrityError:
@@ -813,8 +820,11 @@ def separacao_exec_web(request, tarefa_id):
                     messages.success(request, 'Bipagem registrada com sucesso.')
             elif acao == 'finalizar':
                 status_final = request.POST.get('status_final') or Tarefa.Status.CONCLUIDO
-                finalizar_tarefa(tarefa.id, status_final, request.user, request.POST.get('motivo_restricao'))
-                messages.success(request, 'Tarefa finalizada.')
+                if status_final == OPERACIONAL_STATUS_BLOQUEADO:
+                    messages.error(request, OPERACIONAL_STATUS_BLOQUEADO_ERRO)
+                else:
+                    finalizar_tarefa(tarefa.id, status_final, request.user, request.POST.get('motivo_restricao'))
+                    messages.success(request, 'Tarefa finalizada.')
             elif acao == 'continuar_depois':
                 liberar_execucao_tarefa(tarefa.id, request.user)
                 messages.warning(request, 'Tarefa mantida para continuar depois.')

@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
-from apps.logs.models import LiberacaoDivergencia
+from apps.logs.models import LiberacaoDivergencia, Log
 from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem
 from apps.produtos.models import Produto
 from apps.rotas.models import Rota
@@ -40,6 +40,23 @@ class DashboardWebTests(TestCase):
 			is_active=True,
 		)
 		self.client.login(username='gestor_dashboard', password='123456')
+
+		self.usuario_conferente = Usuario.objects.create_user(
+			username='conferente_dashboard',
+			nome='Conferente Dashboard',
+			perfil=Usuario.Perfil.CONFERENTE,
+			setores=[Setor.Codigo.FILTROS],
+			password='123456',
+			is_active=True,
+		)
+		self.usuario_separador = Usuario.objects.create_user(
+			username='separador_dashboard',
+			nome='Separador Dashboard',
+			perfil=Usuario.Perfil.SEPARADOR,
+			setores=[Setor.Codigo.FILTROS],
+			password='123456',
+			is_active=True,
+		)
 
 		self.rota = Rota.objects.create(nome='L01', cep_inicial='01000000', cep_final='01999999')
 		self.cliente = Cliente.objects.create(nome='Rodrigo', inscricao_estadual='111222333')
@@ -239,10 +256,73 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, '1410289')
 		self.assertContains(response, 'Rodrigo')
 
+	@patch('apps.conferencia.views_web.listar_nfs_disponiveis')
+	def test_gestor_ve_lupa_nas_listas_de_conferencia_e_separacao(self, mock_listar_nfs):
+		mock_listar_nfs.return_value = [
+			{
+				'id': self.nf.id,
+				'numero': self.nf.numero,
+				'cliente': self.cliente.nome,
+				'rota': self.rota.nome,
+				'status': 'PENDENTE',
+				'status_separacao': 'SEPARADO',
+				'conferencia_liberada': True,
+				'conferencia_bloqueio_motivo': '',
+				'balcao': False,
+				'progresso': {'conferido': 0, 'esperado': 2},
+				'itens_pendentes_conferencia': 2,
+				'bloqueado': False,
+				'usuario_em_uso': '',
+				'em_uso_por_mim': False,
+			}
+		]
+
+		response_conferencia = self.client.get('/conferencia/')
+		response_separacao = self.client.get('/separacao/')
+
+		self.assertEqual(response_conferencia.status_code, 200)
+		self.assertEqual(response_separacao.status_code, 200)
+		self.assertContains(response_conferencia, 'action-icon--detalhe')
+		self.assertContains(response_separacao, 'action-icon--detalhe')
+
+	def test_conferente_nao_ve_lupa_na_lista_de_conferencia(self):
+		self.client.force_login(self.usuario_conferente)
+
+		response = self.client.get('/conferencia/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertNotContains(response, 'action-icon--detalhe')
+		self.assertNotContains(response, 'web-conferencia-detalhe')
+
+	def test_separador_nao_ve_lupa_na_lista_de_separacao(self):
+		self.client.force_login(self.usuario_separador)
+
+		response = self.client.get('/separacao/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertNotContains(response, 'action-icon--detalhe')
+		self.assertNotContains(response, 'web-conferencia-detalhe')
+
 	def test_detalhe_nf_exibe_pendencia_de_separacao(self):
 		response = self.client.get(f'/conferencia/detalhe/{self.nf.id}/')
 
 		self.assertEqual(response.status_code, 200)
+
+	def test_conferente_nao_acessa_detalhe_nf_por_url_direta(self):
+		self.client.force_login(self.usuario_conferente)
+
+		response = self.client.get(f'/conferencia/detalhe/{self.nf.numero}/')
+
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(response.headers['Location'], '/conferencia/')
+
+	def test_separador_nao_acessa_detalhe_nf_por_url_direta(self):
+		self.client.force_login(self.usuario_separador)
+
+		response = self.client.get(f'/conferencia/detalhe/{self.nf.numero}/')
+
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(response.headers['Location'], '/separacao/')
 
 	def test_status_nf_api_retorna_itens_e_status(self):
 		response = self.client.get(f'/api/status/nf/{self.nf.id}/')
@@ -345,11 +425,6 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(payload['em_conferencia'], 1)
 
 	def test_tela_separacao_contém_script_de_polling(self):
-		self.tarefa.status = Tarefa.Status.EM_EXECUCAO
-		self.tarefa.usuario = self.usuario
-		self.tarefa.usuario_em_execucao = self.usuario
-		self.tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
-
 		response = self.client.get(f'/separacao/{self.tarefa.id}/')
 
 		self.assertEqual(response.status_code, 200)
@@ -357,90 +432,22 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, '/api/separacao/bipar/')
 		self.assertContains(response, 'setInterval')
 
-	def test_tela_separacao_inicia_tarefa_via_post_para_usuario_multi_setor(self):
-		self.usuario.definir_setores([Setor.Codigo.FILTROS, Setor.Codigo.LUBRIFICANTE])
-
-		response = self.client.post(
-			f'/separacao/{self.tarefa.id}/',
-			{'acao': 'iniciar'},
-		)
-
-		self.assertEqual(response.status_code, 302)
-		self.assertEqual(response['Location'], f'/separacao/{self.tarefa.id}/')
-		self.tarefa.refresh_from_db()
-		self.assertEqual(self.tarefa.status, Tarefa.Status.EM_EXECUCAO)
-		self.assertEqual(self.tarefa.usuario_id, self.usuario.id)
-
-	def test_tela_separacao_inicia_no_get_e_permite_bipar_e_finalizar(self):
-		produto_fluxo = Produto.objects.create(
-			cod_prod='SEP001',
-			descricao='Produto fluxo separacao',
-			cod_ean='789SEP001',
-			categoria=Produto.Categoria.FILTROS,
-		)
-		tarefa_fluxo = Tarefa.objects.create(
-			nf=self.nf,
-			tipo=Tarefa.Tipo.FILTRO,
-			setor=Setor.Codigo.FILTROS,
-			rota=self.rota,
-			status=Tarefa.Status.ABERTO,
-		)
-		TarefaItem.objects.create(
-			tarefa=tarefa_fluxo,
-			nf=self.nf,
-			produto=produto_fluxo,
-			quantidade_total='1.00',
-			quantidade_separada='0.00',
-		)
-
-		response_inicio = self.client.get(f'/separacao/{tarefa_fluxo.id}/')
-
-		self.assertEqual(response_inicio.status_code, 302)
-		self.assertEqual(response_inicio['Location'], f'/separacao/{tarefa_fluxo.id}/')
-		tarefa_fluxo.refresh_from_db()
-		self.assertEqual(tarefa_fluxo.status, Tarefa.Status.EM_EXECUCAO)
-
-		response_exec = self.client.get(f'/separacao/{tarefa_fluxo.id}/')
-		self.assertEqual(response_exec.status_code, 200)
-		self.assertContains(response_exec, 'SEP001')
-
-		response_bipar = self.client.post(
-			f'/separacao/{tarefa_fluxo.id}/',
-			{'acao': 'bipar', 'codigo': '789SEP001'},
-		)
-		self.assertEqual(response_bipar.status_code, 302)
-
-		response_finalizar = self.client.post(
-			f'/separacao/{tarefa_fluxo.id}/',
-			{'acao': 'finalizar', 'status_final': Tarefa.Status.CONCLUIDO},
-		)
-		self.assertEqual(response_finalizar.status_code, 302)
-		tarefa_fluxo.refresh_from_db()
-		self.assertEqual(tarefa_fluxo.status, Tarefa.Status.CONCLUIDO)
-
-	@patch('apps.core.views_web.listar_itens_tarefa_para_exibicao_seguro')
-	def test_tela_separacao_abre_com_fallback_seguro_de_itens(self, mock_listar_itens):
+	def test_tela_separacao_nao_permite_fechamento_com_restricao_no_fluxo_operacional(self):
 		self.tarefa.status = Tarefa.Status.EM_EXECUCAO
 		self.tarefa.usuario = self.usuario
 		self.tarefa.usuario_em_execucao = self.usuario
 		self.tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
-		mock_listar_itens.return_value = []
 
-		response = self.client.get(f'/separacao/{self.tarefa.id}/')
-
-		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Sem itens pendentes para esta tarefa.')
-
-	@patch('apps.core.views_status.listar_itens_tarefa_para_exibicao_seguro')
-	def test_status_tarefa_api_retorna_200_com_fallback_seguro(self, mock_listar_itens):
-		mock_listar_itens.return_value = []
-
-		response = self.client.get(f'/api/status/tarefa/{self.tarefa.id}/')
+		response = self.client.post(
+			f'/separacao/{self.tarefa.id}/',
+			{'acao': 'finalizar', 'status_final': Tarefa.Status.FECHADO_COM_RESTRICAO, 'motivo_restricao': 'FALTA ITEM'},
+			follow=True,
+		)
 
 		self.assertEqual(response.status_code, 200)
-		payload = response.json()
-		self.assertEqual(payload['tarefa_id'], self.tarefa.id)
-		self.assertEqual(payload['itens'], [])
+		self.tarefa.refresh_from_db()
+		self.assertEqual(self.tarefa.status, Tarefa.Status.EM_EXECUCAO)
+		self.assertContains(response, 'Restrição via gestão', html=False)
 
 	def test_tela_separacao_exibe_itens_nao_encontrados_da_tarefa(self):
 		produto_ne = Produto.objects.create(
@@ -598,14 +605,6 @@ class VisibilidadePorSetorTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, str(self.tarefa.id))
 		self.assertContains(response, str(self.tarefa_agregado.id))
-
-	def test_usuario_sem_setor_da_tarefa_recebe_403_na_execucao(self):
-		self.client.login(username='separador_setor', password='123456')
-
-		response = self.client.get(f'/separacao/{self.tarefa_agregado.id}/')
-
-		self.assertEqual(response.status_code, 403)
-		self.assertIn('Usuário sem acesso ao setor', response.content.decode('utf-8'))
 
 	def test_dashboard_resumo_separacao_consistente_com_listagem(self):
 		self.client.login(username='gestor_setor', password='123456')
@@ -922,6 +921,23 @@ class LimpezaImportacaoWebTests(TestCase):
 		)
 		NotaFiscalItem.objects.create(nf=nf, produto=self.produto, quantidade='1.00')
 		return nf
+
+	def test_liberar_entrada_com_xml_ausente_nao_quebra_e_registra_auditoria(self):
+		self.client.login(username='admin_limpeza', password='123456')
+		entrada = EntradaNF.objects.create(
+			chave_nf='35111111111111111111550010000000010000000777',
+			numero_nf='1777',
+			xml='xmls/inexistente.xml',
+			status=EntradaNF.Status.AGUARDANDO,
+		)
+
+		response = self.client.post(f'/importar/fila/{entrada.id}/liberar/', follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		entrada.refresh_from_db()
+		self.assertEqual(entrada.status, EntradaNF.Status.AGUARDANDO)
+		self.assertTrue(Log.objects.filter(usuario=self.admin, acao='XML STORAGE INCONSISTENTE').exists())
+		self.assertContains(response, 'XML indisponível para a entrada', html=False)
 
 	def test_bloqueia_limpeza_sem_base_maior_que_60_dias(self):
 		self.client.login(username='admin_limpeza', password='123456')

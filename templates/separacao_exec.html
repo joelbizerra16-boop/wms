@@ -323,12 +323,16 @@
                     <input type="hidden" name="status_final" value="CONCLUIDO">
                     <button class="btn-op finalizar" type="submit">Finalizar</button>
                 </form>
+                {% if tarefa.status == 'LIBERADO_COM_RESTRICAO' %}
                 <form method="post" id="form-restricao-finalizacao">
                     {% csrf_token %}
                     <input type="hidden" name="acao" value="finalizar">
-                    <input type="hidden" name="status_final" value="{% if tarefa.status == 'LIBERADO_COM_RESTRICAO' %}CONCLUIDO_COM_RESTRICAO{% else %}FECHADO_COM_RESTRICAO{% endif %}">
-                    <button class="btn-op restricao" type="submit">Restrição</button>
+                    <input type="hidden" name="status_final" value="CONCLUIDO_COM_RESTRICAO">
+                    <button class="btn-op restricao" type="submit">Concluir c/ restrição</button>
                 </form>
+                {% else %}
+                <button class="btn-op restricao" type="button" disabled title="Fluxo com restrição exige liberação da gestão.">Restrição via gestão</button>
+                {% endif %}
                 <form method="post">
                     {% csrf_token %}
                     <input type="hidden" name="acao" value="continuar_depois">

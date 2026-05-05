@@ -14,6 +14,13 @@ from apps.usuarios.access import PerfilPermitido
 from apps.usuarios.models import Usuario
 
 
+OPERACIONAL_STATUS_BLOQUEADO = 'FECHADO_COM_RESTRICAO'
+OPERACIONAL_STATUS_BLOQUEADO_ERRO = (
+    'FECHADO_COM_RESTRICAO bloqueia a NF e nao envia para conferencia. '
+    'Conclua a separacao ou solicite liberacao da gestao.'
+)
+
+
 class ListarTarefasSeparacaoAPIView(APIView):
     permission_classes = [IsAuthenticated, PerfilPermitido]
     allowed_profiles = (Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
@@ -54,6 +61,8 @@ class FinalizarTarefaSeparacaoAPIView(APIView):
     allowed_profiles = (Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
 
     def post(self, request):
+        if request.data.get('status') == OPERACIONAL_STATUS_BLOQUEADO:
+            return Response({'erro': OPERACIONAL_STATUS_BLOQUEADO_ERRO}, status=status.HTTP_400_BAD_REQUEST)
         try:
             resultado = finalizar_tarefa(
                 request.data.get('tarefa_id'),
