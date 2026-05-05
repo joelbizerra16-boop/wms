@@ -18,14 +18,14 @@
         </div>
         {% endif %}
         {% if not acesso.is_operacional %}
-        <button id="toggleMenu" class="toggle-btn" type="button" title="Expandir/recolher menu">☰</button>
+        <button id="toggleMenu" class="toggle-btn" type="button" title="Abrir menu" aria-label="Abrir menu" aria-controls="siteNav" aria-expanded="false">☰</button>
         {% endif %}
     </div>
 
-    <nav class="site-nav site-nav--erp">
+    <nav class="site-nav site-nav--erp" id="siteNav">
         {% if acesso.can_manage %}
         <div class="nav-group nav-item dropdown {% if '/dashboard/' in request.path %}nav-group--open{% endif %}">
-            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/dashboard/' in request.path %}active{% endif %}" data-submenu-toggle>
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/dashboard/' in request.path %}active{% endif %}" data-submenu-toggle aria-expanded="{% if '/dashboard/' in request.path %}true{% else %}false{% endif %}">
                 <i data-lucide="layout-dashboard"></i>
                 <span>Dashboard</span>
             </button>
@@ -42,7 +42,7 @@
         </div>
 
         <div class="nav-group nav-item dropdown {% if '/relatorio/' in request.path or '/produtividade/' in request.path %}nav-group--open{% endif %}">
-            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/relatorio/' in request.path or '/produtividade/' in request.path %}active{% endif %}" data-submenu-toggle>
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/relatorio/' in request.path or '/produtividade/' in request.path %}active{% endif %}" data-submenu-toggle aria-expanded="{% if '/relatorio/' in request.path or '/produtividade/' in request.path %}true{% else %}false{% endif %}">
                 <i data-lucide="bar-chart-3"></i>
                 <span>Relatório</span>
             </button>
@@ -69,7 +69,7 @@
         </div>
 
         <div class="nav-group nav-item dropdown {% if '/importar/' in request.path %}nav-group--open{% endif %}">
-            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/importar/' in request.path %}active{% endif %}" data-submenu-toggle>
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/importar/' in request.path %}active{% endif %}" data-submenu-toggle aria-expanded="{% if '/importar/' in request.path %}true{% else %}false{% endif %}">
                 <i data-lucide="file-up"></i>
                 <span>Importar</span>
             </button>
@@ -92,7 +92,7 @@
 
         {% if acesso.can_separacao or acesso.can_conferencia %}
         <div class="nav-group nav-item dropdown {% if '/separacao/' in request.path or '/conferencia/' in request.path %}nav-group--open{% endif %}">
-            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/separacao/' in request.path or '/conferencia/' in request.path %}active{% endif %}" data-submenu-toggle>
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/separacao/' in request.path or '/conferencia/' in request.path %}active{% endif %}" data-submenu-toggle aria-expanded="{% if '/separacao/' in request.path or '/conferencia/' in request.path %}true{% else %}false{% endif %}">
                 <i data-lucide="activity"></i>
                 <span>Operação</span>
             </button>
@@ -115,7 +115,7 @@
 
         {% if acesso.can_manage %}
         <div class="nav-group nav-item dropdown {% if '/clientes/' in request.path or '/produtos/' in request.path or '/rotas/' in request.path or '/usuarios/' in request.path %}nav-group--open{% endif %}">
-            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/clientes/' in request.path or '/produtos/' in request.path or '/rotas/' in request.path or '/usuarios/' in request.path %}active{% endif %}" data-submenu-toggle>
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/clientes/' in request.path or '/produtos/' in request.path or '/rotas/' in request.path or '/usuarios/' in request.path %}active{% endif %}" data-submenu-toggle aria-expanded="{% if '/clientes/' in request.path or '/produtos/' in request.path or '/rotas/' in request.path or '/usuarios/' in request.path %}true{% else %}false{% endif %}">
                 <i data-lucide="database"></i>
                 <span>Cadastro</span>
             </button>

@@ -11,6 +11,7 @@
     <header class="site-header" id="sidebar">
         {% include 'components/sidebar.html' %}
     </header>
+    <button type="button" class="menu-backdrop" id="menuBackdrop" aria-label="Fechar menu"></button>
     <main class="app-main {% block container_class %}container{% endblock %}">
         {% if messages %}
         <ul class="messages">
@@ -30,22 +31,60 @@
     if (window.lucide) {
         window.lucide.createIcons();
     }
-    document.querySelectorAll('[data-submenu-toggle]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            const group = btn.closest('.nav-group');
-            if (!group) return;
-            group.classList.toggle('nav-group--open');
-        });
-    });
     (function () {
         const body = document.body;
         const sidebar = document.getElementById('sidebar');
+        const menuBackdrop = document.getElementById('menuBackdrop');
         const isOperacional = body.classList.contains('sidebar-operacional');
-        document.querySelectorAll('.site-nav a').forEach(function (link) {
+        const nav = document.getElementById('siteNav');
+        const menuLinks = document.querySelectorAll('.site-nav a');
+        const submenuButtons = document.querySelectorAll('[data-submenu-toggle]');
+        const debugMenu = window.WMS_DEBUG_MENU || window.localStorage.getItem('wms-debug-menu') === '1';
+        function logMenu(eventName, payload) {
+            if (!debugMenu) return;
+            console.log('[wms-menu]', eventName, payload || '');
+        }
+        function isMobileMenu() {
+            return window.innerWidth <= 980;
+        }
+        function setMobileMenuOpen(open) {
+            if (!sidebar || !menuBackdrop) return;
+            body.classList.toggle('mobile-menu-open', open);
+            sidebar.classList.toggle('site-header--mobile-open', open);
+            menuBackdrop.hidden = !open;
+            if (btn) {
+                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            logMenu(open ? 'open-mobile-menu' : 'close-mobile-menu');
+        }
+        function closeMobileMenu() {
+            setMobileMenuOpen(false);
+        }
+        menuLinks.forEach(function (link) {
             link.classList.add('menu-link');
         });
         const btn = document.getElementById('toggleMenu');
         const key = 'wms-sidebar-collapsed';
+        submenuButtons.forEach(function (submenuButton) {
+            submenuButton.addEventListener('click', function () {
+                const group = submenuButton.closest('.nav-group');
+                if (!group) return;
+                const willOpen = !group.classList.contains('nav-group--open');
+                if (isMobileMenu()) {
+                    document.querySelectorAll('.nav-group.nav-group--open').forEach(function (openGroup) {
+                        if (openGroup !== group) {
+                            openGroup.classList.remove('nav-group--open');
+                        }
+                    });
+                }
+                group.classList.toggle('nav-group--open', willOpen);
+                submenuButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+                logMenu('submenu-toggle', {
+                    label: submenuButton.textContent.trim(),
+                    open: willOpen,
+                });
+            });
+        });
         if (isOperacional) {
             body.classList.remove('sidebar-collapsed');
             window.localStorage.setItem(key, '0');
@@ -59,17 +98,30 @@
                 body.classList.add('sidebar-collapsed');
             }
         }
+        if (menuBackdrop) {
+            menuBackdrop.hidden = true;
+            menuBackdrop.addEventListener('click', closeMobileMenu);
+        }
         btn.addEventListener('click', function () {
-            if (window.innerWidth <= 980) return;
+            if (isMobileMenu()) {
+                setMobileMenuOpen(!body.classList.contains('mobile-menu-open'));
+                return;
+            }
             body.classList.toggle('sidebar-collapsed');
             const collapsed = body.classList.contains('sidebar-collapsed');
             window.localStorage.setItem(key, collapsed ? '1' : '0');
             window.localStorage.setItem('sidebar', collapsed ? 'collapsed' : 'open');
+            logMenu('desktop-sidebar-toggle', { collapsed: collapsed });
         });
 
         document.querySelectorAll('.menu-link').forEach(function (link) {
             link.addEventListener('click', function () {
-                if (window.innerWidth <= 980 || !sidebar) return;
+                logMenu('menu-link-click', { href: link.getAttribute('href') || '', text: link.textContent.trim() });
+                if (isMobileMenu()) {
+                    closeMobileMenu();
+                    return;
+                }
+                if (!sidebar) return;
                 if (body.classList.contains('sidebar-collapsed')) {
                     body.classList.remove('sidebar-collapsed');
                     window.localStorage.setItem(key, '0');
@@ -77,6 +129,27 @@
                 }
             });
         });
+        document.addEventListener('click', function (event) {
+            if (!isMobileMenu() || !body.classList.contains('mobile-menu-open')) return;
+            if (!sidebar || sidebar.contains(event.target) || event.target === btn) return;
+            closeMobileMenu();
+        });
+        window.addEventListener('resize', function () {
+            if (!isMobileMenu()) {
+                closeMobileMenu();
+                document.querySelectorAll('[data-submenu-toggle]').forEach(function (submenuButton) {
+                    submenuButton.setAttribute('aria-expanded', submenuButton.closest('.nav-group')?.classList.contains('nav-group--open') ? 'true' : 'false');
+                });
+            }
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                closeMobileMenu();
+            }
+        });
+        if (nav) {
+            nav.setAttribute('data-menu-ready', 'true');
+        }
     })();
     </script>
 </body>
