@@ -939,6 +939,36 @@ class LimpezaImportacaoWebTests(TestCase):
 		self.assertTrue(Log.objects.filter(usuario=self.admin, acao='XML STORAGE INCONSISTENTE').exists())
 		self.assertContains(response, 'XML indisponível para a entrada', html=False)
 
+	def test_liberar_entrada_com_xml_ausente_mas_nf_existente_libera_pela_chave(self):
+		self.client.login(username='admin_limpeza', password='123456')
+		chave = '35111111111111111111550010000000010000000888'
+		entrada = EntradaNF.objects.create(
+			chave_nf=chave,
+			numero_nf='1888',
+			xml='xmls/inexistente-888.xml',
+			status=EntradaNF.Status.PROCESSADO,
+		)
+		NotaFiscal.objects.create(
+			chave_nfe=chave,
+			numero='1888',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao=timezone.now(),
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+
+		response = self.client.post(f'/importar/fila/{entrada.id}/liberar/', follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		entrada.refresh_from_db()
+		self.assertEqual(entrada.status, EntradaNF.Status.LIBERADO)
+		self.assertTrue(Log.objects.filter(usuario=self.admin, acao='XML STORAGE INCONSISTENTE').exists())
+		self.assertTrue(Log.objects.filter(usuario=self.admin, acao='LIBERACAO ENTRADA SEM XML').exists())
+		self.assertContains(response, 'liberada sem o arquivo XML', html=False)
+
 	def test_bloqueia_limpeza_sem_base_maior_que_60_dias(self):
 		self.client.login(username='admin_limpeza', password='123456')
 		self._criar_entrada('35111111111111111111550010000000010000000001', '1001', dias_atras=20)

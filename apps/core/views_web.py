@@ -38,6 +38,7 @@ from apps.nf.services.limpeza_importacao_service import (
     executar_limpeza_importacao_controlada,
 )
 from apps.core.services.produto_sync_service import sincronizar_referencias_produto
+from apps.logs.models import Log
 from apps.produtos.models import GrupoAgregado, Produto
 from apps.rotas.models import Rota
 from apps.tarefas.models import Tarefa
@@ -747,7 +748,27 @@ def liberar_entrada_nf_web(request, entrada_id):
             f"Entrada {entrada.chave_nf} liberada com sucesso ({resultado.get('mensagem', 'processada')}).",
         )
     except XMLStorageUnavailableError as exc:
-        messages.error(request, f'XML indisponível para a entrada {entrada.chave_nf}: {str(exc)}')
+        nf_existente = NotaFiscal.objects.filter(chave_nfe=entrada.chave_nf).first()
+        if nf_existente is not None:
+            entrada.status = EntradaNF.Status.LIBERADO
+            entrada.save(update_fields=['status', 'updated_at'])
+            Log.objects.create(
+                usuario=request.user,
+                acao='LIBERACAO ENTRADA SEM XML',
+                detalhe=(
+                    f'Entrada {entrada.id} liberada sem reimportar XML ausente. '
+                    f'NF {nf_existente.numero} ({nf_existente.chave_nfe}) ja existia no sistema.'
+                ),
+            )
+            messages.warning(
+                request,
+                (
+                    f'Entrada {entrada.chave_nf} liberada sem o arquivo XML, '
+                    'usando a NF já existente no sistema.'
+                ),
+            )
+        else:
+            messages.error(request, f'XML indisponível para a entrada {entrada.chave_nf}: {str(exc)}')
     except ImportacaoXMLError as exc:
         messages.error(request, f'Falha ao liberar entrada {entrada.chave_nf}: {str(exc)}')
     except IntegrityError:
