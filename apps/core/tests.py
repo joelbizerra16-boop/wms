@@ -441,6 +441,8 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, 'inputmode="text"', html=False)
 		self.assertContains(response, 'let scannerBuffer =', html=False)
 		self.assertContains(response, 'Scanner pronto', html=False)
+		self.assertNotContains(response, '>Finalizar<', html=False)
+		self.assertNotContains(response, '<h1>Separação</h1>', html=False)
 
 	def test_tela_separacao_nao_permite_fechamento_com_restricao_no_fluxo_operacional(self):
 		self.tarefa.status = Tarefa.Status.EM_EXECUCAO
@@ -457,7 +459,15 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.tarefa.refresh_from_db()
 		self.assertEqual(self.tarefa.status, Tarefa.Status.EM_EXECUCAO)
-		self.assertContains(response, 'Restrição via gestão', html=False)
+		self.assertNotContains(response, '>Finalizar<', html=False)
+
+	def test_tela_separacao_aberta_exibe_aceite_sem_auto_iniciar(self):
+		response = self.client.get(f'/separacao/{self.tarefa.id}/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Aceitar separação', html=False)
+		self.tarefa.refresh_from_db()
+		self.assertEqual(self.tarefa.status, Tarefa.Status.ABERTO)
 
 	def test_tela_separacao_exibe_itens_nao_encontrados_da_tarefa(self):
 		produto_ne = Produto.objects.create(
@@ -504,6 +514,9 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, 'inputmode="text"', html=False)
 		self.assertContains(response, 'let scannerBuffer =', html=False)
 		self.assertContains(response, 'Scanner pronto', html=False)
+		self.assertContains(response, 'conferencia-feedback', html=False)
+		self.assertNotContains(response, '>Finalizar<', html=False)
+		self.assertNotContains(response, '<h1>Conferência</h1>', html=False)
 
 
 @override_settings(ROOT_URLCONF='config.urls')

@@ -28,9 +28,10 @@
         .op-header {
             position: fixed;
             inset: 0 0 auto 0;
-            height: 50px;
-            display: grid;
-            grid-template-columns: auto 1fr auto;
+            height: 46px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             align-items: center;
             gap: 10px;
             padding: 0 12px;
@@ -51,15 +52,14 @@
             place-items: center;
             background: rgba(255,255,255,0.08);
         }
-        .op-header h1 { margin: 0; font-size: 1.2rem; }
-        .op-user { font-size: 0.74rem; color: rgba(255,255,255,0.86); white-space: nowrap; }
+        .op-user { font-size: 0.74rem; color: rgba(255,255,255,0.86); white-space: nowrap; margin-left: auto; }
 
         .op-main {
             max-width: 100%;
             margin: 0 auto;
-            padding: 60px 24px 12px;
+            padding: 56px 12px 12px;
             display: grid;
-            gap: 10px;
+            gap: 8px;
         }
         .nf-strip {
             background: var(--card);
@@ -68,8 +68,9 @@
             padding: 10px;
             display: grid;
             gap: 8px;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+        .nf-item.full { grid-column: 1 / -1; }
         .nf-item span {
             display: block;
             font-size: 0.68rem;
@@ -111,7 +112,7 @@
             border-radius: 10px;
             border: 1px solid transparent;
             padding: 10px 12px;
-            font-size: 0.92rem;
+            font-size: 0.86rem;
         }
         .feedback.ok { background: #dcfce7; border-color: #bbf7d0; color: #166534; }
         .feedback.warn { background: #fef3c7; border-color: #fde68a; color: #92400e; }
@@ -146,6 +147,29 @@
             background: #fef2f2;
             color: #b91c1c;
         }
+        .scanner-status.waiting {
+            border-color: #d1d5db;
+            background: #f8fafc;
+            color: #475569;
+        }
+
+        .accept-panel {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+            display: grid;
+            gap: 8px;
+        }
+        .accept-btn {
+            min-height: 48px;
+            border: 0;
+            border-radius: 10px;
+            background: var(--ok);
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 700;
+        }
 
         .op-panel {
             background: var(--card);
@@ -153,42 +177,42 @@
             border-radius: 12px;
             padding: 12px;
             display: grid;
-            gap: 10px;
-            min-height: calc(100vh - 220px);
+            gap: 8px;
             align-content: start;
         }
         .item-focus {
             display: grid;
             gap: 8px;
-            grid-template-columns: 1.1fr 2fr 1fr 1fr;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .item-card {
             border: 1px solid var(--line);
             border-radius: 10px;
             padding: 10px;
             background: #f8fafc;
-            min-height: 86px;
+            min-height: 72px;
         }
+        .item-card.full { grid-column: 1 / -1; }
         .item-card span {
             font-size: 0.7rem;
             color: var(--muted);
             text-transform: uppercase;
         }
         .item-produto {
-            font-size: 2rem;
+            font-size: 1.55rem;
             font-weight: 800;
             color: var(--info);
             margin-top: 4px;
             line-height: 1.08;
         }
         .item-descricao {
-            font-size: 1rem;
+            font-size: 0.94rem;
             font-weight: 600;
             margin-top: 6px;
             line-height: 1.3;
         }
         .item-quantidade {
-            font-size: 1.8rem;
+            font-size: 1.38rem;
             font-weight: 800;
             margin-top: 6px;
         }
@@ -202,12 +226,12 @@
         }
         .scan-input {
             width: 100%;
-            min-height: 76px;
+            min-height: 62px;
             border-radius: 12px;
             border: 2px solid #cbd5e1;
-            padding: 12px 14px;
+            padding: 10px 12px;
             text-align: center;
-            font-size: 2rem;
+            font-size: 1.45rem;
             font-weight: 700;
             letter-spacing: 0.02em;
             background: #fff;
@@ -237,38 +261,8 @@
             background: linear-gradient(90deg, var(--brand), #fb923c);
             transition: width 0.2s ease;
         }
-
-        .actions {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 8px;
-        }
-        .btn-op {
-            min-height: 52px;
-            border: 0;
-            border-radius: 10px;
-            color: #fff;
-            font-size: 1rem;
-            font-weight: 700;
-            cursor: pointer;
-        }
-        .btn-op.finalizar { background: var(--ok); }
-        .btn-op.restricao { background: var(--warn); color: #111827; }
-        .btn-op.continuar { background: #475569; }
-        .btn-op:disabled { opacity: 0.55; cursor: not-allowed; }
-
-        .restricao-field input {
-            width: 100%;
-            min-height: 40px;
-            border-radius: 8px;
-            border: 1px solid #cbd5e1;
-            padding: 8px 10px;
-        }
-
         @media (max-width: 900px) {
-            .nf-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .item-focus { grid-template-columns: 1fr; }
-            .op-panel { min-height: auto; }
             .op-main { padding-left: 12px; padding-right: 12px; }
         }
 
@@ -284,7 +278,6 @@
 <body class="operacional">
     <header class="op-header">
         <a class="op-back" href="{% url 'web-separacao-lista' %}" aria-label="Voltar">←</a>
-        <h1>Separação</h1>
         <div class="op-user">{{ usuario.nome|default:usuario.username }}</div>
     </header>
 
@@ -294,47 +287,48 @@
             <div class="nf-item"><span>Cliente</span><strong id="tarefa-cliente">{{ cabecalho_tarefa.cliente_nome }}</strong></div>
             <div class="nf-item"><span>Rota</span><strong>{{ tarefa.rota.nome|default:"-" }}</strong></div>
             <div class="nf-item"><span>Status</span><strong id="tarefa-status" class="status-pill {% if tarefa.status == 'EM_EXECUCAO' %}warn{% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' %}ok{% else %}danger{% endif %}">{{ tarefa.status }}</strong></div>
+            <div class="nf-item full"><span>Setor</span><strong id="item-atual-setor">{{ item_atual.setor|default:tarefa.setor|default:'-' }}</strong></div>
+            <div class="nf-item full">
+                <div id="scanner-status" class="scanner-status {% if tarefa.status == 'ABERTO' %}waiting{% endif %}">{% if tarefa.status == 'ABERTO' %}Aguardando aceite{% else %}Scanner pronto{% endif %}</div>
+            </div>
         </section>
 
         {% if tarefa.status == 'ABERTO' %}
-        <form method="post">
-            {% csrf_token %}
-            <input type="hidden" name="acao" value="iniciar">
-            <button class="btn-op finalizar" type="submit" style="width:100%;">Aceitar tarefa</button>
-        </form>
-        <div class="feedback warn">Aceite a tarefa para iniciar a bipagem.</div>
+        <section class="accept-panel">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="acao" value="iniciar">
+                <button class="accept-btn" type="submit">Aceitar separação</button>
+            </form>
+            <div class="feedback warn">Aceite a tarefa para iniciar a bipagem.</div>
+        </section>
         {% endif %}
-
-        <div id="separacao-feedback" class="feedback" style="display:none;"></div>
-        <div id="scanner-status" class="scanner-status">Scanner pronto</div>
 
         <section class="op-panel">
             {% if item_atual %}
             <div class="item-focus">
+                <div class="item-card full">
+                    <span>Descrição</span>
+                    <div class="item-descricao" id="item-atual-descricao">{{ item_atual.descricao }}</div>
+                </div>
                 <div class="item-card">
                     <span>Produto</span>
                     <div class="item-produto" id="item-atual-produto">{{ item_atual.produto }}</div>
                 </div>
                 <div class="item-card">
-                    <span>Descrição</span>
-                    <div class="item-descricao" id="item-atual-descricao">{{ item_atual.descricao }}</div>
-                </div>
-                <div class="item-card">
                     <span>Separado / Total</span>
                     <div class="item-quantidade" id="item-atual-quantidade">{{ item_atual.quantidade_separada|floatformat:0 }} / {{ item_atual.quantidade_total|floatformat:0 }}</div>
                 </div>
-                <div class="item-card">
-                    <span>Setor</span>
-                    <div class="item-descricao" id="item-atual-setor">{{ item_atual.setor|default:'-' }}</div>
-                </div>
             </div>
 
+            {% if tarefa.status != 'ABERTO' %}
             <form method="post" id="bipagem-separacao-form" class="scan-form">
                 {% csrf_token %}
                 <input type="hidden" name="acao" value="bipar">
                 <label for="codigo">Bipagem</label>
-                <input id="codigo" name="codigo" type="text" class="scan-input" placeholder="BIPAR CODIGO" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="done" {% if tarefa.status == 'ABERTO' %}disabled{% endif %}>
+                <input id="codigo" name="codigo" type="text" class="scan-input" placeholder="BIPAR CODIGO" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="done">
             </form>
+            {% endif %}
             {% else %}
             <div class="feedback warn">Sem itens pendentes para esta tarefa.</div>
             {% endif %}
@@ -346,34 +340,7 @@
                 </div>
                 <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
             </div>
-
-            <div class="actions">
-                <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="acao" value="finalizar">
-                    <input type="hidden" name="status_final" value="CONCLUIDO">
-                    <button class="btn-op finalizar" type="submit">Finalizar</button>
-                </form>
-                {% if tarefa.status == 'LIBERADO_COM_RESTRICAO' %}
-                <form method="post" id="form-restricao-finalizacao">
-                    {% csrf_token %}
-                    <input type="hidden" name="acao" value="finalizar">
-                    <input type="hidden" name="status_final" value="CONCLUIDO_COM_RESTRICAO">
-                    <button class="btn-op restricao" type="submit">Concluir c/ restrição</button>
-                </form>
-                {% else %}
-                <button class="btn-op restricao" type="button" disabled title="Fluxo com restrição exige liberação da gestão.">Restrição via gestão</button>
-                {% endif %}
-                <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="acao" value="continuar_depois">
-                    <button class="btn-op continuar" type="submit">Continuar</button>
-                </form>
-            </div>
-
-            <div class="restricao-field">
-                <input id="motivo_restricao" name="motivo_restricao" type="text" form="form-restricao-finalizacao" placeholder="Motivo da restrição (quando houver)" inputmode="none" autocomplete="off">
-            </div>
+            <div id="separacao-feedback" class="feedback" style="display:none;"></div>
         </section>
     </main>
 
@@ -423,10 +390,15 @@
         }
         function setScannerStatus(mode) {
             if (!scannerStatusEl) return;
-            scannerStatusEl.classList.remove('manual', 'offline');
+            scannerStatusEl.classList.remove('manual', 'offline', 'waiting');
             if (mode === 'manual') {
                 scannerStatusEl.classList.add('manual');
                 scannerStatusEl.textContent = 'Digitacao manual ativa';
+                return;
+            }
+            if (mode === 'waiting') {
+                scannerStatusEl.classList.add('waiting');
+                scannerStatusEl.textContent = 'Aguardando aceite';
                 return;
             }
             if (mode === 'offline') {
@@ -526,6 +498,8 @@
             if (tarefaConcluida(data.status)) {
                 bloquearBipagem();
                 if (redirecionandoConclusao) return;
+            } else if (data.status === 'ABERTO') {
+                setScannerStatus('waiting');
             } else {
                 setScannerStatus('scanner');
             }
@@ -612,7 +586,15 @@
         });
 
         updateProgress({{ resumo_tarefa.separado|default:0 }}, {{ resumo_tarefa.total|default:0 }});
-        if (!scannerPronto()) setScannerStatus('offline');
+        {% if tarefa.status == 'ABERTO' %}
+        setScannerStatus('waiting');
+        {% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' or tarefa.status == 'FECHADO_COM_RESTRICAO' %}
+        setScannerStatus('offline');
+        {% elif not item_atual %}
+        setScannerStatus('offline');
+        {% elif tarefa.status != 'ABERTO' %}
+        setScannerStatus('scanner');
+        {% endif %}
         refreshTaskStatus().catch(function () {});
         setInterval(function () { refreshTaskStatus().catch(function () {}); }, 3000);
     })();
