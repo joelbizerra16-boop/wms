@@ -233,6 +233,20 @@ a {
     width: 100%;
 }
 
+@media (min-width: 769px) {
+    .nav-group__header {
+        cursor: pointer;
+    }
+
+    .nav-group__link {
+        width: 100%;
+    }
+
+    .nav-group__toggle {
+        display: none;
+    }
+}
+
 .nav-group__link {
     flex: 1 1 auto;
     color: rgba(255, 255, 255, 0.88);

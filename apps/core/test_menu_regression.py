@@ -62,7 +62,7 @@ class MenuRegressionTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="mobileMenuTrigger"', html=False)
-        self.assertContains(response, 'id="toggleMenu"', html=False)
+        self.assertNotContains(response, 'id="toggleMenu"', html=False)
         self.assertContains(response, 'aria-controls="siteNav"', html=False)
         self.assertContains(response, 'id="menuBackdrop"', html=False)
         self.assertContains(response, 'id="siteNav"', html=False)
