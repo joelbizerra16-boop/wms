@@ -497,9 +497,12 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
     }
 
     .mobile-menu-trigger {
-        display: inline-flex;
+        display: inline-flex !important;
         align-items: center;
         justify-content: center;
+        visibility: visible;
+        opacity: 1;
+        z-index: 1301;
     }
 
     .site-header {
@@ -511,6 +514,8 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
         transition: transform 0.22s ease;
         max-height: 100vh;
         overflow-y: auto;
+        overflow-x: visible;
+        z-index: 1200;
     }
 
     .site-header__inner {
@@ -534,20 +539,27 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
         flex-direction: column;
         align-items: stretch;
         white-space: normal;
-        overflow-x: visible;
-        overflow-y: auto;
+        overflow: visible;
         width: 100%;
+        position: relative;
+        z-index: 1;
     }
 
     .nav-group {
         width: 100%;
     }
 
+    .nav-group.nav-group--open {
+        z-index: 2;
+    }
+
     .nav-group__menu {
-        position: static;
+        position: relative;
         top: auto;
         left: 0;
         min-width: 100%;
+        overflow: visible;
+        z-index: 3;
     }
 
     .nav-group__menu--cadastro {
@@ -580,7 +592,7 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
     }
 
     body.mobile-menu-open .mobile-menu-trigger {
-        left: min(calc(88vw - 52px), 308px);
+        left: 14px;
         background: rgba(15, 23, 42, 0.98);
     }
 
