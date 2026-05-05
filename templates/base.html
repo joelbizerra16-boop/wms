@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
 <body class="{% if acesso.is_operacional %}sidebar-operacional{% endif %}">
+    <button type="button" class="mobile-menu-trigger" id="mobileMenuTrigger" aria-label="Abrir menu" aria-controls="siteNav" aria-expanded="false">☰</button>
     <header class="site-header" id="sidebar">
         {% include 'components/sidebar.html' %}
     </header>
@@ -35,6 +36,7 @@
         const body = document.body;
         const sidebar = document.getElementById('sidebar');
         const menuBackdrop = document.getElementById('menuBackdrop');
+        const mobileMenuTrigger = document.getElementById('mobileMenuTrigger');
         const isOperacional = body.classList.contains('sidebar-operacional');
         const nav = document.getElementById('siteNav');
         const menuLinks = document.querySelectorAll('.site-nav a');
@@ -54,6 +56,11 @@
             menuBackdrop.hidden = !open;
             if (btn) {
                 btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            if (mobileMenuTrigger) {
+                mobileMenuTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+                mobileMenuTrigger.setAttribute('aria-label', open ? 'Fechar menu' : 'Abrir menu');
+                mobileMenuTrigger.textContent = open ? '✕' : '☰';
             }
             logMenu(open ? 'open-mobile-menu' : 'close-mobile-menu');
         }
@@ -101,6 +108,14 @@
         if (menuBackdrop) {
             menuBackdrop.hidden = true;
             menuBackdrop.addEventListener('click', closeMobileMenu);
+        }
+        if (mobileMenuTrigger) {
+            mobileMenuTrigger.addEventListener('click', function () {
+                if (!isMobileMenu()) {
+                    return;
+                }
+                setMobileMenuOpen(!body.classList.contains('mobile-menu-open'));
+            });
         }
         btn.addEventListener('click', function () {
             if (isMobileMenu()) {
@@ -150,6 +165,7 @@
         if (nav) {
             nav.setAttribute('data-menu-ready', 'true');
         }
+        setMobileMenuOpen(false);
     })();
     </script>
 </body>
