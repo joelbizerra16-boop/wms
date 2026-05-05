@@ -594,19 +594,30 @@
         statusAtualizacaoEl.textContent = `Atualizado as ${new Date().toLocaleTimeString()}`;
     }
 
+    let dashboardRefreshTimer = null;
+
     async function cicloAtualizacao() {
         try {
+            if (document.hidden || document.body.classList.contains('mobile-menu-open')) {
+                return;
+            }
             await atualizarDashboard();
         } catch (error) {
             console.log(error);
             setResumoStatus('error');
             resumoEl.textContent = `Erro: verificar backend (${error.message || 'falha de comunicação'})`;
             statusAtualizacaoEl.textContent = 'Erro ao atualizar';
+        } finally {
+            dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 8000);
         }
     }
 
     cicloAtualizacao();
-    setInterval(cicloAtualizacao, 5000);
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && !dashboardRefreshTimer) {
+            cicloAtualizacao();
+        }
+    });
 })();
 </script>
 {% endblock %}

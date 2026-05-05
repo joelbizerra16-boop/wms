@@ -71,7 +71,7 @@ class MenuRegressionTests(TestCase):
         self.assertContains(response, '/dashboard/separacao/', html=False)
         self.assertContains(response, '/logout/', html=False)
 
-    def test_layout_base_mantem_submenu_operacao_aberto_na_rota_ativa(self):
+    def test_layout_base_mantem_submenu_dashboard_aberto_na_rota_ativa(self):
         response = self.client.get('/dashboard/separacao/')
 
         self.assertEqual(response.status_code, 200)
@@ -82,11 +82,11 @@ class MenuRegressionTests(TestCase):
         )
         self.assertContains(
             response,
-            'data-submenu-toggle aria-expanded="true"',
+            'aria-label="Expandir submenu Dashboard" aria-expanded="true"',
             html=False,
         )
         self.assertContains(
             response,
-            'href="/dashboard/separacao/" class="active"',
+            'href="/dashboard/separacao/" class="nav-group__link menu-link active"',
             html=False,
         )
