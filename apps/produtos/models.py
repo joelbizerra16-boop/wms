@@ -26,11 +26,11 @@ class Produto(BaseModel):
 		NAO_ENCONTRADO = 'NAO_ENCONTRADO', 'Nao encontrado'
 
 	cod_prod = models.CharField(max_length=50, unique=True, verbose_name='codigo do produto')
-	codigo = models.CharField(max_length=50, blank=True, null=True, verbose_name='codigo')
+	codigo = models.CharField(max_length=50, blank=True, null=True, db_index=True, verbose_name='codigo')
 	descricao = models.CharField(max_length=255, verbose_name='descricao', db_index=True)
 	embalagem = models.CharField(max_length=20, blank=True, null=True, verbose_name='embalagem')
 	cod_ean = models.CharField(max_length=50, db_index=True, blank=True, null=True, verbose_name='codigo EAN')
-	setor = models.CharField(max_length=50, blank=True, null=True, verbose_name='setor')
+	setor = models.CharField(max_length=50, blank=True, null=True, db_index=True, verbose_name='setor')
 	unidade = models.CharField(max_length=20, null=True, blank=True, verbose_name='unidade')
 	categoria = models.CharField(max_length=20, choices=Categoria.choices, verbose_name='categoria')
 	grupos_agregados = models.ManyToManyField(

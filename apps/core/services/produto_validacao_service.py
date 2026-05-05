@@ -27,6 +27,17 @@ def buscar_produto_por_leitura(codigo_lido):
     return _buscar_produto_por_codigo(codigo_normalizado)
 
 
+def selecionar_item_por_codigo_lido(codigo_lido, itens, *, fallback=None):
+    codigo_normalizado = _normalizar_codigo(codigo_lido)
+    if not codigo_normalizado:
+        return fallback
+    for item in itens:
+        produto = getattr(item, 'produto', None)
+        if produto and _codigo_corresponde_identificador(codigo_normalizado, _identificadores_produto(produto)):
+            return item
+    return fallback
+
+
 def validar_produto(codigo_lido, item_id, usuario, item_model, tipo_validacao):
     codigo_normalizado = _normalizar_codigo(codigo_lido)
     if not codigo_normalizado:

@@ -7,7 +7,7 @@ from django.utils import timezone
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.core.services.produto_validacao_service import (
     ProdutoValidacaoError,
-    buscar_produto_por_leitura,
+    selecionar_item_por_codigo_lido,
     validar_produto,
 )
 from apps.logs.models import Log, UserActivityLog
@@ -422,13 +422,7 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
         )
         if not itens_pendentes:
             raise ConferenciaError('Não existem itens pendentes para bipagem.')
-        produto_lido = buscar_produto_por_leitura(codigo)
-        if produto_lido is None:
-            raise ConferenciaError('Produto não cadastrado.')
-        item_esperado = next(
-            (item for item in itens_pendentes if item.produto_id == produto_lido.id),
-            itens_pendentes[0],
-        )
+        item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
         try:
             validacao = validar_produto(
                 codigo_lido=codigo,
@@ -479,12 +473,15 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
             timestamp=timezone.now(),
         )
 
-    itens_qs = conferencia.itens.select_related('produto').order_by('id')
-    proximo_item = itens_qs.filter(
-        qtd_conferida__lt=F('qtd_esperada'),
-        status=ConferenciaItem.Status.AGUARDANDO,
-    ).first()
-    todos_itens_completos = not itens_qs.exclude(status=ConferenciaItem.Status.OK).exists()
+    itens_restantes = []
+    for item_pendente in itens_pendentes:
+        if item_pendente.id == item.id:
+            if item.qtd_conferida < item.qtd_esperada and item.status == ConferenciaItem.Status.AGUARDANDO:
+                itens_restantes.append(item)
+            continue
+        itens_restantes.append(item_pendente)
+    proximo_item = itens_restantes[0] if itens_restantes else None
+    todos_itens_completos = not itens_restantes
     finalizado = todos_itens_completos
 
     conferencia_resultado = None

@@ -39,11 +39,25 @@
         }
     }
 
-    setInterval(function () {
-        if (!document.hidden) {
-            refreshListaConferencia().catch(function () {});
+    let refreshTimer = null;
+
+    async function cicloAtualizacao() {
+        refreshTimer = null;
+        if (document.hidden) {
+            refreshTimer = window.setTimeout(cicloAtualizacao, 10000);
+            return;
         }
-    }, 5000);
+        await refreshListaConferencia().catch(function () {});
+        refreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+    }
+
+    refreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && !refreshTimer) {
+            refreshTimer = window.setTimeout(cicloAtualizacao, 400);
+        }
+    });
 })();
 </script>
 {% endblock %}

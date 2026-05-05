@@ -207,15 +207,28 @@
         }
     }
 
-    refreshDashboardResumo().catch(function () {});
-    refreshDashboardTabela().catch(function () {});
-    setInterval(function () {
+    let dashboardRefreshTimer = null;
+
+    async function cicloAtualizacao() {
+        dashboardRefreshTimer = null;
         if (document.hidden) {
+            dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 10000);
             return;
         }
-        refreshDashboardResumo().catch(function () {});
-        refreshDashboardTabela().catch(function () {});
-    }, 5000);
+        await refreshDashboardResumo().catch(function () {});
+        await refreshDashboardTabela().catch(function () {});
+        dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+    }
+
+    refreshDashboardResumo().catch(function () {});
+    refreshDashboardTabela().catch(function () {});
+    dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && !dashboardRefreshTimer) {
+            dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 400);
+        }
+    });
 })();
 </script>
 {% endblock %}

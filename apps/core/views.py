@@ -2,6 +2,8 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 import logging
+from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.response import Response
@@ -36,6 +38,12 @@ def home(request):
 def dashboard_data(request):
     try:
         hoje = timezone.localdate()
+        use_cache = not settings.DEBUG
+        cache_key = f'dashboard_data:{request.user.id}:{hoje.isoformat()}'
+        if use_cache:
+            cached_payload = cache.get(cache_key)
+            if cached_payload is not None:
+                return JsonResponse(cached_payload)
         tarefas_base = (
             Tarefa.objects.select_related('nf')
             .filter(ativo=True)
@@ -43,12 +51,7 @@ def dashboard_data(request):
             .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
         )
         _sincronizar_status_tarefas_por_quantidade(tarefas_base)
-        tarefas_base = (
-            Tarefa.objects.select_related('nf')
-            .filter(ativo=True)
-            .filter(created_at__date=hoje)
-            .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
-        )
+        tarefas_base = tarefas_base.select_related('nf')
 
         itens = list(
             TarefaItem.objects.select_related('tarefa', 'nf')
@@ -199,6 +202,8 @@ def dashboard_data(request):
             'alertas_alta': nfs_prioridade_alta,
             'data_referencia': hoje.strftime('%d/%m/%Y'),
         }
+        if use_cache:
+            cache.set(cache_key, payload, timeout=8)
         return JsonResponse(payload)
     except Exception as exc:
         logger.exception('Erro no endpoint /api/dashboard/')

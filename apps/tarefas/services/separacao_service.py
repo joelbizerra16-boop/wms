@@ -10,7 +10,7 @@ from django.utils import timezone
 from apps.logs.models import Log, UserActivityLog
 from apps.core.services.produto_validacao_service import (
     ProdutoValidacaoError,
-    buscar_produto_por_leitura,
+    selecionar_item_por_codigo_lido,
     validar_produto,
 )
 from apps.nf.services.status_service import sincronizar_status_operacional_nfs
@@ -373,7 +373,6 @@ def iniciar_tarefa(tarefa_id, usuario):
 def bipar_tarefa(tarefa_id, codigo, usuario):
     tarefa = (
         Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
-        .prefetch_related('itens__produto', 'itens__nf')
         .get(id=tarefa_id)
     )
     _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
@@ -413,13 +412,7 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
             if not itens_pendentes:
                 raise SeparacaoError('Tarefa sem itens pendentes para bipagem')
 
-            produto_lido = buscar_produto_por_leitura(codigo)
-            if produto_lido is None:
-                raise SeparacaoError('Produto não cadastrado.')
-            item_esperado = next(
-                (item for item in itens_pendentes if item.produto_id == produto_lido.id),
-                itens_pendentes[0],
-            )
+            item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
             try:
                 validacao = validar_produto(
                     codigo_lido=codigo,
@@ -462,15 +455,17 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                 )
                 tarefa_local.refresh_from_db(fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
             sincronizar_status_operacional_nfs(_nfs_afetadas_tarefa(tarefa_local))
-            return tarefa_local, item_local
+            itens_restantes = []
+            for item_pendente in itens_pendentes:
+                if item_pendente.id == item_local.id:
+                    if item_local.quantidade_separada < item_local.quantidade_total:
+                        itens_restantes.append(item_local)
+                    continue
+                itens_restantes.append(item_pendente)
+            return tarefa_local, item_local, itens_restantes
 
-    tarefa, item = _executar_com_retry_sqlite_lock(_executar)
-    proximo_item = (
-        TarefaItem.objects.filter(tarefa=tarefa, quantidade_separada__lt=F('quantidade_total'))
-        .select_related('produto', 'nf', 'grupo_agregado')
-        .order_by('nf__data_emissao', 'nf__numero', 'created_at')
-        .first()
-    )
+    tarefa, item, itens_restantes = _executar_com_retry_sqlite_lock(_executar)
+    proximo_item = itens_restantes[0] if itens_restantes else None
     finalizado = proximo_item is None or tarefa.status in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}
     return {
         'status': 'ok',
