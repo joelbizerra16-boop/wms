@@ -246,30 +246,6 @@ class StatusTarefaAPIView(APIView):
             id=tarefa_id,
             ativo=True,
         )
-        print('==== DEBUG STATUS TAREFA ====')
-        print(f'ID: {tarefa_id}')
-        print(f'USER: {request.user}')
-        print(f'TAREFA: {tarefa}')
-        print(f'SETOR: {tarefa.setor}')
-        print(f'STATUS: {tarefa.status}')
-
-        try:
-            setores = list(request.user.setores.values_list('nome', flat=True))
-            print(f'SETORES USUARIO: {setores}')
-        except Exception as exc:
-            print(f'ERRO SETORES: {exc}')
-            raise
-
-        itens_rel = getattr(tarefa, 'itens', None)
-        if itens_rel:
-            try:
-                print(f'QTD ITENS REL: {itens_rel.count()}')
-            except Exception as exc:
-                print(f'ERRO ITENS REL: {exc}')
-                raise
-        else:
-            print('TAREFA SEM ITENS')
-
         try:
             sincronizar_conclusao_automatica_tarefa(tarefa)
             tarefa.refresh_from_db()
@@ -309,7 +285,6 @@ class StatusTarefaAPIView(APIView):
                 status=status.HTTP_200_OK,
             )
         except Exception as exc:
-            print(f'ERRO REAL: {exc}')
             logger.exception('Erro real status tarefa: tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(request.user, 'id', None), str(exc))
             raise
 

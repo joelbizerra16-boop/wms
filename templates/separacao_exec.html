@@ -366,6 +366,9 @@
         let scannerBuffer = '';
         let scannerTimer = null;
         const scannerTimeoutMs = 120;
+        const pollingIntervalMs = 10000;
+        let pollingHandle = null;
+        let pollingInFlight = false;
 
         function getCookie(name) {
             const value = `; ${document.cookie}`;
@@ -488,37 +491,58 @@
             codigoInput.placeholder = 'Separacao finalizada';
             clearScannerBuffer();
             setScannerStatus('offline');
+            stopPolling();
         }
 
         async function refreshTaskStatus() {
+            if (pollingInFlight || document.hidden) return;
+            pollingInFlight = true;
             const response = await fetch(`/api/tarefa-status/${tarefaId}/`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-            if (!response.ok) throw new Error('Nao foi possivel atualizar tarefa.');
-            const data = await response.json();
-            setStatusBadge(data.status);
-            if (tarefaConcluida(data.status)) {
-                bloquearBipagem();
-                if (redirecionandoConclusao) return;
-            } else if (data.status === 'ABERTO') {
-                setScannerStatus('waiting');
-            } else {
-                setScannerStatus('scanner');
-            }
+            try {
+                if (!response.ok) throw new Error('Nao foi possivel atualizar tarefa.');
+                const data = await response.json();
+                setStatusBadge(data.status);
+                if (tarefaConcluida(data.status)) {
+                    bloquearBipagem();
+                    if (redirecionandoConclusao) return;
+                } else if (data.status === 'ABERTO') {
+                    setScannerStatus('waiting');
+                } else {
+                    setScannerStatus('scanner');
+                }
 
-            let totalEsperado = 0;
-            let totalSeparado = 0;
-            data.itens.forEach((item) => {
-                totalEsperado += Number(item.quantidade_total || 0);
-                totalSeparado += Number(item.quantidade_separada || 0);
-            });
-            updateProgress(totalSeparado, totalEsperado);
+                let totalEsperado = 0;
+                let totalSeparado = 0;
+                data.itens.forEach((item) => {
+                    totalEsperado += Number(item.quantidade_total || 0);
+                    totalSeparado += Number(item.quantidade_separada || 0);
+                });
+                updateProgress(totalSeparado, totalEsperado);
 
-            const currentItem = data.itens.find((item) => !isDone(item.status)) || data.itens[0];
-            if (currentItem) {
-                if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = currentItem.produto || '';
-                if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = currentItem.descricao || '';
-                if (itemAtualQuantidadeEl) itemAtualQuantidadeEl.textContent = `${formatNumber(currentItem.quantidade_separada)} / ${formatNumber(currentItem.quantidade_total)}`;
-                if (itemAtualSetorEl) itemAtualSetorEl.textContent = currentItem.setor || '-';
+                const currentItem = data.itens.find((item) => !isDone(item.status)) || data.itens[0];
+                if (currentItem) {
+                    if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = currentItem.produto || '';
+                    if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = currentItem.descricao || '';
+                    if (itemAtualQuantidadeEl) itemAtualQuantidadeEl.textContent = `${formatNumber(currentItem.quantidade_separada)} / ${formatNumber(currentItem.quantidade_total)}`;
+                    if (itemAtualSetorEl) itemAtualSetorEl.textContent = currentItem.setor || '-';
+                }
+            } finally {
+                pollingInFlight = false;
             }
+        }
+
+        function stopPolling() {
+            if (pollingHandle) {
+                clearInterval(pollingHandle);
+                pollingHandle = null;
+            }
+        }
+
+        function startPolling() {
+            if (!scannerPronto() || document.hidden || pollingHandle) return;
+            pollingHandle = setInterval(function () {
+                refreshTaskStatus().catch(function () {});
+            }, pollingIntervalMs);
         }
 
         if (form) {
@@ -574,6 +598,18 @@
             }
         });
 
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) {
+                stopPolling();
+                return;
+            }
+            refreshTaskStatus().catch(function () {});
+            startPolling();
+        });
+
+        window.addEventListener('pagehide', stopPolling);
+        window.addEventListener('beforeunload', stopPolling);
+
         postForms.forEach(function (postForm) {
             if (postForm.id === 'bipagem-separacao-form') return;
             postForm.addEventListener('submit', function () {
@@ -596,7 +632,7 @@
         setScannerStatus('scanner');
         {% endif %}
         refreshTaskStatus().catch(function () {});
-        setInterval(function () { refreshTaskStatus().catch(function () {}); }, 3000);
+        startPolling();
     })();
     </script>
 </body>

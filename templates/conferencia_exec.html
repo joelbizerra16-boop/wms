@@ -416,6 +416,9 @@
         let scannerBuffer = '';
         let scannerTimer = null;
         const scannerTimeoutMs = 120;
+        const pollingIntervalMs = 10000;
+        let pollingHandle = null;
+        let pollingInFlight = false;
 
         function getCookie(name) {
             const value = `; ${document.cookie}`;
@@ -495,26 +498,46 @@
         }
 
         async function refreshNFStatus() {
+            if (pollingInFlight || document.hidden) return;
+            pollingInFlight = true;
             const response = await fetch(`/api/status/nf/${nfId}/`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-            if (!response.ok) throw new Error('Nao foi possivel atualizar NF.');
-            const data = await response.json();
+            try {
+                if (!response.ok) throw new Error('Nao foi possivel atualizar NF.');
+                const data = await response.json();
 
-            setStatusBadge(data.nf_status);
-            const itemAtual = data.itens.find((item) => item.status !== 'OK') || data.itens[0];
-            let totalEsperado = 0;
-            let totalConferido = 0;
-            data.itens.forEach((item) => {
-                totalEsperado += Number(item.esperado || 0);
-                totalConferido += Number(item.conferido || 0);
-            });
-            updateProgress(totalConferido, totalEsperado);
+                setStatusBadge(data.nf_status);
+                const itemAtual = data.itens.find((item) => item.status !== 'OK') || data.itens[0];
+                let totalEsperado = 0;
+                let totalConferido = 0;
+                data.itens.forEach((item) => {
+                    totalEsperado += Number(item.esperado || 0);
+                    totalConferido += Number(item.conferido || 0);
+                });
+                updateProgress(totalConferido, totalEsperado);
 
-            if (itemAtual) {
-                if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = itemAtual.produto || '';
-                if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = itemAtual.descricao || '';
-                if (itemAtualQuantidadeEl) itemAtualQuantidadeEl.textContent = `${formatNumber(itemAtual.conferido)} / ${formatNumber(itemAtual.esperado)}`;
+                if (itemAtual) {
+                    if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = itemAtual.produto || '';
+                    if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = itemAtual.descricao || '';
+                    if (itemAtualQuantidadeEl) itemAtualQuantidadeEl.textContent = `${formatNumber(itemAtual.conferido)} / ${formatNumber(itemAtual.esperado)}`;
+                }
+                setScannerStatus('scanner');
+            } finally {
+                pollingInFlight = false;
             }
-            setScannerStatus('scanner');
+        }
+
+        function stopPolling() {
+            if (pollingHandle) {
+                clearInterval(pollingHandle);
+                pollingHandle = null;
+            }
+        }
+
+        function startPolling() {
+            if (!scannerPronto() || document.hidden || pollingHandle) return;
+            pollingHandle = setInterval(function () {
+                refreshNFStatus().catch(function () {});
+            }, pollingIntervalMs);
         }
 
         async function handleBipagem(codigo, origem) {
@@ -547,6 +570,7 @@
                 setFeedback('Leitura registrada com sucesso.', 'ok');
                 if (data.finalizado) {
                     if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
+                    stopPolling();
                     setTimeout(function () {
                         window.location.href = "{% url 'web-dashboard-conferencia' %}";
                     }, 800);
@@ -617,6 +641,16 @@
                 codigoInput.blur();
             }
         });
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) {
+                stopPolling();
+                return;
+            }
+            refreshNFStatus().catch(function () {});
+            startPolling();
+        });
+        window.addEventListener('pagehide', stopPolling);
+        window.addEventListener('beforeunload', stopPolling);
         postForms.forEach(function (postForm) {
             if (postForm.id === 'form-bipagem') return;
             postForm.addEventListener('submit', function () {
@@ -630,7 +664,7 @@
         updateProgress({{ totais_nf.conferido|default:0 }}, {{ totais_nf.esperado|default:0 }});
         if (!scannerPronto()) setScannerStatus('offline');
         refreshNFStatus().catch(function () {});
-        setInterval(function () { refreshNFStatus().catch(function () {}); }, 2000);
+        startPolling();
     })();
     </script>
     {% else %}
