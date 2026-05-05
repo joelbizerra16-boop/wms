@@ -48,7 +48,7 @@
             console.log('[wms-menu]', eventName, payload || '');
         }
         function isMobileMenu() {
-            return window.innerWidth <= 980;
+            return window.innerWidth <= 768;
         }
         function setMobileMenuOpen(open) {
             if (!sidebar || !menuBackdrop) return;
@@ -106,7 +106,7 @@
             return;
         }
         if (!btn) return;
-        if (window.innerWidth > 980) {
+        if (window.innerWidth > 768) {
             const persisted = window.localStorage.getItem(key);
             if (persisted === '1' || persisted === 'collapsed') {
                 body.classList.add('sidebar-collapsed');

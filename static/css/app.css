@@ -490,7 +490,7 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
     padding: 24px 20px 40px;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 768px) {
     body {
         padding-left: 0;
         padding-top: 84px;
@@ -2153,7 +2153,6 @@ tbody tr:hover {
 }
 
 @media (max-width: 980px) {
-    .site-header__inner,
     .page-header {
         flex-direction: column;
         align-items: stretch;
