@@ -694,13 +694,13 @@ def dashboard_conferencia(request):
     return _render(request, 'dashboard_conferencia.html', contexto)
 
 
-@require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
+@require_profiles(Usuario.Perfil.GESTOR)
 def detalhe_nf_por_id(request, nf_id):
     # Fluxo operacional manual: detalhes de conferencia nao sao mais abertos por redirecionamento automatico.
     return redirect('web-conferencia-lista')
 
 
-@require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
+@require_profiles(Usuario.Perfil.GESTOR)
 def detalhe_nf(request, nf_numero):
     numeros = [numero.strip() for numero in str(nf_numero).split(',') if numero.strip()]
     if not numeros:

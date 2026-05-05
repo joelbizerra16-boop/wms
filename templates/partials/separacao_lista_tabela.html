@@ -35,7 +35,7 @@
                     {% if tarefa.status == 'LIBERADO_COM_RESTRICAO' %}⚠{% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' %}✔{% elif tarefa.status == 'EM_EXECUCAO' %}📦{% else %}▶{% endif %}
                 </a>
                 {% endif %}
-                {% if tarefa.nf_numero and tarefa.nf_numero != '-' %}
+                {% if acesso.can_view_nf_detail and tarefa.nf_numero and tarefa.nf_numero != '-' %}
                 <a
                     class="action-icon action-icon--detalhe status-aberto"
                     href="{% url 'web-conferencia-detalhe' tarefa.nf_numero %}"

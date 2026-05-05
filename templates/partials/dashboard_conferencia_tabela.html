@@ -18,7 +18,9 @@
             {% for linha in linhas %}
             <tr>
                 <td>
+                    {% if acesso.can_view_nf_detail %}
                     <a class="action-icon action-icon--detalhe status-aberto" href="{% url 'web-dashboard-conferencia' %}?data_inicial={{ filtros.date_from }}&data_final={{ filtros.date_to }}&busca={{ filtros.busca|urlencode }}&nf_detalhe={{ linha.numero }}#detalhe-nf" title="Visualizar detalhe da NF">🔍</a>
+                    {% endif %}
                     <span class="nf-chip">{{ linha.numero }}</span>
                     {% if linha.balcao %}<span class="badge-balcao">BALCAO</span>{% endif %}
                 </td>

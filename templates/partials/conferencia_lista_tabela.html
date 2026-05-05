@@ -38,6 +38,7 @@
                     {% if nf.status == 'BLOQUEADA_COM_RESTRICAO' %}⚠{% elif nf.status == 'CONCLUIDO' or nf.status == 'CONCLUIDO_COM_RESTRICAO' %}✔{% elif nf.status == 'EM_CONFERENCIA' %}⏳{% else %}▶{% endif %}
                 </a>
                 {% endif %}
+                {% if acesso.can_view_nf_detail %}
                 <a
                     class="action-icon action-icon--detalhe status-aberto"
                     href="{% url 'web-conferencia-detalhe' nf.numero %}"
@@ -45,6 +46,7 @@
                 >
                     🔍
                 </a>
+                {% endif %}
                 <span class="id-text">{{ nf.numero|default:'Sem NF' }}</span>
             </td>
             <td class="col-cliente" data-label="Cliente">

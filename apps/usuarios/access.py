@@ -8,6 +8,10 @@ from rest_framework.permissions import BasePermission, IsAuthenticated
 from apps.usuarios.models import Usuario
 
 
+def can_view_nf_detail(user):
+    return getattr(user, 'perfil', None) == Usuario.Perfil.GESTOR
+
+
 def get_post_login_redirect_url(user):
     if getattr(user, 'perfil', None) == Usuario.Perfil.SEPARADOR:
         return 'web-separacao-lista'
@@ -21,13 +25,15 @@ def build_access_context(user):
     is_operacional = perfil in {Usuario.Perfil.SEPARADOR, Usuario.Perfil.CONFERENTE}
     setores = list(user.setores.values_list('nome', flat=True)) if getattr(user, 'is_authenticated', False) else []
     setor_liberado = ', '.join(setores) if setores else getattr(user, 'setor', None)
+    can_manage = perfil == Usuario.Perfil.GESTOR
     return {
         'acesso': {
             'perfil': perfil,
-            'is_gestor': perfil == Usuario.Perfil.GESTOR,
+            'is_gestor': can_manage,
             'is_operacional': is_operacional,
-            'can_view_home': perfil == Usuario.Perfil.GESTOR,
-            'can_manage': perfil == Usuario.Perfil.GESTOR,
+            'can_view_home': can_manage,
+            'can_manage': can_manage,
+            'can_view_nf_detail': can_view_nf_detail(user),
             'can_separacao': perfil in {Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR},
             'can_conferencia': perfil in {Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR},
             'setor_liberado': setor_liberado,
