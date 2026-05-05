@@ -58,34 +58,6 @@ a {
     transition: width 0.25s ease;
 }
 
-.menu-backdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, 0.48);
-    border: 0;
-    padding: 0;
-    margin: 0;
-    z-index: 999;
-}
-
-.mobile-menu-trigger {
-    display: none;
-    position: fixed;
-    top: 14px;
-    left: 14px;
-    width: 38px;
-    height: 38px;
-    border: 0;
-    border-radius: 10px;
-    background: rgba(15, 23, 42, 0.92);
-    color: #fff;
-    font-size: 18px;
-    line-height: 1;
-    z-index: 1002;
-    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.22);
-}
-
 .site-header__inner {
     max-width: 100%;
     margin: 0;
@@ -109,9 +81,12 @@ a {
 }
 
 .toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     position: static;
-    width: 30px;
-    height: 30px;
+    width: 36px;
+    height: 36px;
     border: none;
     border-radius: 8px;
     background: transparent;
@@ -121,7 +96,7 @@ a {
     opacity: 0.9;
     transition: background 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
     z-index: 2;
-    margin-top: 10px;
+    margin: 4px auto 0;
 }
 
 .toggle-btn:hover {
@@ -226,46 +201,6 @@ a {
     width: 100%;
 }
 
-.nav-group__header {
-    display: flex;
-    align-items: stretch;
-    gap: 6px;
-    width: 100%;
-}
-
-@media (min-width: 769px) {
-    .nav-group__header {
-        cursor: pointer;
-    }
-
-    .nav-group__link {
-        width: 100%;
-    }
-
-    .nav-group__toggle {
-        display: none;
-    }
-}
-
-.nav-group__link {
-    flex: 1 1 auto;
-    color: rgba(255, 255, 255, 0.88);
-    text-decoration: none;
-    padding: 8px 10px;
-    border-radius: 999px;
-    font-size: 14px;
-    font-weight: 500;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.nav-group__link:hover,
-.nav-group__link.active {
-    background: rgba(255, 255, 255, 0.14);
-    color: #fff;
-}
-
 .nav-group__toggle {
     background: transparent;
     border: 0;
@@ -280,10 +215,8 @@ a {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 48px;
-    min-width: 48px;
-    justify-content: center;
-    flex: 0 0 48px;
+    width: 100%;
+    justify-content: flex-start;
     touch-action: manipulation;
 }
 
@@ -291,14 +224,6 @@ a {
 .nav-group__toggle.active {
     background: rgba(255, 255, 255, 0.14);
     color: #fff;
-}
-
-.nav-group.nav-group--open .nav-group__toggle i {
-    transform: rotate(180deg);
-}
-
-.nav-group__toggle i {
-    transition: transform 0.2s ease;
 }
 
 .nav-group__menu {
@@ -510,18 +435,6 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
         padding-top: 84px;
     }
 
-    .mobile-menu-trigger {
-        display: inline-flex !important;
-        align-items: center;
-        justify-content: center;
-        visibility: visible;
-        opacity: 1;
-        color: #fff;
-        background: rgba(15, 23, 42, 0.94);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        z-index: 10000;
-    }
-
     .site-header {
         width: 100vw;
         height: 100dvh;
@@ -559,7 +472,8 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
     .sidebar-header {
         width: 100%;
         flex-direction: row;
-        justify-content: space-between;
+        justify-content: center;
+        padding-top: 14px;
     }
 
     .site-nav {
@@ -596,15 +510,8 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
     }
 
     .site-nav a,
-    .nav-group__link,
     .nav-group__toggle {
         width: 100%;
-    }
-
-    .nav-group__toggle {
-        width: 48px;
-        min-width: 48px;
-        flex: 0 0 48px;
     }
 
     .site-header__user {
@@ -614,17 +521,15 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
     }
 
     .toggle-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        margin-top: 0;
-        color: #fff;
-        background: rgba(255, 255, 255, 0.08);
-    }
-
-    body.mobile-menu-open .mobile-menu-trigger {
+        position: fixed;
+        top: 14px;
         left: 14px;
+        margin: 0;
+        color: #fff;
         background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        z-index: 10000;
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.22);
     }
 
     body.mobile-menu-open {
@@ -643,10 +548,6 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
 
     body.mobile-menu-open .site-nav {
         display: flex;
-    }
-
-    body.mobile-menu-open .menu-backdrop {
-        display: block;
     }
 }
 
