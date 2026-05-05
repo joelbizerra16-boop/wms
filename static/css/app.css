@@ -502,30 +502,44 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
         justify-content: center;
         visibility: visible;
         opacity: 1;
-        z-index: 1301;
+        color: #fff;
+        background: rgba(15, 23, 42, 0.94);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        z-index: 10000;
     }
 
     .site-header {
-        width: min(88vw, 360px);
-        height: auto;
-        inset: 0 0 auto 0;
+        width: 100vw;
+        height: 100dvh;
+        inset: 0;
         border-right: 0;
-        transform: translateX(-100%);
-        transition: transform 0.22s ease;
-        max-height: 100vh;
-        overflow-y: auto;
-        overflow-x: visible;
-        z-index: 1200;
+        background: rgba(2, 6, 23, 0.36);
+        backdrop-filter: blur(2px);
+        transform: none;
+        transition: opacity 0.22s ease, visibility 0.22s ease;
+        max-height: 100dvh;
+        overflow: hidden;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        z-index: 9998;
     }
 
     .site-header__inner {
         flex-direction: column;
         align-items: stretch;
         justify-content: flex-start;
-        height: auto;
-        overflow: visible;
+        width: min(88vw, 360px);
+        height: 100dvh;
+        overflow-x: visible;
+        overflow-y: auto;
         padding-top: 14px;
-        min-height: 100vh;
+        min-height: 100dvh;
+        background: rgba(15, 23, 42, 0.98);
+        box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        z-index: 1;
     }
 
     .sidebar-header {
@@ -542,15 +556,16 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
         overflow: visible;
         width: 100%;
         position: relative;
-        z-index: 1;
+        z-index: 2;
     }
 
     .nav-group {
         width: 100%;
+        position: relative;
     }
 
     .nav-group.nav-group--open {
-        z-index: 2;
+        z-index: 4;
     }
 
     .nav-group__menu {
@@ -559,7 +574,7 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
         left: 0;
         min-width: 100%;
         overflow: visible;
-        z-index: 3;
+        z-index: 5;
     }
 
     .nav-group__menu--cadastro {
@@ -589,6 +604,8 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
         align-items: center;
         justify-content: center;
         margin-top: 0;
+        color: #fff;
+        background: rgba(255, 255, 255, 0.08);
     }
 
     body.mobile-menu-open .mobile-menu-trigger {
@@ -601,8 +618,13 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
     }
 
     body.mobile-menu-open .site-header {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+    }
+
+    body.mobile-menu-open .site-header__inner {
         transform: translateX(0);
-        box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
     }
 
     body.mobile-menu-open .site-nav {
