@@ -229,7 +229,7 @@ a {
 .nav-group__header {
     display: flex;
     align-items: stretch;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
 }
 
@@ -266,10 +266,11 @@ a {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 42px;
-    min-width: 42px;
+    width: 48px;
+    min-width: 48px;
     justify-content: center;
-    flex: 0 0 42px;
+    flex: 0 0 48px;
+    touch-action: manipulation;
 }
 
 .nav-group__toggle:hover,
@@ -308,11 +309,13 @@ a {
     align-items: center;
     gap: 10px;
     color: var(--primary-2);
-    padding: 10px 12px;
+    padding: 12px 14px;
     border-radius: 6px;
     text-decoration: none;
     font-size: 14px;
     font-weight: 500;
+    position: relative;
+    z-index: 1;
 }
 
 .nav-group__menu a:hover,
@@ -558,9 +561,9 @@ body.sidebar-operacional.sidebar-collapsed .nav-group__menu--cadastro {
     }
 
     .nav-group__toggle {
-        width: 44px;
-        min-width: 44px;
-        flex: 0 0 44px;
+        width: 48px;
+        min-width: 48px;
+        flex: 0 0 48px;
     }
 
     .site-header__user {

@@ -42,6 +42,7 @@
         const menuLinks = document.querySelectorAll('.site-nav a');
         const submenuButtons = document.querySelectorAll('[data-submenu-toggle]');
         const debugMenu = window.WMS_DEBUG_MENU || window.localStorage.getItem('wms-debug-menu') === '1';
+        let mobileCloseTimer = null;
         function logMenu(eventName, payload) {
             if (!debugMenu) return;
             console.log('[wms-menu]', eventName, payload || '');
@@ -51,6 +52,10 @@
         }
         function setMobileMenuOpen(open) {
             if (!sidebar || !menuBackdrop) return;
+            if (mobileCloseTimer) {
+                window.clearTimeout(mobileCloseTimer);
+                mobileCloseTimer = null;
+            }
             body.classList.toggle('mobile-menu-open', open);
             sidebar.classList.toggle('site-header--mobile-open', open);
             menuBackdrop.hidden = !open;
@@ -73,7 +78,9 @@
         const btn = document.getElementById('toggleMenu');
         const key = 'wms-sidebar-collapsed';
         submenuButtons.forEach(function (submenuButton) {
-            submenuButton.addEventListener('click', function () {
+            submenuButton.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
                 const group = submenuButton.closest('.nav-group');
                 if (!group) return;
                 const willOpen = !group.classList.contains('nav-group--open');
@@ -131,8 +138,16 @@
 
         document.querySelectorAll('.menu-link').forEach(function (link) {
             link.addEventListener('click', function () {
-                logMenu('menu-link-click', { href: link.getAttribute('href') || '', text: link.textContent.trim() });
+                const href = link.getAttribute('href') || '';
+                const isRealNavigation = href && href !== '#' && !href.toLowerCase().startsWith('javascript:');
+                logMenu('menu-link-click', { href: href, text: link.textContent.trim() });
                 if (isMobileMenu()) {
+                    if (isRealNavigation) {
+                        mobileCloseTimer = window.setTimeout(function () {
+                            closeMobileMenu();
+                        }, 180);
+                        return;
+                    }
                     closeMobileMenu();
                     return;
                 }
@@ -146,7 +161,7 @@
         });
         document.addEventListener('click', function (event) {
             if (!isMobileMenu() || !body.classList.contains('mobile-menu-open')) return;
-            if (!sidebar || sidebar.contains(event.target) || event.target === btn) return;
+            if (!sidebar || sidebar.contains(event.target) || event.target === btn || event.target === mobileMenuTrigger) return;
             closeMobileMenu();
         });
         window.addEventListener('resize', function () {

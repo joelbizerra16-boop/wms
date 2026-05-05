@@ -30,11 +30,11 @@
                     <i data-lucide="layout-dashboard"></i>
                     <span>Dashboard</span>
                 </a>
-                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Dashboard" aria-expanded="{% if '/dashboard/' in request.path %}true{% else %}false{% endif %}">
+                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Dashboard" aria-controls="submenu-dashboard" aria-expanded="{% if '/dashboard/' in request.path %}true{% else %}false{% endif %}">
                     <i data-lucide="chevron-down"></i>
                 </button>
             </div>
-            <div class="nav-group__menu dropdown-menu">
+            <div class="nav-group__menu dropdown-menu" id="submenu-dashboard">
                 <a href="{% url 'web-dashboard-separacao' %}" class="{% if request.path == '/dashboard/separacao/' %}active{% endif %}">
                     <i data-lucide="layout-dashboard"></i>
                     <span>Dash Separação</span>
@@ -52,11 +52,11 @@
                     <i data-lucide="bar-chart-3"></i>
                     <span>Relatório</span>
                 </a>
-                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Relatório" aria-expanded="{% if '/relatorio/' in request.path or '/produtividade/' in request.path %}true{% else %}false{% endif %}">
+                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Relatório" aria-controls="submenu-relatorios" aria-expanded="{% if '/relatorio/' in request.path or '/produtividade/' in request.path %}true{% else %}false{% endif %}">
                     <i data-lucide="chevron-down"></i>
                 </button>
             </div>
-            <div class="nav-group__menu dropdown-menu">
+            <div class="nav-group__menu dropdown-menu" id="submenu-relatorios">
                 <a href="{% url 'web-relatorio-liberacoes' %}" class="{% if request.path == '/relatorio/liberacoes/' %}active{% endif %}">
                     <i data-lucide="file-text"></i>
                     <span>Liberações</span>
@@ -84,11 +84,11 @@
                     <i data-lucide="file-up"></i>
                     <span>Importar</span>
                 </a>
-                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Importar" aria-expanded="{% if '/importar/' in request.path %}true{% else %}false{% endif %}">
+                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Importar" aria-controls="submenu-importar" aria-expanded="{% if '/importar/' in request.path %}true{% else %}false{% endif %}">
                     <i data-lucide="chevron-down"></i>
                 </button>
             </div>
-            <div class="nav-group__menu dropdown-menu">
+            <div class="nav-group__menu dropdown-menu" id="submenu-importar">
                 <a href="{% url 'web-importar-xml' %}" class="{% if '/importar/' in request.path %}active{% endif %}">
                     <i data-lucide="upload"></i>
                     <span>Importar XML</span>
@@ -112,11 +112,11 @@
                     <i data-lucide="activity"></i>
                     <span>Operação</span>
                 </a>
-                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Operação" aria-expanded="{% if '/separacao/' in request.path or '/conferencia/' in request.path %}true{% else %}false{% endif %}">
+                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Operação" aria-controls="submenu-operacao" aria-expanded="{% if '/separacao/' in request.path or '/conferencia/' in request.path %}true{% else %}false{% endif %}">
                     <i data-lucide="chevron-down"></i>
                 </button>
             </div>
-            <div class="nav-group__menu dropdown-menu">
+            <div class="nav-group__menu dropdown-menu" id="submenu-operacao">
                 {% if acesso.can_separacao %}
                 <a href="{% url 'web-separacao-lista' %}" class="{% if '/separacao/' in request.path %}active{% endif %}">
                     <i data-lucide="scan-line"></i>
@@ -140,11 +140,11 @@
                     <i data-lucide="database"></i>
                     <span>Cadastro</span>
                 </a>
-                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Cadastro" aria-expanded="{% if '/clientes/' in request.path or '/produtos/' in request.path or '/rotas/' in request.path or '/usuarios/' in request.path %}true{% else %}false{% endif %}">
+                <button type="button" class="nav-group__toggle dropdown-toggle" data-submenu-toggle aria-label="Expandir submenu Cadastro" aria-controls="submenu-cadastro" aria-expanded="{% if '/clientes/' in request.path or '/produtos/' in request.path or '/rotas/' in request.path or '/usuarios/' in request.path %}true{% else %}false{% endif %}">
                     <i data-lucide="chevron-down"></i>
                 </button>
             </div>
-            <div class="nav-group__menu dropdown-menu nav-group__menu--cadastro">
+            <div class="nav-group__menu dropdown-menu nav-group__menu--cadastro" id="submenu-cadastro">
                 <a href="{% url 'web-clientes' %}" class="{% if '/clientes/' in request.path %}active{% endif %}">
                     <i data-lucide="user"></i>
                     <span>Cliente</span>

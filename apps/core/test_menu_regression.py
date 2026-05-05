@@ -67,6 +67,7 @@ class MenuRegressionTests(TestCase):
         self.assertContains(response, 'id="menuBackdrop"', html=False)
         self.assertContains(response, 'id="siteNav"', html=False)
         self.assertContains(response, 'data-submenu-toggle', html=False)
+        self.assertContains(response, 'aria-controls="submenu-dashboard"', html=False)
         self.assertContains(response, '/separacao/', html=False)
         self.assertContains(response, '/conferencia/', html=False)
         self.assertContains(response, '/dashboard/separacao/', html=False)
@@ -83,7 +84,12 @@ class MenuRegressionTests(TestCase):
         )
         self.assertContains(
             response,
-            'aria-label="Expandir submenu Dashboard" aria-expanded="true"',
+            'aria-label="Expandir submenu Dashboard"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'aria-controls="submenu-dashboard" aria-expanded="true"',
             html=False,
         )
         self.assertContains(
