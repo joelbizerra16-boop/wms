@@ -415,6 +415,7 @@
         let bipagemEmAndamento = false;
         let scannerBuffer = '';
         let scannerTimer = null;
+        let focusTimer = null;
         const scannerTimeoutMs = 120;
         const pollingIntervalMs = 10000;
         let pollingHandle = null;
@@ -497,6 +498,15 @@
             scannerTimer = setTimeout(clearScannerBuffer, scannerTimeoutMs);
         }
 
+        function scheduleInputFocus() {
+            if (!scannerPronto() || document.hidden) return;
+            if (focusTimer) clearTimeout(focusTimer);
+            focusTimer = setTimeout(function () {
+                if (!scannerPronto() || document.hidden) return;
+                codigoInput.focus({ preventScroll: true });
+            }, 100);
+        }
+
         async function refreshNFStatus() {
             if (pollingInFlight || document.hidden) return;
             pollingInFlight = true;
@@ -544,15 +554,13 @@
             if (bipagemEmAndamento) return;
             const valor = (codigo || '').trim();
             if (!valor) {
+                scheduleInputFocus();
                 return;
             }
             bipagemEmAndamento = true;
             if (codigoInput) codigoInput.disabled = true;
             try {
                 codigoInput.value = valor;
-                if (origem === 'scanner' && document.activeElement !== codigoInput) {
-                    codigoInput.blur();
-                }
                 const response = await fetch('/api/conferencia/bipar/', {
                     method: 'POST',
                     headers: {
@@ -583,6 +591,7 @@
             } finally {
                 bipagemEmAndamento = false;
                 if (codigoInput) codigoInput.disabled = false;
+                if (scannerPronto()) scheduleInputFocus();
             }
         }
 
@@ -634,13 +643,6 @@
             scheduleScannerTimeout();
             event.preventDefault();
         });
-        document.addEventListener('pointerdown', function (event) {
-            if (!codigoInput) return;
-            if (event.target === codigoInput) return;
-            if (document.activeElement === codigoInput) {
-                codigoInput.blur();
-            }
-        });
         document.addEventListener('visibilitychange', function () {
             if (document.hidden) {
                 stopPolling();
@@ -648,6 +650,7 @@
             }
             refreshNFStatus().catch(function () {});
             startPolling();
+            scheduleInputFocus();
         });
         window.addEventListener('pagehide', stopPolling);
         window.addEventListener('beforeunload', stopPolling);
@@ -665,6 +668,7 @@
         if (!scannerPronto()) setScannerStatus('offline');
         refreshNFStatus().catch(function () {});
         startPolling();
+        scheduleInputFocus();
     })();
     </script>
     {% else %}

@@ -365,6 +365,7 @@
         let redirecionandoConclusao = false;
         let scannerBuffer = '';
         let scannerTimer = null;
+        let focusTimer = null;
         const scannerTimeoutMs = 120;
         const pollingIntervalMs = 10000;
         let pollingHandle = null;
@@ -440,19 +441,25 @@
             if (scannerTimer) clearTimeout(scannerTimer);
             scannerTimer = setTimeout(clearScannerBuffer, scannerTimeoutMs);
         }
+        function scheduleInputFocus() {
+            if (!scannerPronto() || document.hidden) return;
+            if (focusTimer) clearTimeout(focusTimer);
+            focusTimer = setTimeout(function () {
+                if (!scannerPronto() || document.hidden) return;
+                codigoInput.focus({ preventScroll: true });
+            }, 100);
+        }
         async function processarCodigo(codigo, origem) {
             if (!scannerPronto()) return;
             const valor = (codigo || '').trim();
             if (!valor) {
                 setFeedback('Informe o código para bipagem.', 'erro');
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
+                scheduleInputFocus();
                 return;
             }
 
             codigoInput.value = valor;
-            if (origem === 'scanner' && document.activeElement !== codigoInput) {
-                codigoInput.blur();
-            }
 
             try {
                 const response = await fetch('/api/separacao/bipar/', {
@@ -483,6 +490,8 @@
             } catch (error) {
                 setFeedback(error.message, 'erro');
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
+            } finally {
+                if (scannerPronto() && !redirecionandoConclusao) scheduleInputFocus();
             }
         }
         function bloquearBipagem() {
@@ -490,6 +499,10 @@
             codigoInput.disabled = true;
             codigoInput.placeholder = 'Separacao finalizada';
             clearScannerBuffer();
+            if (focusTimer) {
+                clearTimeout(focusTimer);
+                focusTimer = null;
+            }
             setScannerStatus('offline');
             stopPolling();
         }
@@ -590,14 +603,6 @@
             event.preventDefault();
         });
 
-        document.addEventListener('pointerdown', function (event) {
-            if (!codigoInput) return;
-            if (event.target === codigoInput) return;
-            if (document.activeElement === codigoInput) {
-                codigoInput.blur();
-            }
-        });
-
         document.addEventListener('visibilitychange', function () {
             if (document.hidden) {
                 stopPolling();
@@ -605,6 +610,7 @@
             }
             refreshTaskStatus().catch(function () {});
             startPolling();
+            scheduleInputFocus();
         });
 
         window.addEventListener('pagehide', stopPolling);
@@ -633,6 +639,7 @@
         {% endif %}
         refreshTaskStatus().catch(function () {});
         startPolling();
+        scheduleInputFocus();
     })();
     </script>
 </body>
