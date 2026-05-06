@@ -313,7 +313,7 @@
                 </div>
                 <div class="item-card">
                     <span>Produto</span>
-                    <div class="item-produto" id="item-atual-produto">{{ item_atual.produto }}</div>
+                    <div class="item-produto" id="item-atual-produto">{{ item_atual.produto }} - ({{ item_atual.quantidade_separada|floatformat:"-2" }}/{{ item_atual.quantidade_total|floatformat:"-2" }})</div>
                 </div>
             </div>
 
@@ -374,6 +374,10 @@
         }
         function formatNumber(value) {
             return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value || 0));
+        }
+        function formatItemProduto(produto, separado, total) {
+            const codigo = produto || '';
+            return `${codigo} - (${formatNumber(separado)}/${formatNumber(total)})`;
         }
         function setStatusBadge(status) {
             statusEl.textContent = status;
@@ -529,7 +533,7 @@
 
                 const currentItem = data.itens.find((item) => !isDone(item.status)) || data.itens[0];
                 if (currentItem) {
-                    if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = currentItem.produto || '';
+                    if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = formatItemProduto(currentItem.produto, currentItem.quantidade_separada, currentItem.quantidade_total);
                     if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = currentItem.descricao || '';
                     if (itemAtualSetorEl) itemAtualSetorEl.textContent = currentItem.setor || '-';
                 }

@@ -76,10 +76,17 @@ class ConferenciaWebTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '1410289')
-        self.assertContains(response, 'WEB001')
+        self.assertContains(response, 'WEB001 - (0/10)')
         self.assertContains(response, '10,00')
         self.assertContains(response, '0,00')
         self.assertEqual(response.context['conferencia_ativa'].id, conferencia.id)
+
+    def test_lista_conferencia_exibe_rota_no_card_mobile(self):
+        response = self.client.get('/conferencia/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'col-rota-mobile', html=False)
+        self.assertContains(response, 'Rota Web')
 
     def test_bipagem_atualiza_quantidade_e_feedback(self):
         self._iniciar()

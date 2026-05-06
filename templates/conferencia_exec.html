@@ -360,7 +360,7 @@
                 </div>
                 <div class="item-card">
                     <span>Produto</span>
-                    <div class="item-produto" id="item-atual-produto">{{ item.produto.cod_prod }}</div>
+                    <div class="item-produto" id="item-atual-produto">{{ item.produto.cod_prod }} - ({{ item.qtd_conferida|floatformat:"-2" }}/{{ item.qtd_esperada|floatformat:"-2" }})</div>
                 </div>
             </div>
 
@@ -425,6 +425,10 @@
 
         function formatNumber(value) {
             return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value || 0));
+        }
+        function formatItemProduto(produto, conferido, esperado) {
+            const codigo = produto || '';
+            return `${codigo} - (${formatNumber(conferido)}/${formatNumber(esperado)})`;
         }
 
         function setStatusBadge(status) {
@@ -521,7 +525,7 @@
                 updateProgress(totalConferido, totalEsperado);
 
                 if (itemAtual) {
-                    if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = itemAtual.produto || '';
+                    if (itemAtualProdutoEl) itemAtualProdutoEl.textContent = formatItemProduto(itemAtual.produto, itemAtual.conferido, itemAtual.esperado);
                     if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = itemAtual.descricao || '';
                 }
                 setScannerStatus('scanner');

@@ -450,6 +450,7 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, 'Scanner pronto', html=False)
 		self.assertNotContains(response, 'Separado / Total', html=False)
 		self.assertNotContains(response, 'item-atual-quantidade', html=False)
+		self.assertContains(response, '123039 - (3/5)', html=False)
 		self.assertNotContains(response, '>Finalizar<', html=False)
 		self.assertNotContains(response, '<h1>Separação</h1>', html=False)
 
@@ -503,9 +504,17 @@ class DashboardWebTests(TestCase):
 		response = self.client.get(f'/separacao/{tarefa_ne.id}/')
 
 		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'NE999')
+		self.assertContains(response, 'NE999 - (1/3)')
 		self.assertContains(response, 'Produto nao encontrado')
-		self.assertContains(response, '1 / 3')
+		self.assertContains(response, '0 / 1')
+
+	def test_lista_separacao_exibe_rota_no_card_mobile(self):
+		self.client.login(username='gestor_setor', password='123456')
+		response = self.client.get('/separacao/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'col-rota-mobile', html=False)
+		self.assertContains(response, 'L01')
 
 	def test_tela_conferencia_contém_script_de_polling(self):
 		TarefaItem.objects.filter(tarefa=self.tarefa).update(quantidade_separada=F('quantidade_total'))
@@ -532,6 +541,7 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, 'Scanner pronto', html=False)
 		self.assertNotContains(response, 'Conferido / Total', html=False)
 		self.assertNotContains(response, 'item-atual-quantidade', html=False)
+		self.assertContains(response, '123039 - (3/5)', html=False)
 		self.assertContains(response, 'conferencia-feedback', html=False)
 		self.assertNotContains(response, '>Finalizar<', html=False)
 		self.assertNotContains(response, '<h1>Conferência</h1>', html=False)
