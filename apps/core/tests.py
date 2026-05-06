@@ -120,6 +120,24 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'Dashboard de Conferência')
 
+	def test_home_operacional_agenda_atualizacao_automatica_a_cada_cinco_minutos(self):
+		response = self.client.get('/home/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'const dashboardRefreshIntervalMs = 300000;', html=False)
+
+	def test_dashboard_separacao_agenda_atualizacao_automatica_a_cada_cinco_minutos(self):
+		response = self.client.get('/dashboard/separacao/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'const dashboardRefreshIntervalMs = 300000;', html=False)
+
+	def test_dashboard_conferencia_agenda_atualizacao_automatica_a_cada_cinco_minutos(self):
+		response = self.client.get('/dashboard/conferencia/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'const dashboardRefreshIntervalMs = 300000;', html=False)
+
 	def test_separacao_lista_ajax_retorna_somente_tabela(self):
 		response = self.client.get('/separacao/', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 

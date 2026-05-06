@@ -182,26 +182,34 @@
         }
     }
 
+    const dashboardRefreshIntervalMs = 300000;
     let dashboardRefreshTimer = null;
+
+    function agendarProximaAtualizacao(delayMs = dashboardRefreshIntervalMs) {
+        if (dashboardRefreshTimer) {
+            window.clearTimeout(dashboardRefreshTimer);
+        }
+        dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, delayMs);
+    }
 
     async function cicloAtualizacao() {
         dashboardRefreshTimer = null;
         if (document.hidden) {
-            dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 10000);
+            agendarProximaAtualizacao();
             return;
         }
         await refreshDashboardResumo().catch(function () {});
         await refreshDashboardTabela().catch(function () {});
-        dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+        agendarProximaAtualizacao();
     }
 
     refreshDashboardResumo().catch(function () {});
     refreshDashboardTabela().catch(function () {});
-    dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+    agendarProximaAtualizacao();
 
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden && !dashboardRefreshTimer) {
-            dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 400);
+            agendarProximaAtualizacao(400);
         }
     });
 })();

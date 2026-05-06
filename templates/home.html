@@ -594,9 +594,18 @@
         statusAtualizacaoEl.textContent = `Atualizado as ${new Date().toLocaleTimeString()}`;
     }
 
+    const dashboardRefreshIntervalMs = 300000;
     let dashboardRefreshTimer = null;
 
+    function agendarProximaAtualizacao(delayMs = dashboardRefreshIntervalMs) {
+        if (dashboardRefreshTimer) {
+            window.clearTimeout(dashboardRefreshTimer);
+        }
+        dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, delayMs);
+    }
+
     async function cicloAtualizacao() {
+        dashboardRefreshTimer = null;
         try {
             if (document.hidden || document.body.classList.contains('mobile-menu-open')) {
                 return;
@@ -608,14 +617,14 @@
             resumoEl.textContent = `Erro: verificar backend (${error.message || 'falha de comunicação'})`;
             statusAtualizacaoEl.textContent = 'Erro ao atualizar';
         } finally {
-            dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+            agendarProximaAtualizacao();
         }
     }
 
     cicloAtualizacao();
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden && !dashboardRefreshTimer) {
-            cicloAtualizacao();
+            agendarProximaAtualizacao(400);
         }
     });
 })();
