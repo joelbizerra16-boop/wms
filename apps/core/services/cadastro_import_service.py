@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 import unicodedata
 from collections import Counter
 
 import pandas as pd
+from django.db import transaction
 from django.db.models import Q
 
 from apps.clientes.models import Cliente
-from apps.core.services.produto_sync_service import sincronizar_produtos_relacionados
+from apps.core.services.produto_sync_service import sincronizar_referencias_produto
 from apps.produtos.models import GrupoAgregado, Produto
 from apps.rotas.models import Rota
 from apps.rotas.services.roteirizacao_service import normalizar_cep_para_int
@@ -44,6 +46,31 @@ def _clean_text(value):
 
 def _digits_only(value):
     return re.sub(r'\D', '', _clean_text(value))
+
+
+def _sanitize_ean(value):
+    text = _clean_text(value)
+    if not text:
+        return ''
+
+    compact = re.sub(r'\s+', '', text)
+    if re.fullmatch(r'\d+', compact):
+        return compact[:50]
+    if re.fullmatch(r'\d+[\.,]0+', compact):
+        return re.split(r'[\.,]', compact, maxsplit=1)[0][:50]
+
+    if re.search(r'[eE]', compact):
+        try:
+            decimal_value = Decimal(compact)
+        except InvalidOperation:
+            decimal_value = None
+        if decimal_value is not None and decimal_value == decimal_value.to_integral_value():
+            return format(decimal_value.quantize(Decimal('1')), 'f')[:50]
+
+    digits = re.sub(r'\D', '', compact)
+    if digits == '0':
+        return ''
+    return digits[:50]
 
 
 def _pick(row, aliases):
@@ -106,6 +133,11 @@ def _vincular_grupo_agregado_por_setor(produto):
     produto.grupos_agregados.add(grupo)
 
 
+def _iter_batches(items, batch_size):
+    for index in range(0, len(items), batch_size):
+        yield items[index:index + batch_size]
+
+
 def importar_produtos_arquivo(file_or_path):
     if Tarefa.objects.filter(ativo=True, status__in=[Tarefa.Status.ABERTO, Tarefa.Status.EM_EXECUCAO]).exists():
         raise ValueError(
@@ -133,9 +165,7 @@ def importar_produtos_arquivo(file_or_path):
     for _, row in df.iterrows():
         cod_prod = _sanitize_code(row.get(col_cod_prod, ''))
         codigo = _sanitize_code(row.get(col_codigo, ''))
-        ean = _digits_only(row.get(col_ean, ''))[:50]
-        if ean == '0':
-            ean = ''
+        ean = _sanitize_ean(row.get(col_ean, ''))
         descricao = _clean_text(row.get(col_descricao, ''))
         embalagem = _clean_text(row.get(col_embalagem, ''))
         setor_raw = row.get(col_setor)
@@ -197,13 +227,14 @@ def importar_produtos_arquivo(file_or_path):
     codigos = {r['cod_prod'] for r in rows if r['cod_prod']}
     eans = {r['ean'] for r in rows if r['ean']}
     existentes = list(
-        Produto.objects.filter(Q(cod_prod__in=codigos) | Q(cod_ean__in=eans))
+        Produto.objects.filter(Q(cod_prod__in=codigos) | Q(cod_ean__in=eans)).only('id', 'cod_prod', 'cod_ean', 'descricao')
     )
     por_codigo = {p.cod_prod: p for p in existentes}
     por_ean = {p.cod_ean: p for p in existentes if p.cod_ean}
 
     novos = []
     atualizacoes = []
+    produtos_para_sincronizar = []
     vistos_codigos = set()
     vistos_ids_update = set()
 
@@ -211,83 +242,66 @@ def importar_produtos_arquivo(file_or_path):
         codigo = data['codigo']
         cod_prod = data['cod_prod'] or codigo
         ean = data['ean']
-        if data['import_key_type'] == 'ean':
-            existente = por_ean.get(data['import_key']) or por_codigo.get(cod_prod)
-        else:
-            existente = por_codigo.get(cod_prod) or (por_ean.get(ean) if ean else None)
+        existente = por_codigo.get(cod_prod) or (por_ean.get(ean) if ean else None)
 
         if existente is None:
             if cod_prod in vistos_codigos:
                 continue
             vistos_codigos.add(cod_prod)
-            novos.append(
-                Produto(
-                    cod_prod=cod_prod,
-                    codigo=codigo[:50] or None,
-                    descricao=data['descricao'] or 'SEM DESCRICAO',
-                    cod_ean=ean,
-                    embalagem=data['embalagem'],
-                    unidade=data['embalagem'],
-                    setor=data['setor'],
-                    categoria=data['categoria'],
-                    ativo=True,
-                    cadastrado_manual=True,
-                    incompleto=False,
-                )
+            produto_novo = Produto(
+                cod_prod=cod_prod,
+                codigo=codigo[:50] or None,
+                descricao=data['descricao'] or 'SEM DESCRICAO',
+                cod_ean=ean or None,
+                embalagem=data['embalagem'],
+                unidade=data['embalagem'],
+                setor=data['setor'],
+                categoria=data['categoria'],
+                ativo=True,
+                cadastrado_manual=True,
+                incompleto=False,
             )
+            novos.append(produto_novo)
             continue
 
         alterou = False
         if data['descricao'] and existente.descricao != data['descricao']:
             existente.descricao = data['descricao']
             alterou = True
-        if codigo and existente.codigo != codigo:
-            existente.codigo = codigo
-            alterou = True
-        if data['embalagem'] and existente.embalagem != data['embalagem']:
-            existente.embalagem = data['embalagem']
-            alterou = True
-        if data['embalagem'] and existente.unidade != data['embalagem']:
-            existente.unidade = data['embalagem']
-            alterou = True
         if ean and existente.cod_ean != ean:
-            existente.cod_ean = ean
-            alterou = True
-        if data['setor'] and existente.setor != data['setor']:
-            existente.setor = data['setor']
-            alterou = True
-        if data['categoria'] and existente.categoria != data['categoria']:
-            existente.categoria = data['categoria']
-            alterou = True
-        if existente.incompleto:
-            existente.incompleto = False
-            alterou = True
-        if not existente.cadastrado_manual:
-            existente.cadastrado_manual = True
-            alterou = True
-        if not existente.ativo:
-            existente.ativo = True
+            existente.cod_ean = ean or None
             alterou = True
 
         if alterou and existente.id not in vistos_ids_update:
             vistos_ids_update.add(existente.id)
             atualizacoes.append(existente)
 
-    if novos:
-        Produto.objects.bulk_create(novos, batch_size=1000)
-    if atualizacoes:
-        Produto.objects.bulk_update(
-            atualizacoes,
-            fields=['codigo', 'descricao', 'embalagem', 'cod_ean', 'setor', 'unidade', 'categoria', 'ativo', 'cadastrado_manual', 'incompleto', 'updated_at'],
-            batch_size=1000,
-        )
-    if novos:
-        for produto in Produto.objects.filter(cod_prod__in=[p.cod_prod for p in novos]):
+    with transaction.atomic():
+        if novos:
+            for batch in _iter_batches(novos, 200):
+                Produto.objects.bulk_create(batch, batch_size=200)
+            produtos_novos = list(Produto.objects.filter(cod_prod__in=[p.cod_prod for p in novos]))
+        else:
+            produtos_novos = []
+
+        if atualizacoes:
+            for produto in atualizacoes:
+                produto.save(update_fields=['descricao', 'cod_ean', 'updated_at'])
+
+        for produto in produtos_novos:
             _vincular_grupo_agregado_por_setor(produto)
-    if atualizacoes:
-        for produto in atualizacoes:
-            _vincular_grupo_agregado_por_setor(produto)
-    sync_resultado = sincronizar_produtos_relacionados()
+
+        produtos_para_sincronizar.extend(produtos_novos)
+        produtos_para_sincronizar.extend(atualizacoes)
+
+    sync_resultado = {
+        'itens_tarefa_corrigidos': 0,
+        'itens_conferencia_corrigidos': 0,
+    }
+    for produto in produtos_para_sincronizar:
+        resultado_produto = sincronizar_referencias_produto(produto)
+        sync_resultado['itens_tarefa_corrigidos'] += resultado_produto['itens_tarefa_corrigidos']
+        sync_resultado['itens_conferencia_corrigidos'] += resultado_produto['itens_conferencia_corrigidos']
 
     return {
         'total_processado': len(rows),
