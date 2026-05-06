@@ -47,6 +47,12 @@ class NFeProcessada:
     tipo_documento: str
 
 
+@dataclass
+class ItemProdutoResolvido:
+    produto: Produto | None
+    item_xml: ItemImportado
+
+
 SEFAZ_NS = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
 STATUS_AUTORIZADA = {'100', '150'}
 STATUS_CANCELADA = {'101', '135', '151', '155'}
@@ -161,14 +167,17 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
                 return _tratar_nf_existente(nf_existente, documento, log_user, balcao=balcao)
             raise
 
-        produtos_novos = 0
+        itens_sem_cadastro = []
         for item in documento.itens:
-            produto, criado_automaticamente = _obter_ou_criar_produto_xml(item)
-            if criado_automaticamente:
-                produtos_novos += 1
+            produto = _buscar_produto_cadastrado(item)
+            if produto is None:
+                itens_sem_cadastro.append(item)
             NotaFiscalItem.objects.create(
                 nf=nf,
                 produto=produto,
+                cod_prod_xml=item.cod_prod[:50],
+                descricao_xml=item.descricao[:255],
+                cod_ean_xml=item.cod_ean[:50],
                 quantidade=item.quantidade,
             )
 
@@ -177,20 +186,24 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
         _validar_sanidade_nf(nf)
         _executar_validacao_final_automatica()
 
+        avisos = _registrar_itens_sem_cadastro(nf, itens_sem_cadastro, log_user)
+
         Log.objects.create(
             usuario=log_user,
             acao='IMPORTACAO XML',
             detalhe=(
                 f'NF {nf.numero} importada com {nf.itens.count()} item(ns). '
-                f'Produtos criados automaticamente: {produtos_novos}.'
+                f'Itens sem cadastro mestre vinculado: {len(itens_sem_cadastro)}.'
             ),
         )
 
         return {
             'sucesso': True,
             'erros': [],
+            'avisos': avisos,
             'quantidade_itens_importados': nf.itens.count(),
-            'produtos_novos': produtos_novos,
+            'produtos_novos': 0,
+            'itens_sem_cadastro': len(itens_sem_cadastro),
             'status': 'sucesso',
             'mensagem': 'NF importada com sucesso',
             'nota_fiscal_id': nf.id,
@@ -312,39 +325,34 @@ def _obter_ou_criar_cliente(documento):
     return cliente
 
 
-def _obter_ou_criar_produto_xml(item):
-    produto, created = Produto.objects.get_or_create(
-        cod_prod=item.cod_prod,
-        defaults={
-            'descricao': item.descricao[:255],
-            'cod_ean': item.cod_ean[:50],
-            'unidade': None,
-            'categoria': Produto.Categoria.NAO_ENCONTRADO,
-            'ativo': True,
-            'cadastrado_manual': False,
-            'incompleto': True,
-        },
-    )
-    campos_atualizados = []
-    if not produto.descricao:
-        produto.descricao = item.descricao[:255]
-        campos_atualizados.append('descricao')
-    elif produto.descricao != item.descricao[:255]:
-        produto.descricao = item.descricao[:255]
-        campos_atualizados.append('descricao')
-    if item.cod_ean and (not produto.cod_ean or produto.cod_ean != item.cod_ean[:50]):
-        produto.cod_ean = item.cod_ean[:50]
-        campos_atualizados.append('cod_ean')
-    categoria_normalizada = _normalizar_categoria_produto(produto, persistir=False)
-    if produto.categoria != categoria_normalizada:
-        produto.categoria = categoria_normalizada
-        campos_atualizados.append('categoria')
-    if campos_atualizados:
-        campos_atualizados.append('updated_at')
-        produto.save(update_fields=campos_atualizados)
-    if created:
-        return produto, True
-    return produto, False
+def _buscar_produto_cadastrado(item):
+    codigo = (item.cod_prod or '').strip()
+    if codigo:
+        produto = Produto.objects.filter(cod_prod=codigo, ativo=True).first()
+        if produto is not None:
+            return produto
+
+    cod_ean = (item.cod_ean or '').strip()
+    if cod_ean:
+        return Produto.objects.filter(cod_ean=cod_ean, ativo=True).first()
+
+    return None
+
+
+def _registrar_itens_sem_cadastro(nf, itens_sem_cadastro, usuario_log):
+    avisos = []
+    for item in itens_sem_cadastro:
+        aviso = (
+            f'Produto {item.cod_prod} nao cadastrado no mestre. '
+            f'NF {nf.numero} importada sem vinculo automatico.'
+        )
+        avisos.append(aviso)
+        Log.objects.create(
+            usuario=usuario_log,
+            acao='IMPORTACAO XML PRODUTO NAO CADASTRADO',
+            detalhe=aviso,
+        )
+    return avisos
 
 
 def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
@@ -353,6 +361,8 @@ def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
     itens_filtros = []
 
     for item_nf in nf.itens.select_related('produto').all():
+        if item_nf.produto_id is None:
+            continue
         produto = item_nf.produto
         categoria = _normalizar_categoria_produto(produto)
         if categoria == Produto.Categoria.FILTROS:

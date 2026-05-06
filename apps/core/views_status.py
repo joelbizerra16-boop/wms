@@ -97,6 +97,8 @@ def _nf_status(nf, last_conference):
 
 
 def _quantidade_separada_nf_item(nf, item_nf):
+    if item_nf.produto_id is None:
+        return Decimal('0')
     tarefa_item_nf = next(
         (
             tarefa_item
@@ -200,7 +202,9 @@ class StatusNFAPIView(APIView):
             conferencia_item = conference_items.get(item_nf.produto_id)
             conferido = conferencia_item.qtd_conferida if conferencia_item else Decimal('0')
             falta = max(item_nf.quantidade - conferido, Decimal('0'))
-            if conferencia_item and conferencia_item.status == ConferenciaItem.Status.DIVERGENCIA:
+            if item_nf.produto_id is None:
+                status_item = 'PRODUTO NAO CADASTRADO'
+            elif conferencia_item and conferencia_item.status == ConferenciaItem.Status.DIVERGENCIA:
                 status_item = 'DIVERGENCIA'
             elif separado < item_nf.quantidade:
                 status_item = 'FALTA SEPARAR'
@@ -210,8 +214,8 @@ class StatusNFAPIView(APIView):
                 status_item = 'OK'
             itens.append(
                 {
-                    'produto': item_nf.produto.cod_prod,
-                    'descricao': item_nf.produto.descricao,
+                    'produto': item_nf.codigo_operacional,
+                    'descricao': item_nf.descricao_operacional,
                     'esperado': float(item_nf.quantidade),
                     'separado': float(separado),
                     'conferido': float(conferido),

@@ -40,6 +40,9 @@ def _setores_nf(nf):
     if setores:
         return setores
     for item in nf.itens.select_related('produto').all():
+        if item.produto_id is None:
+            setores.add(Setor.Codigo.NAO_ENCONTRADO)
+            continue
         categoria = item.produto.categoria
         if categoria == Produto.Categoria.FILTROS:
             setores.add(Setor.Codigo.FILTROS)

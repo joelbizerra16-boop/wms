@@ -76,7 +76,12 @@ class NotaFiscalItem(BaseModel):
 		on_delete=models.PROTECT,
 		related_name='itens_nota_fiscal',
 		verbose_name='produto',
+		null=True,
+		blank=True,
 	)
+	cod_prod_xml = models.CharField(max_length=50, blank=True, default='', verbose_name='codigo do produto no XML')
+	descricao_xml = models.CharField(max_length=255, blank=True, default='', verbose_name='descricao do produto no XML')
+	cod_ean_xml = models.CharField(max_length=50, blank=True, default='', verbose_name='codigo EAN no XML')
 	quantidade = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='quantidade')
 
 	class Meta:
@@ -92,7 +97,25 @@ class NotaFiscalItem(BaseModel):
 		]
 
 	def __str__(self):
-		return f'{self.nf} - {self.produto}'
+		return f'{self.nf} - {self.descricao_operacional}'
+
+	@property
+	def codigo_operacional(self):
+		if self.produto_id:
+			return self.produto.cod_prod
+		return self.cod_prod_xml
+
+	@property
+	def descricao_operacional(self):
+		if self.produto_id:
+			return self.produto.descricao
+		return self.descricao_xml or self.cod_prod_xml or 'Produto sem cadastro'
+
+	@property
+	def ean_operacional(self):
+		if self.produto_id:
+			return self.produto.cod_ean or ''
+		return self.cod_ean_xml or ''
 
 
 class EntradaNF(BaseModel):

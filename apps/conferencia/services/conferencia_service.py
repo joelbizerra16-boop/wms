@@ -107,7 +107,7 @@ def _setor_item_nf(item_nf):
 
 
 def _itens_nf_por_usuario(nf, usuario):
-    itens_nf = list(nf.itens.select_related('produto').all())
+    itens_nf = [item_nf for item_nf in nf.itens.select_related('produto').all() if item_nf.produto_id is not None]
     if usuario is None or _usuario_pode_ver_todos_setores(usuario):
         return itens_nf
     setores_usuario = _setores_usuario(usuario)
@@ -118,7 +118,7 @@ def _produto_ids_conferencia(conferencia):
     itens = getattr(conferencia, '_prefetched_objects_cache', {}).get('itens')
     if itens is None:
         itens = conferencia.itens.all()
-    return {item.produto_id for item in itens}
+    return {item.produto_id for item in itens if item.produto_id is not None}
 
 
 def _conferencia_cobre_produtos(conferencia, produto_ids):
@@ -652,6 +652,7 @@ def _tarefas_relacionadas_nf(nf):
     setores_nf = {
         item.produto.categoria
         for item in nf.itens.select_related('produto').all()
+        if item.produto_id is not None
         if item.produto.categoria != Produto.Categoria.FILTROS
     }
     tarefas = [tarefa for tarefa in nf.tarefas.all() if tarefa.tipo == Tarefa.Tipo.FILTRO]

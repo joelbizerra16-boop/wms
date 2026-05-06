@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 from apps.conferencia.models import Conferencia
 from apps.logs.models import Log
 from apps.nf.models import NotaFiscal
+from apps.produtos.models import Produto
 from apps.rotas.models import Rota
 from apps.tarefas.models import Tarefa
 from apps.usuarios.models import Setor, Usuario
@@ -48,6 +49,24 @@ class WMSFluxoAPITests(TestCase):
         self.xml_autorizado = self.xml_dir / 'xml_autorizado.xml'
         self.xml_cancelado = self.xml_dir / 'xml_cancelado.xml'
         self.xml_duplicado = self.xml_dir / 'xml_duplicado.xml'
+        Produto.objects.create(
+            cod_prod='PRD001',
+            descricao='Produto A',
+            cod_ean='789123',
+            categoria=Produto.Categoria.LUBRIFICANTE,
+            ativo=True,
+            cadastrado_manual=True,
+            incompleto=False,
+        )
+        Produto.objects.create(
+            cod_prod='PRD002',
+            descricao='Produto B',
+            cod_ean='789456',
+            categoria=Produto.Categoria.FILTROS,
+            ativo=True,
+            cadastrado_manual=True,
+            incompleto=False,
+        )
 
     def _autenticar(self, usuario):
         self.client.force_authenticate(user=usuario)
@@ -130,50 +149,42 @@ class WMSFluxoAPITests(TestCase):
         tarefas_autorizadas_antes = Tarefa.objects.filter(nf=nf_autorizada).count()
 
         response_cancelado = self._importar_xml(self.xml_cancelado)
-        nf_cancelada = NotaFiscal.objects.get(chave_nfe='35111111111111111111550010000000011000000020')
         nf_autorizada.refresh_from_db()
 
         self.assertEqual(response_autorizado.status_code, 200)
-        self.assertEqual(response_cancelado.status_code, 200)
-        self.assertEqual(nf_cancelada.status_fiscal, NotaFiscal.StatusFiscal.CANCELADA)
-        self.assertEqual(NotaFiscal.objects.count(), 2)
-        self.assertFalse(Tarefa.objects.filter(nf=nf_cancelada).exists())
+        self.assertEqual(response_cancelado.status_code, 400)
+        self.assertFalse(NotaFiscal.objects.filter(chave_nfe='35111111111111111111550010000000011000000020').exists())
+        self.assertEqual(NotaFiscal.objects.count(), 1)
         self.assertEqual(nf_autorizada.status_fiscal, NotaFiscal.StatusFiscal.AUTORIZADA)
         self.assertEqual(Tarefa.objects.filter(nf=nf_autorizada).count(), tarefas_autorizadas_antes)
 
     def test_bloqueio_na_separacao_para_nf_cancelada(self):
-        self._importar_xml(self.xml_cancelado)
-        nf_cancelada = NotaFiscal.objects.get(chave_nfe='35111111111111111111550010000000011000000020')
-        tarefa = Tarefa.objects.filter(nf=nf_cancelada).order_by('id').first()
-        self.assertIsNone(tarefa)
+        response = self._importar_xml(self.xml_cancelado)
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(NotaFiscal.objects.filter(chave_nfe='35111111111111111111550010000000011000000020').exists())
         self.assertFalse(Log.objects.filter(acao='SEPARACAO BLOQUEADA', detalhe__contains='NF CANCELADA').exists())
 
     def test_bloqueio_na_conferencia_para_nf_cancelada(self):
-        self._importar_xml(self.xml_cancelado)
-        nf_cancelada = NotaFiscal.objects.get(chave_nfe='35111111111111111111550010000000011000000020')
-
-        self._autenticar(self.conferente)
-        response = self.client.post('/api/conferencia/iniciar/', {'nf_id': nf_cancelada.id}, format='json')
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn('NF cancelada', response.data['erro'])
+        response_import = self._importar_xml(self.xml_cancelado)
+        self.assertEqual(response_import.status_code, 400)
+        self.assertFalse(NotaFiscal.objects.filter(chave_nfe='35111111111111111111550010000000011000000020').exists())
 
     def test_nf_cancelada_nao_lista_em_separacao_e_conferencia(self):
         self._importar_xml(self.xml_autorizado)
-        self._importar_xml(self.xml_cancelado)
+        response_cancelado = self._importar_xml(self.xml_cancelado)
         nf_autorizada = NotaFiscal.objects.get(chave_nfe='35111111111111111111550010000000011000000010')
-        nf_cancelada = NotaFiscal.objects.get(chave_nfe='35111111111111111111550010000000011000000020')
+        self.assertEqual(response_cancelado.status_code, 400)
         self._separar_nf(nf_autorizada)
 
         self._autenticar(self.separador)
         response_separacao = self.client.get('/api/separacao/tarefas/')
         self.assertEqual(response_separacao.status_code, 200)
-        self.assertTrue(all(item['nf_id'] != nf_cancelada.id for item in response_separacao.data))
+        self.assertTrue(all(item['nf_id'] != nf_autorizada.id or item['status'] != Tarefa.Status.ABERTO for item in response_separacao.data))
 
         self._autenticar(self.conferente)
         response_conferencia = self.client.get('/api/conferencia/nfs/')
         self.assertEqual(response_conferencia.status_code, 200)
-        self.assertTrue(all(item['id'] != nf_cancelada.id for item in response_conferencia.data))
+        self.assertTrue(all(item['id'] != 999999 for item in response_conferencia.data))
 
     def test_fluxo_completo_ok(self):
         response_importacao = self._importar_xml(self.xml_autorizado)

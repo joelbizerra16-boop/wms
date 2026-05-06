@@ -10,7 +10,7 @@ def _ultima_conferencia(nf):
 
 
 def _status_base_nf(nf, conferencias_validas):
-    itens_nf = list(nf.itens.all())
+    itens_nf = [item for item in nf.itens.all() if item.produto_id is not None]
     if not itens_nf or not conferencias_validas:
         return NotaFiscal.Status.PENDENTE
 

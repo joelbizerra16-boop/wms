@@ -369,8 +369,8 @@ def _filtrar_itens_separacao(itens, date_from, date_to, busca):
                     str(item.tarefa_id),
                     str(nf_numero or ''),
                     str(cliente or ''),
-                    str(item.produto.cod_prod or ''),
-                    str(item.produto.descricao or ''),
+                    str(getattr(item.produto, 'cod_prod', '') or ''),
+                    str(getattr(item.produto, 'descricao', '') or ''),
                     str(item.tarefa.rota.nome or ''),
                     'balcao' if _balcao_item_tarefa(item) else '',
                     str(status or ''),
@@ -470,6 +470,8 @@ def _nf_valida_dashboard_conferencia(nf, ultima_conferencia):
 
 
 def _quantidade_separada_nf_item(nf, item_nf):
+    if item_nf.produto_id is None:
+        return Decimal('0')
     tarefa_item_nf = next(
         (
             tarefa_item
@@ -544,8 +546,8 @@ def dashboard_separacao(request):
                 'rota': f'Balcao - {item.tarefa.rota.nome}' if _balcao_item_tarefa(item) else item.tarefa.rota.nome,
                 'cliente': _cliente_tarefa(item),
                 'balcao': _balcao_item_tarefa(item),
-                'produto': item.produto.cod_prod,
-                'descricao': item.produto.descricao,
+                'produto': getattr(item.produto, 'cod_prod', '') or '',
+                'descricao': getattr(item.produto, 'descricao', '') or '',
                 'quantidade': float(item.quantidade_total),
                 'status': status_item,
                 'status_badge_class': _badge_status_class(status_item),
@@ -739,7 +741,7 @@ def detalhe_nf(request, nf_numero):
 
         itens_nf_ordenados = sorted(
             nf.itens.all(),
-            key=lambda item: ((item.produto.setor or 'ZZZ'), (item.produto.cod_prod or '')),
+            key=lambda item: (((getattr(item.produto, 'setor', None) or 'ZZZ')), (item.codigo_operacional or '')),
         )
         for item_nf in itens_nf_ordenados:
             separado = _quantidade_separada_nf_item(nf, item_nf)
@@ -747,7 +749,10 @@ def detalhe_nf(request, nf_numero):
             conferido = conferencia_item.qtd_conferida if conferencia_item else Decimal('0')
             falta = max(item_nf.quantidade - conferido, Decimal('0'))
 
-            if conferencia_item and conferencia_item.status == ConferenciaItem.Status.DIVERGENCIA:
+            if item_nf.produto_id is None:
+                status = 'PRODUTO NAO CADASTRADO'
+                pendencias_separacao += 1
+            elif conferencia_item and conferencia_item.status == ConferenciaItem.Status.DIVERGENCIA:
                 status = 'DIVERGENCIA'
             elif separado < item_nf.quantidade:
                 status = 'FALTA SEPARAR'
@@ -759,9 +764,9 @@ def detalhe_nf(request, nf_numero):
 
             linhas.append(
                 {
-                    'produto': item_nf.produto.cod_prod,
-                    'descricao': item_nf.produto.descricao,
-                    'setor': item_nf.produto.setor,
+                    'produto': item_nf.codigo_operacional,
+                    'descricao': item_nf.descricao_operacional,
+                    'setor': getattr(item_nf.produto, 'setor', '') or '',
                     'qtd_nf': float(item_nf.quantidade),
                     'separado': float(separado),
                     'conferido': float(conferido),

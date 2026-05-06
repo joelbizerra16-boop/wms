@@ -30,7 +30,23 @@ class ImportadorXMLAPITests(TestCase):
         arquivo = SimpleUploadedFile(filename, xml_content.encode('utf-8'), content_type='text/xml')
         return self.client.post('/api/importar-xml/', {'file': arquivo}, format='multipart')
 
+    def _cadastrar_produtos(self, *produtos):
+        for cod_prod, descricao, cod_ean, categoria in produtos:
+            Produto.objects.create(
+                cod_prod=cod_prod,
+                descricao=descricao,
+                cod_ean=cod_ean,
+                categoria=categoria,
+                ativo=True,
+                cadastrado_manual=True,
+                incompleto=False,
+            )
+
     def test_importa_nfe_e_cria_nf_itens_tarefas(self):
+        self._cadastrar_produtos(
+            ('PRD001', 'Produto A', '789123', Produto.Categoria.LUBRIFICANTE),
+            ('PRD002', 'Filtro B', '789456', Produto.Categoria.FILTROS),
+        )
         xml = """<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe>
@@ -80,14 +96,16 @@ class ImportadorXMLAPITests(TestCase):
         self.assertEqual(NotaFiscal.objects.count(), 1)
         self.assertEqual(NotaFiscalItem.objects.count(), 2)
         self.assertEqual(Cliente.objects.count(), 1)
-        self.assertEqual(Tarefa.objects.count(), 1)
+        self.assertEqual(Tarefa.objects.count(), 2)
         self.assertEqual(TarefaItem.objects.count(), 2)
-        tarefa = Tarefa.objects.get()
-        self.assertEqual(tarefa.tipo, Tarefa.Tipo.ROTA)
-        self.assertEqual(tarefa.setor, Usuario.Setor.NAO_ENCONTRADO)
+        self.assertEqual(
+          set(Tarefa.objects.values_list('setor', flat=True)),
+          {Usuario.Setor.LUBRIFICANTE, Usuario.Setor.FILTROS},
+        )
         self.assertEqual(TarefaItem.objects.filter(nf__numero='123').count(), 2)
 
     def test_reimportacao_cancelada_atualiza_nf_e_cancela_fluxos(self):
+        self._cadastrar_produtos(('PRD001', 'Produto A', '789123', Produto.Categoria.LUBRIFICANTE))
         xml_autorizada = """<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe>
@@ -152,6 +170,7 @@ class ImportadorXMLAPITests(TestCase):
         self.assertEqual(Conferencia.objects.filter(nf=nf, status=Conferencia.Status.CANCELADA).count(), 1)
 
     def test_importa_sem_rota_cadastrada_e_cria_rota_operacional(self):
+        self._cadastrar_produtos(('PRD777', 'Produto sem rota', '789777', Produto.Categoria.NAO_ENCONTRADO))
         xml = """<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe>
@@ -293,6 +312,114 @@ class ImportadorXMLAPITests(TestCase):
         self.assertEqual(produto.categoria, Produto.Categoria.NAO_ENCONTRADO)
         self.assertEqual(tarefa.setor, Usuario.Setor.NAO_ENCONTRADO)
         self.assertEqual(TarefaItem.objects.filter(tarefa=tarefa, produto=produto).count(), 1)
+
+    def test_importacao_xml_nao_sobrescreve_produto_existente(self):
+        produto = Produto.objects.create(
+            cod_prod='PRD321',
+            descricao='Descricao mestre',
+            cod_ean='789321',
+            categoria=Produto.Categoria.LUBRIFICANTE,
+            setor='LUBRIFICANTE',
+            codigo='INTERNO-321',
+            embalagem='CX',
+            ativo=True,
+            cadastrado_manual=True,
+            incompleto=False,
+        )
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000321" versao="4.00">
+      <ide>
+        <nNF>321</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Mestre</xNome>
+        <IE>123456321</IE>
+        <enderDest>
+          <xBairro>Centro</xBairro>
+          <CEP>01001000</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD321</cProd>
+          <cEAN>999999</cEAN>
+          <xProd>Descricao vinda do XML</xProd>
+          <qCom>2.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>
+"""
+
+        response = self._upload(xml, filename='nao_sobrescreve.xml')
+        produto.refresh_from_db()
+        item_nf = NotaFiscalItem.objects.get(nf__numero='321')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(produto.descricao, 'Descricao mestre')
+        self.assertEqual(produto.cod_ean, '789321')
+        self.assertEqual(produto.embalagem, 'CX')
+        self.assertEqual(item_nf.produto_id, produto.id)
+        self.assertEqual(item_nf.descricao_xml, 'Descricao vinda do XML')
+        self.assertEqual(response.data['itens_sem_cadastro'], 0)
+
+    def test_importacao_xml_nao_cria_produto_quando_nao_cadastrado(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000888" versao="4.00">
+      <ide>
+        <nNF>888</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Sem Cadastro</xNome>
+        <IE>123456888</IE>
+        <enderDest>
+          <xBairro>Centro</xBairro>
+          <CEP>01001000</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD888</cProd>
+          <cEAN>789888</cEAN>
+          <xProd>Produto nao cadastrado</xProd>
+          <qCom>4.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>
+"""
+
+        response = self._upload(xml, filename='sem_cadastro.xml')
+        item_nf = NotaFiscalItem.objects.get(nf__numero='888')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Produto.objects.filter(cod_prod='PRD888').exists())
+        self.assertIsNone(item_nf.produto)
+        self.assertEqual(item_nf.cod_prod_xml, 'PRD888')
+        self.assertEqual(item_nf.descricao_xml, 'Produto nao cadastrado')
+        self.assertEqual(item_nf.cod_ean_xml, '789888')
+        self.assertEqual(response.data['itens_sem_cadastro'], 1)
+        self.assertTrue(response.data['avisos'])
+        self.assertFalse(Tarefa.objects.filter(nf=item_nf.nf).exists())
 
     def test_rejeita_xml_com_status_fiscal_invalido(self):
         xml = """<?xml version="1.0" encoding="UTF-8"?>
