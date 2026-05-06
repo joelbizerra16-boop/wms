@@ -372,8 +372,9 @@ class ImportadorXMLAPITests(TestCase):
         self.assertEqual(item_nf.produto_id, produto.id)
         self.assertEqual(item_nf.descricao_xml, 'Descricao vinda do XML')
         self.assertEqual(response.data['itens_sem_cadastro'], 0)
+        self.assertEqual(response.data['produtos_novos'], 0)
 
-    def test_importacao_xml_nao_cria_produto_quando_nao_cadastrado(self):
+    def test_importacao_xml_cria_produto_quando_nao_cadastrado(self):
         xml = """<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe>
@@ -410,16 +411,21 @@ class ImportadorXMLAPITests(TestCase):
 
         response = self._upload(xml, filename='sem_cadastro.xml')
         item_nf = NotaFiscalItem.objects.get(nf__numero='888')
+        produto = Produto.objects.get(cod_prod='PRD888')
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(Produto.objects.filter(cod_prod='PRD888').exists())
-        self.assertIsNone(item_nf.produto)
+        self.assertEqual(item_nf.produto_id, produto.id)
         self.assertEqual(item_nf.cod_prod_xml, 'PRD888')
         self.assertEqual(item_nf.descricao_xml, 'Produto nao cadastrado')
         self.assertEqual(item_nf.cod_ean_xml, '789888')
-        self.assertEqual(response.data['itens_sem_cadastro'], 1)
-        self.assertTrue(response.data['avisos'])
-        self.assertFalse(Tarefa.objects.filter(nf=item_nf.nf).exists())
+        self.assertEqual(produto.descricao, 'Produto nao cadastrado')
+        self.assertEqual(produto.cod_ean, '789888')
+        self.assertEqual(produto.categoria, Produto.Categoria.NAO_ENCONTRADO)
+        self.assertFalse(produto.cadastrado_manual)
+        self.assertTrue(produto.incompleto)
+        self.assertEqual(response.data['produtos_novos'], 1)
+        self.assertEqual(response.data['itens_sem_cadastro'], 0)
+        self.assertTrue(TarefaItem.objects.filter(nf=item_nf.nf, produto=produto).exists())
 
     def test_rejeita_xml_com_status_fiscal_invalido(self):
         xml = """<?xml version="1.0" encoding="UTF-8"?>

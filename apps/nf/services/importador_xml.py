@@ -45,14 +45,6 @@ class NFeProcessada:
     status_fiscal: str
     itens: list[ItemImportado]
     tipo_documento: str
-
-
-@dataclass
-class ItemProdutoResolvido:
-    produto: Produto | None
-    item_xml: ItemImportado
-
-
 SEFAZ_NS = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
 STATUS_AUTORIZADA = {'100', '150'}
 STATUS_CANCELADA = {'101', '135', '151', '155'}
@@ -167,43 +159,47 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
                 return _tratar_nf_existente(nf_existente, documento, log_user, balcao=balcao)
             raise
 
-        itens_sem_cadastro = []
+        produtos_novos = []
         for item in documento.itens:
-            produto = _buscar_produto_cadastrado(item)
-            if produto is None:
-                itens_sem_cadastro.append(item)
-            NotaFiscalItem.objects.create(
+            produto, criado = _obter_ou_criar_produto_xml_seguro(item)
+            if criado:
+                produtos_novos.append(produto)
+            item_nf, item_criado = NotaFiscalItem.objects.get_or_create(
                 nf=nf,
                 produto=produto,
-                cod_prod_xml=item.cod_prod[:50],
-                descricao_xml=item.descricao[:255],
-                cod_ean_xml=item.cod_ean[:50],
-                quantidade=item.quantidade,
+                defaults={
+                    'cod_prod_xml': item.cod_prod[:50],
+                    'descricao_xml': item.descricao[:255],
+                    'cod_ean_xml': item.cod_ean[:50],
+                    'quantidade': item.quantidade,
+                },
             )
+            if not item_criado:
+                item_nf.quantidade += item.quantidade
+                item_nf.save(update_fields=['quantidade', 'updated_at'])
 
         gerar_tarefas_separacao(nf, tarefas_lote_cache=tarefas_lote_cache)
         sincronizar_status_operacional_nf(nf)
         _validar_sanidade_nf(nf)
         _executar_validacao_final_automatica()
 
-        avisos = _registrar_itens_sem_cadastro(nf, itens_sem_cadastro, log_user)
+        _registrar_produtos_criados_via_xml(nf, produtos_novos, log_user)
 
         Log.objects.create(
             usuario=log_user,
             acao='IMPORTACAO XML',
             detalhe=(
                 f'NF {nf.numero} importada com {nf.itens.count()} item(ns). '
-                f'Itens sem cadastro mestre vinculado: {len(itens_sem_cadastro)}.'
+                f'Produtos criados automaticamente: {len(produtos_novos)}.'
             ),
         )
 
         return {
             'sucesso': True,
             'erros': [],
-            'avisos': avisos,
             'quantidade_itens_importados': nf.itens.count(),
-            'produtos_novos': 0,
-            'itens_sem_cadastro': len(itens_sem_cadastro),
+            'produtos_novos': len(produtos_novos),
+            'itens_sem_cadastro': 0,
             'status': 'sucesso',
             'mensagem': 'NF importada com sucesso',
             'nota_fiscal_id': nf.id,
@@ -339,20 +335,35 @@ def _buscar_produto_cadastrado(item):
     return None
 
 
-def _registrar_itens_sem_cadastro(nf, itens_sem_cadastro, usuario_log):
-    avisos = []
-    for item in itens_sem_cadastro:
-        aviso = (
-            f'Produto {item.cod_prod} nao cadastrado no mestre. '
-            f'NF {nf.numero} importada sem vinculo automatico.'
-        )
-        avisos.append(aviso)
+def _obter_ou_criar_produto_xml_seguro(item):
+    produto = _buscar_produto_cadastrado(item)
+    if produto is not None:
+        return produto, False
+
+    produto = Produto.objects.create(
+        cod_prod=(item.cod_prod or '').strip()[:50],
+        descricao=(item.descricao or '').strip()[:255] or 'Produto importado via XML',
+        cod_ean=(item.cod_ean or '').strip()[:50] or None,
+        unidade=None,
+        setor=Produto.Categoria.NAO_ENCONTRADO,
+        categoria=Produto.Categoria.NAO_ENCONTRADO,
+        ativo=True,
+        cadastrado_manual=False,
+        incompleto=True,
+    )
+    return produto, True
+
+
+def _registrar_produtos_criados_via_xml(nf, produtos_novos, usuario_log):
+    for produto in produtos_novos:
         Log.objects.create(
             usuario=usuario_log,
-            acao='IMPORTACAO XML PRODUTO NAO CADASTRADO',
-            detalhe=aviso,
+            acao='PRODUTO CRIADO VIA XML',
+            detalhe=(
+                f'Produto criado automaticamente via XML: {produto.cod_prod} - '
+                f'NF {nf.numero}. Cadastro mestre preservado para produtos existentes.'
+            ),
         )
-    return avisos
 
 
 def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
@@ -361,8 +372,6 @@ def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
     itens_filtros = []
 
     for item_nf in nf.itens.select_related('produto').all():
-        if item_nf.produto_id is None:
-            continue
         produto = item_nf.produto
         categoria = _normalizar_categoria_produto(produto)
         if categoria == Produto.Categoria.FILTROS:
