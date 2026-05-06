@@ -285,6 +285,30 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(response_separacao.status_code, 200)
 		self.assertContains(response_conferencia, 'action-icon--detalhe')
 		self.assertContains(response_separacao, 'action-icon--detalhe')
+		self.assertContains(response_separacao, 'Imprimir minuta')
+
+	def test_impressao_minuta_separacao_retorna_pdf_com_dados_da_tarefa(self):
+		response = self.client.get(f'/separacao/{self.tarefa.id}/imprimir/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response['Content-Type'], 'application/pdf')
+		self.assertIn('minuta-separacao-1.pdf', response['Content-Disposition'])
+		self.assertTrue(response.content.startswith(b'%PDF'))
+		self.assertIn(b'MINUTA DE SEPARACAO', response.content)
+		self.assertIn(b'1410289', response.content)
+		self.assertIn(b'Rodrigo', response.content)
+		self.assertIn(b'L01', response.content)
+		self.assertIn(b'FILTROS', response.content)
+		self.assertIn(b'123223', response.content)
+		self.assertIn(b'123039', response.content)
+
+	def test_impressao_minuta_separacao_respeita_permissao_por_setor(self):
+		self.client.force_login(self.usuario_conferente)
+
+		response = self.client.get(f'/separacao/{self.tarefa.id}/imprimir/')
+
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(response.headers['Location'], '/conferencia/')
 
 	def test_conferente_nao_ve_lupa_na_lista_de_conferencia(self):
 		self.client.force_login(self.usuario_conferente)

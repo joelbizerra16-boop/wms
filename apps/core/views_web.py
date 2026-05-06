@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from io import BytesIO
 
 import pandas as pd
 from django.contrib import messages
@@ -11,9 +12,14 @@ from django.db import IntegrityError
 from django.db.models import Prefetch, Q
 import json
 
-from django.http import HttpResponseForbidden, JsonResponse
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia
@@ -355,6 +361,141 @@ def _resumo_tarefa_separacao(itens_exibicao):
         'separados': separados,
         'pendentes': max(total_itens - separados, 0),
     }
+
+
+def _formatar_quantidade_pdf(valor):
+    numero = valor if valor is not None else 0
+    if isinstance(numero, int):
+        return str(numero)
+    texto = format(numero, 'f') if hasattr(numero, 'as_tuple') else str(numero)
+    if texto.endswith('.00'):
+        return texto[:-3]
+    if '.' in texto:
+        return texto.rstrip('0').rstrip('.')
+    return texto
+
+
+def _build_minuta_separacao_pdf(tarefa, cabecalho_tarefa, itens_exibicao):
+    buffer = BytesIO()
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        pageCompression=0,
+    )
+    styles = getSampleStyleSheet()
+    titulo_style = ParagraphStyle(
+        'MinutaTitulo',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=15,
+        leading=18,
+        alignment=1,
+        spaceAfter=8,
+    )
+    cabecalho_style = ParagraphStyle(
+        'MinutaCabecalho',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9.5,
+        leading=12,
+    )
+    assinatura_style = ParagraphStyle(
+        'MinutaAssinatura',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=10,
+        leading=12,
+        alignment=1,
+    )
+
+    data_hora = timezone.localtime(timezone.now()).strftime('%d/%m/%Y %H:%M')
+    header_rows = [
+        [
+            Paragraph(f'<b>NF:</b> {cabecalho_tarefa["nf_numero"]}', cabecalho_style),
+            Paragraph(f'<b>ROTA:</b> {getattr(tarefa.rota, "nome", "-") or "-"}', cabecalho_style),
+        ],
+        [Paragraph(f'<b>CLIENTE:</b> {cabecalho_tarefa["cliente_nome"]}', cabecalho_style), ''],
+        [
+            Paragraph(f'<b>DATA / HORA:</b> {data_hora}', cabecalho_style),
+            Paragraph(f'<b>SETOR:</b> {tarefa.get_setor_display().upper()}', cabecalho_style),
+        ],
+        [Paragraph(f'<b>QUANTIDADE TOTAL DE ITENS:</b> {len(itens_exibicao)}', cabecalho_style), ''],
+    ]
+
+    header_table = Table(header_rows, colWidths=[90 * mm, 90 * mm], hAlign='LEFT')
+    header_table.setStyle(
+        TableStyle(
+            [
+                ('BOX', (0, 0), (-1, -1), 0.7, colors.black),
+                ('INNERGRID', (0, 0), (-1, -1), 0.35, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('SPAN', (0, 1), (1, 1)),
+                ('SPAN', (0, 3), (1, 3)),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+
+    table_data = [[
+        'COD PROD',
+        'DESCRICAO',
+        'QTDE',
+        'QTDE SEPARADA',
+    ]]
+    for item in itens_exibicao:
+        table_data.append(
+            [
+                item['produto'] or '-',
+                item['descricao'] or '-',
+                _formatar_quantidade_pdf(item['quantidade_total']),
+                _formatar_quantidade_pdf(item['quantidade_separada']),
+            ]
+        )
+
+    itens_table = Table(
+        table_data,
+        colWidths=[28 * mm, 102 * mm, 24 * mm, 30 * mm],
+        repeatRows=1,
+        hAlign='LEFT',
+    )
+    itens_table.setStyle(
+        TableStyle(
+            [
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e2e8f0')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('LEADING', (0, 0), (-1, -1), 11),
+                ('GRID', (0, 0), (-1, -1), 0.4, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+
+    elements = [
+        Paragraph('MINUTA DE SEPARACAO', titulo_style),
+        header_table,
+        Spacer(1, 8 * mm),
+        itens_table,
+        Spacer(1, 18 * mm),
+        Paragraph('_____________________________', assinatura_style),
+        Spacer(1, 3 * mm),
+        Paragraph('SEPARADOR', assinatura_style),
+    ]
+    document.build(elements)
+    return buffer.getvalue()
 
 
 @require_profiles(Usuario.Perfil.GESTOR)
@@ -893,6 +1034,30 @@ def separacao_exec_web(request, tarefa_id):
     except Exception as exc:
         logger.exception('Erro separacao GET: tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(request.user, 'id', None), str(exc))
         raise
+
+
+@require_profiles(Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
+def separacao_imprimir_web(request, tarefa_id):
+    try:
+        tarefa = _obter_tarefa_permitida(request, tarefa_id)
+    except PermissionDenied as exc:
+        logger.warning(
+            'separacao_imprimir_web 403: tarefa_id=%s user_id=%s motivo=%s',
+            tarefa_id,
+            getattr(request.user, 'id', None),
+            str(exc),
+        )
+        return HttpResponseForbidden(str(exc))
+
+    itens_exibicao = listar_itens_tarefa_para_exibicao_seguro(tarefa)
+    pdf_content = _build_minuta_separacao_pdf(
+        tarefa,
+        _cabecalho_tarefa_separacao(tarefa),
+        itens_exibicao,
+    )
+    response = HttpResponse(pdf_content, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="minuta-separacao-{tarefa.id}.pdf"'
+    return response
 
 
 @require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
