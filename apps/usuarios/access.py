@@ -26,6 +26,7 @@ def build_access_context(user):
     setores = list(user.setores.values_list('nome', flat=True)) if getattr(user, 'is_authenticated', False) else []
     setor_liberado = ', '.join(setores) if setores else getattr(user, 'setor', None)
     can_manage = perfil == Usuario.Perfil.GESTOR
+    can_print_minuta = can_manage or bool(getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False))
     return {
         'acesso': {
             'perfil': perfil,
@@ -33,6 +34,7 @@ def build_access_context(user):
             'is_operacional': is_operacional,
             'can_view_home': can_manage,
             'can_manage': can_manage,
+            'can_print_minuta': can_print_minuta,
             'can_view_nf_detail': can_view_nf_detail(user),
             'can_separacao': perfil in {Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR},
             'can_conferencia': perfil in {Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR},

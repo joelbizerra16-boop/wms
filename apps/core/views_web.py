@@ -449,15 +449,19 @@ def _build_minuta_separacao_pdf(tarefa, cabecalho_tarefa, itens_exibicao):
         'QTDE',
         'QTDE SEPARADA',
     ]]
+    total_quantidade = 0
     for item in itens_exibicao:
+        quantidade_total = item['quantidade_total'] or 0
+        total_quantidade += quantidade_total
         table_data.append(
             [
                 item['produto'] or '-',
                 item['descricao'] or '-',
-                _formatar_quantidade_pdf(item['quantidade_total']),
-                _formatar_quantidade_pdf(item['quantidade_separada']),
+                _formatar_quantidade_pdf(quantidade_total),
+                '',
             ]
         )
+    table_data.append(['', 'TOTAL QTDE:', _formatar_quantidade_pdf(total_quantidade), ''])
 
     itens_table = Table(
         table_data,
@@ -469,8 +473,10 @@ def _build_minuta_separacao_pdf(tarefa, cabecalho_tarefa, itens_exibicao):
         TableStyle(
             [
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e2e8f0')),
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#f8fafc')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (1, -1), (2, -1), 'Helvetica-Bold'),
                 ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
                 ('FONTSIZE', (0, 0), (-1, -1), 9),
                 ('LEADING', (0, 0), (-1, -1), 11),
@@ -1038,6 +1044,10 @@ def separacao_exec_web(request, tarefa_id):
 
 @require_profiles(Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
 def separacao_imprimir_web(request, tarefa_id):
+    if not (getattr(request.user, 'perfil', None) == Usuario.Perfil.GESTOR or getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False)):
+        messages.warning(request, 'Acesso redirecionado para a sua area permitida.')
+        return redirect('web-separacao-lista')
+
     try:
         tarefa = _obter_tarefa_permitida(request, tarefa_id)
     except PermissionDenied as exc:

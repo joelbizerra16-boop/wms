@@ -301,6 +301,10 @@ class DashboardWebTests(TestCase):
 		self.assertIn(b'FILTROS', response.content)
 		self.assertIn(b'123223', response.content)
 		self.assertIn(b'123039', response.content)
+		self.assertIn(b'TOTAL QTDE:', response.content)
+		self.assertIn(b'15', response.content)
+		self.assertNotIn(b'( 3) Tj', response.content)
+		self.assertNotIn(b'( 10) Tj', response.content)
 
 	def test_impressao_minuta_separacao_respeita_permissao_por_setor(self):
 		self.client.force_login(self.usuario_conferente)
@@ -309,6 +313,14 @@ class DashboardWebTests(TestCase):
 
 		self.assertEqual(response.status_code, 302)
 		self.assertEqual(response.headers['Location'], '/conferencia/')
+
+	def test_separador_nao_pode_gerar_minuta_por_url_direta(self):
+		self.client.force_login(self.usuario_separador)
+
+		response = self.client.get(f'/separacao/{self.tarefa.id}/imprimir/')
+
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(response.headers['Location'], '/separacao/')
 
 	def test_conferente_nao_ve_lupa_na_lista_de_conferencia(self):
 		self.client.force_login(self.usuario_conferente)
@@ -327,6 +339,15 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertNotContains(response, 'action-icon--detalhe')
 		self.assertNotContains(response, 'web-conferencia-detalhe')
+		self.assertNotContains(response, 'Imprimir minuta')
+
+	def test_conferente_nao_ve_botao_minuta_na_lista_separacao(self):
+		self.client.force_login(self.usuario_conferente)
+
+		response = self.client.get('/separacao/')
+
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(response.headers['Location'], '/conferencia/')
 
 	def test_detalhe_nf_exibe_pendencia_de_separacao(self):
 		response = self.client.get(f'/conferencia/detalhe/{self.nf.id}/')

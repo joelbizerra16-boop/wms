@@ -35,6 +35,7 @@
                     {% if tarefa.status == 'LIBERADO_COM_RESTRICAO' %}⚠{% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' %}✔{% elif tarefa.status == 'EM_EXECUCAO' %}📦{% else %}▶{% endif %}
                 </a>
                 {% endif %}
+                {% if acesso.can_print_minuta %}
                 <a
                     class="action-icon status-aberto"
                     href="{% url 'web-separacao-imprimir' tarefa.id %}"
@@ -44,6 +45,7 @@
                 >
                     🖨
                 </a>
+                {% endif %}
                 {% if acesso.can_view_nf_detail and tarefa.nf_numero and tarefa.nf_numero != '-' %}
                 <a
                     class="action-icon action-icon--detalhe status-aberto"
