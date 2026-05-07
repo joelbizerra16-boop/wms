@@ -145,11 +145,20 @@ class DashboardWebTests(TestCase):
 		self.assertEqual(cliente, 'CLIENTE NAO INFORMADO')
 		self.assertTrue(any('Item sem cliente vinculado' in message for message in logs.output))
 
-	def test_home_operacional_agenda_atualizacao_automatica_a_cada_cinco_minutos(self):
+	def test_home_operacional_e_estatica_e_sem_polling(self):
 		response = self.client.get('/home/')
 
 		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'const dashboardRefreshIntervalMs = 300000;', html=False)
+		self.assertContains(response, 'Home Operacional WMS')
+		self.assertContains(response, 'Bem-vindo ao sistema WMS')
+		self.assertNotContains(response, '/api/dashboard/', html=False)
+		self.assertNotContains(response, 'dashboardRefreshIntervalMs', html=False)
+		self.assertNotContains(response, 'fetch(', html=False)
+
+	def test_home_dashboard_api_antiga_nao_esta_disponivel(self):
+		response = self.client.get('/api/dashboard/')
+
+		self.assertEqual(response.status_code, 404)
 
 	def test_dashboard_separacao_agenda_atualizacao_automatica_a_cada_cinco_minutos(self):
 		response = self.client.get('/dashboard/separacao/')
@@ -507,11 +516,11 @@ class DashboardWebTests(TestCase):
 		self.tarefa.status = Tarefa.Status.CONCLUIDO
 		self.tarefa.save(update_fields=['status', 'updated_at'])
 
-		response = self.client.get('/api/dashboard/')
+		response = self.client.get('/home/')
 
 		self.assertEqual(response.status_code, 200)
-		payload = response.json()
-		self.assertEqual(payload['em_conferencia'], 1)
+		self.assertNotContains(response, 'Resumo do dia')
+		self.assertContains(response, 'Controle operacional')
 
 	def test_tela_separacao_contém_script_de_polling(self):
 		self.tarefa.status = Tarefa.Status.EM_EXECUCAO

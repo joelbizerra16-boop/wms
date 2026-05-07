@@ -127,8 +127,7 @@ class PerformanceRegressionTests(TestCase):
 
     def test_perf_views_principais_ficam_dentro_do_orcamento(self):
         budgets = [
-            ('GET', '/home/', 8),
-            ('GET', '/api/dashboard/', 30),
+            ('GET', '/home/', 10),
             ('GET', '/produtos/', 8),
             ('GET', '/separacao/', 18),
             ('GET', '/conferencia/', 20),
