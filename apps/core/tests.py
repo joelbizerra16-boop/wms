@@ -11,8 +11,10 @@ class HealthCheckTests(SimpleTestCase):
 
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import F
 from django.test import Client, TestCase, override_settings
@@ -26,6 +28,7 @@ from apps.produtos.models import Produto
 from apps.rotas.models import Rota
 from apps.tarefas.models import Tarefa, TarefaItem
 from apps.usuarios.models import Setor, Usuario
+from apps.core.views_dashboard import _cliente_tarefa
 
 
 @override_settings(ROOT_URLCONF='config.urls')
@@ -119,6 +122,28 @@ class DashboardWebTests(TestCase):
 
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'Dashboard de Conferência')
+
+	def test_dashboard_conferencia_nao_quebra_quando_nf_esta_sem_cliente_valido(self):
+		class NFInconsistente:
+			id = 987
+			cliente_id = 123
+
+			@property
+			def cliente(self):
+				raise ObjectDoesNotExist('cliente ausente')
+
+		class ItemInconsistente:
+			id = 321
+			tarefa_id = 654
+			nf_id = 987
+			nf = NFInconsistente()
+			tarefa = SimpleNamespace(nf_id=None, nf=None)
+
+		with self.assertLogs('apps.core.views_dashboard', level='INFO') as logs:
+			cliente = _cliente_tarefa(ItemInconsistente())
+
+		self.assertEqual(cliente, 'CLIENTE NAO INFORMADO')
+		self.assertTrue(any('Item sem cliente vinculado' in message for message in logs.output))
 
 	def test_home_operacional_agenda_atualizacao_automatica_a_cada_cinco_minutos(self):
 		response = self.client.get('/home/')

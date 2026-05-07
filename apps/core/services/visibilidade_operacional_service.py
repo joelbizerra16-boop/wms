@@ -1,5 +1,6 @@
 import logging
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Prefetch
 from django.utils import timezone
 
@@ -12,6 +13,23 @@ from apps.tarefas.services.separacao_service import listar_tarefas_disponiveis
 from apps.usuarios.models import Setor
 
 logger = logging.getLogger(__name__)
+
+
+def _nome_cliente_nf(nf):
+    fallback = 'CLIENTE NAO INFORMADO'
+    if nf is None or not getattr(nf, 'cliente_id', None):
+        logger.info('NF sem cliente vinculado na conferencia nf_id=%s', getattr(nf, 'id', None))
+        return fallback
+    try:
+        cliente = nf.cliente
+    except ObjectDoesNotExist:
+        logger.info(
+            'NF sem cliente vinculado na conferencia nf_id=%s cliente_id=%s',
+            getattr(nf, 'id', None),
+            getattr(nf, 'cliente_id', None),
+        )
+        return fallback
+    return getattr(cliente, 'nome', '') or fallback
 
 
 def _contains_busca(haystack, busca):
@@ -152,7 +170,7 @@ def get_nfs_monitoramento_conferencia(usuario, data_inicio=None, data_fim=None, 
             texto_busca = ' '.join(
                 [
                     str(nf.numero or ''),
-                    str(nf.cliente.nome or ''),
+                    str(_nome_cliente_nf(nf) or ''),
                     str(nf.rota.nome or ''),
                     str(status or ''),
                 ]
@@ -170,7 +188,7 @@ def get_nfs_monitoramento_conferencia(usuario, data_inicio=None, data_fim=None, 
             {
                 'id': nf.id,
                 'numero': nf.numero,
-                'cliente': nf.cliente.nome,
+                'cliente': _nome_cliente_nf(nf),
                 'rota': f'Balcao - {nf.rota.nome}' if nf.balcao else nf.rota.nome,
                 'status_fiscal': nf.status_fiscal,
                 'status': status,

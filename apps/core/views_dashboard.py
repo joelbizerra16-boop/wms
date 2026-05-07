@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 import logging
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.paginator import Paginator
 from django.db.models import F, Prefetch, Q
 from django.http import Http404
@@ -251,11 +252,49 @@ def _data_referencia_item_dashboard(item):
 
 
 def _cliente_tarefa(item):
-    if item.nf_id and item.nf and item.nf.cliente_id:
-        return item.nf.cliente.nome
-    if item.tarefa.nf_id and item.tarefa.nf and item.tarefa.nf.cliente_id:
-        return item.tarefa.nf.cliente.nome
-    return 'CONSOLIDADO'
+    fallback_sem_cliente = 'CLIENTE NAO INFORMADO'
+    if not item:
+        return ''
+
+    nf = None
+    try:
+        if item.nf_id:
+            nf = item.nf
+        elif item.tarefa.nf_id:
+            nf = item.tarefa.nf
+    except ObjectDoesNotExist:
+        logger.info(
+            'Item sem NF consistente no dashboard da conferencia item_id=%s tarefa_id=%s',
+            getattr(item, 'id', None),
+            getattr(item, 'tarefa_id', None),
+        )
+        return fallback_sem_cliente
+
+    if nf is None:
+        return 'CONSOLIDADO'
+
+    if not getattr(nf, 'cliente_id', None):
+        logger.info(
+            'Item sem cliente vinculado no dashboard da conferencia item_id=%s tarefa_id=%s nf_id=%s',
+            getattr(item, 'id', None),
+            getattr(item, 'tarefa_id', None),
+            getattr(nf, 'id', None),
+        )
+        return fallback_sem_cliente
+
+    try:
+        cliente = nf.cliente
+    except ObjectDoesNotExist:
+        logger.info(
+            'Item sem cliente vinculado no dashboard da conferencia item_id=%s tarefa_id=%s nf_id=%s cliente_id=%s',
+            getattr(item, 'id', None),
+            getattr(item, 'tarefa_id', None),
+            getattr(nf, 'id', None),
+            getattr(nf, 'cliente_id', None),
+        )
+        return fallback_sem_cliente
+
+    return getattr(cliente, 'nome', '') or fallback_sem_cliente
 
 
 def _nf_tarefa(item):
@@ -666,7 +705,7 @@ def dashboard_conferencia(request):
     percentual_concluido = 0 if total_nfs == 0 else round(conferidas / total_nfs * 100, 2)
 
     itens_separacao = list(
-        TarefaItem.objects.select_related('tarefa', 'tarefa__nf', 'produto', 'nf')
+        TarefaItem.objects.select_related('tarefa', 'tarefa__nf', 'tarefa__nf__cliente', 'produto', 'nf', 'nf__cliente')
         .filter(tarefa__ativo=True)
         .filter(Q(tarefa__nf__isnull=True) | ~Q(tarefa__nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
     )
