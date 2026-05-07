@@ -11,7 +11,7 @@ from apps.core.services.produto_validacao_service import (
     validar_produto,
 )
 from apps.logs.models import Log, UserActivityLog
-from apps.nf.models import NotaFiscal
+from apps.nf.models import NotaFiscal, NotaFiscalItem
 from apps.nf.services.consistencia_service import sanear_consistencia_nf, separacao_concluida_nf
 from apps.nf.services.status_service import atualizar_status_nf, sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
@@ -102,12 +102,33 @@ def _itens_separacao_nf_qs(nf):
     return TarefaItem.objects.filter(Q(tarefa__nf=nf) | Q(nf=nf))
 
 
+def _itens_nf_relacionados(nf):
+    itens = getattr(nf, '_prefetched_objects_cache', {}).get('itens')
+    if itens is not None:
+        return itens
+    return nf.itens.select_related('produto').all()
+
+
+def _tarefas_nf_relacionadas(nf):
+    tarefas = getattr(nf, '_prefetched_objects_cache', {}).get('tarefas')
+    if tarefas is not None:
+        return tarefas
+    return nf.tarefas.all()
+
+
+def _conferencias_nf_relacionadas(nf):
+    conferencias = getattr(nf, '_prefetched_objects_cache', {}).get('conferencias')
+    if conferencias is not None:
+        return conferencias
+    return nf.conferencias.exclude(status=Conferencia.Status.CANCELADA).select_related('conferente').prefetch_related('itens')
+
+
 def _setor_item_nf(item_nf):
     return _normalizar_setor_operacional(getattr(item_nf.produto, 'categoria', None))
 
 
 def _itens_nf_por_usuario(nf, usuario):
-    itens_nf = [item_nf for item_nf in nf.itens.select_related('produto').all() if item_nf.produto_id is not None]
+    itens_nf = [item_nf for item_nf in _itens_nf_relacionados(nf) if item_nf.produto_id is not None]
     if usuario is None or _usuario_pode_ver_todos_setores(usuario):
         return itens_nf
     setores_usuario = _setores_usuario(usuario)
@@ -127,11 +148,12 @@ def _conferencia_cobre_produtos(conferencia, produto_ids):
     return bool(_produto_ids_conferencia(conferencia).intersection(produto_ids))
 
 
-def _conferencias_relacionadas_ao_usuario(nf, usuario, conferencias=None):
-    itens_usuario = _itens_nf_por_usuario(nf, usuario)
-    produto_ids_usuario = {item_nf.produto_id for item_nf in itens_usuario}
+def _conferencias_relacionadas_ao_usuario(nf, usuario, conferencias=None, produto_ids_usuario=None):
+    if produto_ids_usuario is None:
+        itens_usuario = _itens_nf_por_usuario(nf, usuario)
+        produto_ids_usuario = {item_nf.produto_id for item_nf in itens_usuario}
     if conferencias is None:
-        conferencias = nf.conferencias.exclude(status=Conferencia.Status.CANCELADA).prefetch_related('itens')
+        conferencias = _conferencias_nf_relacionadas(nf)
     return [
         conferencia
         for conferencia in conferencias
@@ -215,10 +237,54 @@ def avaliar_liberacao_conferencia(nf):
 def listar_nfs_disponiveis(usuario=None):
     if usuario is not None and not _usuario_pode_ver_todos_setores(usuario) and not _setores_usuario(usuario):
         return []
-    tarefas_prefetch = Prefetch('tarefas', queryset=Tarefa.objects.prefetch_related('itens').order_by('id'))
+    tarefas_prefetch = Prefetch(
+        'tarefas',
+        queryset=Tarefa.objects.only('id', 'nf_id', 'rota_id', 'tipo', 'setor').order_by('id'),
+    )
+    itens_prefetch = Prefetch(
+        'itens',
+        queryset=NotaFiscalItem.objects.select_related('produto').only(
+            'id',
+            'nf_id',
+            'produto_id',
+            'quantidade',
+            'produto__id',
+            'produto__categoria',
+        ),
+    )
+    conferencias_prefetch = Prefetch(
+        'conferencias',
+        queryset=Conferencia.objects.exclude(status=Conferencia.Status.CANCELADA)
+        .select_related('conferente')
+        .prefetch_related(
+            Prefetch(
+                'itens',
+                queryset=ConferenciaItem.objects.only(
+                    'id',
+                    'conferencia_id',
+                    'produto_id',
+                    'status',
+                    'qtd_esperada',
+                    'qtd_conferida',
+                ),
+            )
+        )
+        .only(
+            'id',
+            'nf_id',
+            'conferente_id',
+            'status',
+            'created_at',
+            'updated_at',
+            'conferente__id',
+            'conferente__nome',
+            'conferente__username',
+        )
+        .order_by('-created_at'),
+    )
     nfs = (
         NotaFiscal.objects.select_related('cliente', 'rota')
-        .prefetch_related(tarefas_prefetch, 'itens__produto', 'itens_tarefa', 'conferencias__itens')
+        .prefetch_related(tarefas_prefetch, itens_prefetch, conferencias_prefetch)
         .filter(status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA, ativa=True)
         .order_by('-data_emissao')
     )
@@ -234,10 +300,16 @@ def listar_nfs_disponiveis(usuario=None):
         if not _nf_pertence_a_setores_usuario(nf, usuario):
             continue
 
+        itens_usuario = _itens_nf_por_usuario(nf, usuario)
+        produto_ids_usuario = {item_nf.produto_id for item_nf in itens_usuario}
+        if not produto_ids_usuario:
+            continue
+
         conferencias_relacionadas = _conferencias_relacionadas_ao_usuario(
             nf,
             usuario,
-            conferencias=list(nf.conferencias.select_related('conferente').all()),
+            conferencias=_conferencias_nf_relacionadas(nf),
+            produto_ids_usuario=produto_ids_usuario,
         )
         for conferencia in conferencias_relacionadas:
             if (
@@ -247,12 +319,6 @@ def listar_nfs_disponiveis(usuario=None):
             ):
                 conferencia.status = Conferencia.Status.AGUARDANDO
                 conferencia.save(update_fields=['status', 'updated_at'])
-
-        itens_usuario = _itens_nf_por_usuario(nf, usuario)
-        produto_ids_usuario = {item_nf.produto_id for item_nf in itens_usuario}
-        if not produto_ids_usuario:
-            continue
-
         conferencia_ativa_usuario = _conferencia_ativa_do_usuario(conferencias_relacionadas, usuario)
         conferencia_ativa_outro = _conferencia_ativa_outro_usuario(conferencias_relacionadas, usuario)
         conferencia_em_fluxo_obj = conferencia_ativa_usuario or conferencia_ativa_outro or _conferencia_mais_recente(
@@ -651,11 +717,11 @@ def _gerar_retorno_para_separacao(conferencia):
 def _tarefas_relacionadas_nf(nf):
     setores_nf = {
         item.produto.categoria
-        for item in nf.itens.select_related('produto').all()
+        for item in _itens_nf_relacionados(nf)
         if item.produto_id is not None
         if item.produto.categoria != Produto.Categoria.FILTROS
     }
-    tarefas = [tarefa for tarefa in nf.tarefas.all() if tarefa.tipo == Tarefa.Tipo.FILTRO]
+    tarefas = [tarefa for tarefa in _tarefas_nf_relacionadas(nf) if tarefa.tipo == Tarefa.Tipo.FILTRO]
     if not setores_nf:
         return tarefas
 

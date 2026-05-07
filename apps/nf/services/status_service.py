@@ -5,8 +5,19 @@ from apps.nf.models import NotaFiscal
 from apps.tarefas.models import Tarefa, TarefaItem
 
 
-def _ultima_conferencia(nf):
-    return nf.conferencias.exclude(status=Conferencia.Status.CANCELADA).order_by('-created_at').first()
+def _conferencias_validas_nf(nf):
+    conferencias = getattr(nf, '_prefetched_objects_cache', {}).get('conferencias')
+    if conferencias is not None:
+        return [conferencia for conferencia in conferencias if conferencia.status != Conferencia.Status.CANCELADA]
+    return list(nf.conferencias.exclude(status=Conferencia.Status.CANCELADA).prefetch_related('itens'))
+
+
+def _ultima_conferencia(nf, conferencias_validas=None):
+    if conferencias_validas is None:
+        conferencias_validas = _conferencias_validas_nf(nf)
+    if not conferencias_validas:
+        return None
+    return max(conferencias_validas, key=lambda conferencia: (conferencia.created_at, conferencia.id))
 
 
 def _status_base_nf(nf, conferencias_validas):
@@ -42,8 +53,8 @@ def atualizar_status_nf(nf):
         TarefaItem.objects.select_related('tarefa')
         .filter(nf=nf, possui_restricao=True)
     )
-    conferencias_validas = list(nf.conferencias.exclude(status=Conferencia.Status.CANCELADA).prefetch_related('itens'))
-    ultima_conferencia = _ultima_conferencia(nf)
+    conferencias_validas = _conferencias_validas_nf(nf)
+    ultima_conferencia = _ultima_conferencia(nf, conferencias_validas)
     status_base = _status_base_nf(nf, conferencias_validas)
 
     possui_bloqueio_tarefa = any(item.tarefa.status == Tarefa.Status.FECHADO_COM_RESTRICAO for item in itens_com_restricao)

@@ -6,6 +6,13 @@ from apps.nf.models import NotaFiscal
 from apps.tarefas.models import Tarefa, TarefaItem
 
 
+def _conferencias_validas_nf(nf):
+    conferencias = getattr(nf, '_prefetched_objects_cache', {}).get('conferencias')
+    if conferencias is not None:
+        return [conferencia for conferencia in conferencias if conferencia.status != Conferencia.Status.CANCELADA]
+    return nf.conferencias.exclude(status=Conferencia.Status.CANCELADA)
+
+
 def separacao_concluida_nf(nf):
     tarefas_nf = (
         Tarefa.objects.filter(Q(nf=nf) | Q(itens__nf=nf))
@@ -27,13 +34,13 @@ def separacao_concluida_nf(nf):
 
 
 def sanear_consistencia_nf(nf, *, actor=None, persist=False, exigir_conferencia=False):
-    conferencias_validas = nf.conferencias.exclude(status=Conferencia.Status.CANCELADA)
+    conferencias_validas = _conferencias_validas_nf(nf)
     separacao_ok = separacao_concluida_nf(nf)
 
     if not separacao_ok:
-        removidas = conferencias_validas.count()
+        removidas = len(conferencias_validas) if isinstance(conferencias_validas, list) else conferencias_validas.count()
         if persist and removidas:
-            conferencias_validas.delete()
+            nf.conferencias.exclude(status=Conferencia.Status.CANCELADA).delete()
         if persist and nf.status != NotaFiscal.Status.INCONSISTENTE:
             nf.status = NotaFiscal.Status.INCONSISTENTE
             nf.bloqueada = True
@@ -50,7 +57,7 @@ def sanear_consistencia_nf(nf, *, actor=None, persist=False, exigir_conferencia=
             'conferencias_removidas': removidas,
         }
 
-    if exigir_conferencia and not conferencias_validas.exists():
+    if exigir_conferencia and not (bool(conferencias_validas) if isinstance(conferencias_validas, list) else conferencias_validas.exists()):
         if persist and nf.status != NotaFiscal.Status.INCONSISTENTE:
             nf.status = NotaFiscal.Status.INCONSISTENTE
             nf.bloqueada = True

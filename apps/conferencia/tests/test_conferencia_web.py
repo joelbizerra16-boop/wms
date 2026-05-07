@@ -1,7 +1,10 @@
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
+from apps.conferencia.services.conferencia_service import listar_nfs_disponiveis
 from apps.nf.models import NotaFiscal, NotaFiscalItem
 from apps.produtos.models import Produto
 from apps.rotas.models import Rota
@@ -87,6 +90,45 @@ class ConferenciaWebTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'col-rota-mobile', html=False)
         self.assertContains(response, 'Rota Web')
+
+    def test_listar_nfs_disponiveis_evitar_query_de_conferencia_por_nf(self):
+        for indice in range(2, 6):
+            nf = NotaFiscal.objects.create(
+                chave_nfe=f'35111111111111111111550010000000011000000{indice:03d}',
+                numero=f'1410{indice:03d}',
+                cliente=self.cliente,
+                rota=self.rota,
+                data_emissao='2026-04-24T10:00:00-03:00',
+                status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+                bloqueada=False,
+                ativa=True,
+            )
+            NotaFiscalItem.objects.create(nf=nf, produto=self.produto, quantidade='10.00')
+            tarefa = Tarefa.objects.create(
+                nf=nf,
+                tipo=Tarefa.Tipo.FILTRO,
+                setor=Setor.Codigo.FILTROS,
+                rota=self.rota,
+                status=Tarefa.Status.CONCLUIDO,
+            )
+            TarefaItem.objects.create(
+                tarefa=tarefa,
+                produto=self.produto,
+                quantidade_total='10.00',
+                quantidade_separada='10.00',
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            nfs = listar_nfs_disponiveis(self.usuario)
+
+        self.assertGreaterEqual(len(nfs), 5)
+        tabela_conferencia = Conferencia._meta.db_table
+        consultas_por_nf = [
+            query['sql']
+            for query in queries.captured_queries
+            if tabela_conferencia in query['sql'].lower() and '"nf_id" =' in query['sql'].lower()
+        ]
+        self.assertFalse(consultas_por_nf)
 
     def test_bipagem_atualiza_quantidade_e_feedback(self):
         self._iniciar()
