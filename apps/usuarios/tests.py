@@ -1,6 +1,9 @@
 from datetime import timedelta
+from unittest.mock import patch
 
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.clientes.models import Cliente
@@ -8,7 +11,8 @@ from apps.nf.models import NotaFiscal, NotaFiscalItem
 from apps.produtos.models import Produto
 from apps.rotas.models import Rota
 from apps.tarefas.models import Tarefa, TarefaItem
-from apps.usuarios.models import Setor, Usuario
+from apps.usuarios.models import Setor, Usuario, UsuarioSessao
+from apps.usuarios.session_utils import usuario_esta_logado
 
 
 @override_settings(ROOT_URLCONF='config.urls')
@@ -184,6 +188,83 @@ class MonitoramentoUsuariosOnlineTests(TestCase):
         response = self.client.get('/usuarios/logados/')
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'OFFLINE')
+
+
+@override_settings(ROOT_URLCONF='config.urls')
+class UsuarioSessaoMiddlewareTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.rota = Rota.objects.create(nome='R-MW', cep_inicial='01000000', cep_final='01999999')
+        self.cliente = Cliente.objects.create(nome='Cliente MW', inscricao_estadual='123456780')
+        self.produto = Produto.objects.create(
+            cod_prod='MW001',
+            descricao='Produto MW',
+            cod_ean='789MW001',
+            categoria=Produto.Categoria.LUBRIFICANTE,
+        )
+        self.nf = NotaFiscal.objects.create(
+            chave_nfe='35111111111111111111550010000000011000000777',
+            numero='200777',
+            cliente=self.cliente,
+            rota=self.rota,
+            data_emissao='2026-04-24T10:00:00-03:00',
+            status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+            bloqueada=False,
+            ativa=True,
+        )
+        self.usuario = Usuario.objects.create_user(
+            username='separador_mw',
+            nome='Separador MW',
+            perfil=Usuario.Perfil.SEPARADOR,
+            setores=[Setor.Codigo.LUBRIFICANTE],
+            password='123456',
+            is_active=True,
+        )
+        self.tarefa = Tarefa.objects.create(
+            nf=None,
+            tipo=Tarefa.Tipo.ROTA,
+            setor=Setor.Codigo.LUBRIFICANTE,
+            rota=self.rota,
+            status=Tarefa.Status.ABERTO,
+        )
+        TarefaItem.objects.create(
+            tarefa=self.tarefa,
+            nf=self.nf,
+            produto=self.produto,
+            quantidade_total='2.00',
+            quantidade_separada='0.00',
+        )
+        self.client.login(username='separador_mw', password='123456')
+
+    def test_middleware_cria_somente_uma_sessao_monitoramento(self):
+        UsuarioSessao.objects.create(usuario=self.usuario, ativo=True, total_logins_dia=1)
+        UsuarioSessao.objects.create(usuario=self.usuario, ativo=True, total_logins_dia=1)
+
+        response = self.client.get('/separacao/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(UsuarioSessao.objects.filter(usuario=self.usuario).count(), 1)
+
+    def test_polling_api_nao_reconsulta_usuario_sessao_dentro_do_heartbeat(self):
+        self.client.get('/separacao/')
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(f'/api/status/tarefa/{self.tarefa.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(any('usuarios_usuariosessao' in query['sql'].lower() for query in queries.captured_queries))
+
+    def test_usuario_esta_logado_consulta_monitoramento_leve(self):
+        UsuarioSessao.objects.create(
+            usuario=self.usuario,
+            ativo=True,
+            total_logins_dia=1,
+        )
+
+        with patch('apps.usuarios.session_utils.Session.objects.filter') as session_filter:
+            self.assertTrue(usuario_esta_logado(self.usuario))
+
+        session_filter.assert_not_called()
 
 
 @override_settings(ROOT_URLCONF='config.urls')

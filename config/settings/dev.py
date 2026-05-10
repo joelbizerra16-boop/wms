@@ -1,7 +1,6 @@
 from .base import *
 
 import dj_database_url
-from decouple import config
 
 
 DEBUG = True
@@ -14,9 +13,9 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 
 DATABASES = {
-	'default': dj_database_url.config(
-		default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+	'default': dj_database_url.parse(
+		'postgresql://postgres:JOELRAFA010103@db.qvsfsccdvuujqxceogfz.supabase.co:5432/postgres?sslmode=require',
 		conn_max_age=600,
-		ssl_require=config('DEV_DB_SSL_REQUIRE', default=False, cast=bool),
+		ssl_require=True,
 	)
 }
