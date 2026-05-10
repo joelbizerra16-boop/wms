@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import dj_database_url
 from decouple import Csv, config
 
 
@@ -78,19 +79,30 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 ASGI_APPLICATION = 'config.asgi.application'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='wms_db'),
-        'USER': config('DB_USER', default='wms_user'),
-        'PASSWORD': config('DB_PASSWORD', default='Wms@2026!Secure#Base'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
-        'OPTIONS': {
-            'client_encoding': 'UTF8',
-        },
+DATABASE_URL = config('DATABASE_URL', default='')
+
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=DATABASE_URL.startswith(('postgres://', 'postgresql://')),
+        )
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': config('DB_NAME', default='wms_db'),
+            'USER': config('DB_USER', default='wms_user'),
+            'PASSWORD': config('DB_PASSWORD', default='Wms@2026!Secure#Base'),
+            'HOST': config('DB_HOST', default='localhost'),
+            'PORT': config('DB_PORT', default='5432'),
+            'OPTIONS': {
+                'client_encoding': 'UTF8',
+            },
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
