@@ -17,6 +17,8 @@ services:
         value: postgresql://postgres.qvsfsccdvuujqxceogfz:JOELRAFA010103@aws-1-us-east-1.pooler.supabase.com:6543/postgres
       - key: SECRET_KEY
         generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.13.5
       - key: DJANGO_SUPERUSER_USERNAME
         value: admin
       - key: DJANGO_SUPERUSER_EMAIL
