@@ -34,7 +34,7 @@ def _render(request, template_name, context=None):
 
 def _obter_conferencia_contexto(nf_id, usuario):
     nf = get_object_or_404(
-        NotaFiscal.objects.select_related('cliente', 'rota').prefetch_related(
+        NotaFiscal.objects.select_related('cliente', 'rota').defer('bairro').prefetch_related(
             'itens__produto',
             Prefetch('conferencias', queryset=Conferencia.objects.select_related('conferente').prefetch_related('itens__produto')),
         ),
@@ -196,7 +196,7 @@ def aceitar_conferencia_web(request, nf_id):
         return redirect('web-conferencia-exec', nf_id=nf_id)
     try:
         nf = get_object_or_404(
-            NotaFiscal.objects.select_related('cliente', 'rota').prefetch_related('itens__produto', 'conferencias'),
+            NotaFiscal.objects.select_related('cliente', 'rota').defer('bairro').prefetch_related('itens__produto', 'conferencias'),
             id=nf_id,
         )
         _validar_acesso_nf_por_setor(nf, request.user)

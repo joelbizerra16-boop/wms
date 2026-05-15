@@ -85,7 +85,7 @@ def get_nfs_para_conferencia(usuario, data_inicio=None, data_fim=None, busca=Non
     nf_ids = [nf.get('id') for nf in nfs if nf.get('id') is not None]
     nf_por_id = {
         nf.id: nf
-        for nf in NotaFiscal.objects.select_related('cliente', 'rota').filter(id__in=nf_ids)
+        for nf in NotaFiscal.objects.select_related('cliente', 'rota').defer('bairro').filter(id__in=nf_ids)
     }
 
     filtradas = []
@@ -140,6 +140,7 @@ def get_nfs_monitoramento_conferencia(usuario, data_inicio=None, data_fim=None, 
 
     nfs_historico_qs = (
         NotaFiscal.objects.select_related('cliente', 'rota')
+        .defer('bairro')
         .prefetch_related('itens__produto', 'tarefas', 'conferencias__itens')
         .filter(ativa=True)
         .exclude(status_fiscal=NotaFiscal.StatusFiscal.CANCELADA)

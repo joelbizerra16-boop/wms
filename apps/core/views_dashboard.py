@@ -361,6 +361,7 @@ def collect_itens_filtrados_dashboard_separacao(usuario, date_from, date_to, bus
         return []
     itens = list(
         TarefaItem.objects.select_related('tarefa', 'tarefa__nf', 'tarefa__nf__cliente', 'tarefa__rota', 'produto', 'nf', 'nf__cliente')
+        .defer('nf__bairro', 'tarefa__nf__bairro')
         .filter(tarefa__ativo=True)
         .filter(tarefa_id__in=tarefa_ids_visiveis)
         .filter(Q(tarefa__nf__isnull=True) | ~Q(tarefa__nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
@@ -634,7 +635,7 @@ def dashboard_conferencia(request):
     nf_ids = [nf.get('id') for nf in nfs_disponiveis if nf.get('id') is not None]
     nf_por_id = {
         nf.id: nf
-        for nf in NotaFiscal.objects.select_related('cliente', 'rota')
+        for nf in NotaFiscal.objects.select_related('cliente', 'rota').defer('bairro')
         .prefetch_related('itens__produto')
         .filter(id__in=nf_ids)
     }
@@ -711,6 +712,7 @@ def dashboard_conferencia(request):
 
     itens_separacao = list(
         TarefaItem.objects.select_related('tarefa', 'tarefa__nf', 'tarefa__nf__cliente', 'produto', 'nf', 'nf__cliente')
+        .defer('nf__bairro', 'tarefa__nf__bairro')
         .filter(tarefa__ativo=True)
         .filter(Q(tarefa__nf__isnull=True) | ~Q(tarefa__nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
     )
@@ -757,9 +759,17 @@ def detalhe_nf(request, nf_numero):
         )
 
     nfs = list(
-        NotaFiscal.objects.select_related('cliente', 'rota').prefetch_related(
+        NotaFiscal.objects.select_related('cliente', 'rota').defer('bairro').prefetch_related(
             'itens__produto',
-            Prefetch('tarefas', queryset=Tarefa.objects.prefetch_related('itens__produto', 'itens__nf')),
+            Prefetch(
+                'tarefas',
+                queryset=Tarefa.objects.prefetch_related(
+                    Prefetch(
+                        'itens',
+                        queryset=TarefaItem.objects.select_related('produto', 'nf').defer('nf__bairro'),
+                    )
+                ),
+            ),
             Prefetch('conferencias', queryset=Conferencia.objects.prefetch_related('itens__produto').order_by('-created_at')),
         )
         .filter(numero__in=numeros, ativa=True)

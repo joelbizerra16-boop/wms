@@ -284,6 +284,7 @@ def listar_nfs_disponiveis(usuario=None):
     )
     nfs = (
         NotaFiscal.objects.select_related('cliente', 'rota')
+        .defer('bairro')
         .prefetch_related(tarefas_prefetch, itens_prefetch, conferencias_prefetch)
         .filter(status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA, ativa=True)
         .order_by('-data_emissao')
@@ -411,6 +412,7 @@ def _itens_pendentes_conferencia(produto_ids_usuario, conferencia_em_fluxo_obj=N
 def iniciar_conferencia(nf_id, usuario):
     nf = (
         NotaFiscal.objects.select_related('cliente', 'rota')
+        .defer('bairro')
         .prefetch_related('itens__produto', 'tarefas__itens', 'conferencias__itens')
         .get(id=nf_id)
     )
