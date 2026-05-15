@@ -224,6 +224,7 @@ def _obter_tarefa_permitida(request, tarefa_id):
     pode_gerir = _usuario_pode_gerir_separacao(request.user)
     base_qs = (
         Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
+        .defer('nf__bairro')
         .prefetch_related('itens__produto')
     )
     if pode_gerir:
@@ -318,7 +319,7 @@ def _cabecalho_tarefa_separacao(tarefa):
     nfs = []
     vistos = set()
     itens = getattr(tarefa, 'itens', None)
-    itens = itens.select_related('nf', 'nf__cliente').all() if itens else []
+    itens = itens.select_related('nf', 'nf__cliente').defer('nf__bairro').all() if itens else []
     for item in itens:
         if not item.nf_id or item.nf_id in vistos:
             continue

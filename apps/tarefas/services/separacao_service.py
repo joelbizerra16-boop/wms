@@ -108,6 +108,7 @@ def _setores_usuario(usuario):
 def listar_tarefas_disponiveis(usuario=None):
     tarefas = list(
         Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
+        .defer('nf__bairro')
         .prefetch_related('itens__produto', 'itens__nf')
         .filter(ativo=True)
         .filter(status__in=[Tarefa.Status.ABERTO, Tarefa.Status.EM_EXECUCAO])
@@ -335,7 +336,7 @@ def iniciar_tarefa(tarefa_id, usuario):
             raise SeparacaoError(USUARIO_SEM_SETOR_ERRO)
 
         tarefa = _obter_tarefa_ou_erro(
-            Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao').prefetch_related('itens__produto', 'itens__nf'),
+            Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao').defer('nf__bairro').prefetch_related('itens__produto', 'itens__nf'),
             tarefa_id,
         )
         _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
@@ -373,6 +374,7 @@ def iniciar_tarefa(tarefa_id, usuario):
 def bipar_tarefa(tarefa_id, codigo, usuario):
     tarefa = (
         Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
+        .defer('nf__bairro')
         .get(id=tarefa_id)
     )
     _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
@@ -488,6 +490,7 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
 def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
     tarefa = (
         Tarefa.objects.select_related('nf', 'usuario', 'usuario_em_execucao')
+        .defer('nf__bairro')
         .prefetch_related('itens__nf')
         .get(id=tarefa_id)
     )

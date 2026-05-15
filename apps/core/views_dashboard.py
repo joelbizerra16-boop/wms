@@ -202,6 +202,7 @@ def _setores_usuario_dashboard(usuario):
 def _tarefas_base_dashboard_separacao(usuario):
     tarefas = list(
         Tarefa.objects.select_related('nf', 'nf__cliente', 'rota')
+        .defer('nf__bairro')
         .prefetch_related('itens')
         .filter(ativo=True)
         .filter(status__in=STATUS_TAREFA_DASHBOARD_SEPARACAO)
@@ -550,7 +551,7 @@ def _nf_liberacao(liberacao):
         nfs = sorted(
             {
                 item.nf.numero
-                for item in liberacao.tarefa.itens.select_related('nf').all()
+                    for item in liberacao.tarefa.itens.select_related('nf').defer('nf__bairro').all()
                 if item.nf_id and item.nf
             }
         )
@@ -854,7 +855,12 @@ def detalhe_nf(request, nf_numero):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def relatorio_liberacoes(request):
-    liberacoes = LiberacaoDivergencia.objects.select_related('usuario', 'nf', 'tarefa', 'tarefa__nf', 'nf__cliente').prefetch_related('tarefa__itens__nf').all()
+    liberacoes = (
+        LiberacaoDivergencia.objects.select_related('usuario', 'nf', 'tarefa', 'tarefa__nf', 'nf__cliente')
+        .defer('nf__bairro', 'tarefa__nf__bairro')
+        .prefetch_related('tarefa__itens__nf')
+        .all()
+    )
 
     data_filtro = _parse_date(request.GET.get('data'))
     usuario_filtro = (request.GET.get('usuario') or '').strip().lower()

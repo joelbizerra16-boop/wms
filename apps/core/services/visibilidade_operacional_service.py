@@ -232,6 +232,7 @@ def get_tarefas_para_separacao(usuario, data_inicio=None, data_fim=None, busca=N
     tarefa_ids = [t.get('id') for t in tarefas if t.get('id') is not None]
     tarefas_qs = (
         Tarefa.objects.select_related('nf', 'nf__cliente', 'rota')
+        .defer('nf__bairro')
         .prefetch_related(Prefetch('itens'))
         .filter(id__in=tarefa_ids)
     )
