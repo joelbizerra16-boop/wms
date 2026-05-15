@@ -7,7 +7,7 @@ from rest_framework import permissions
 
 from apps.conferencia.views_web import aceitar_conferencia_web, conferencia_lista_web, conferir_nf, registrar_divergencia_web
 from apps.core.views_dashboard import dashboard_conferencia, dashboard_separacao, detalhe_nf, detalhe_nf_por_id, relatorio_liberacoes
-from apps.core.views import home
+from apps.core.views import home, minuta, minuta_pdf
 from apps.core.views_liberacao import (
     excluir_nf_conferencia_view,
     excluir_tarefa_view,
@@ -58,6 +58,8 @@ urlpatterns = [
     path('login/', login_view, name='login'),
     path('logout/', logout_view, name='logout'),
     path('home/', home, name='home'),
+    path('minuta/', minuta, name='web-minuta'),
+    path('minuta/pdf/', minuta_pdf, name='web-minuta-pdf'),
     path('importar/', importar_xml_web, name='web-importar-xml'),
     path('importar/fila/', fila_entradas_nf_web, name='web-fila-entradas-nf'),
     path('importar/fila/limpeza/', limpar_dados_importacao_web, name='web-limpar-dados-importacao'),

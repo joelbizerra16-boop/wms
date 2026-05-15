@@ -52,7 +52,7 @@
                     >
                         LIBERAR DIVERGÊNCIA
                     </button>
-                    {% elif acesso.can_manage %}
+                    {% elif acesso.can_manage and linha.pode_excluir %}
                     <button
                         type="button"
                         class="icon-delete js-open-exclusao-modal"

@@ -10,6 +10,9 @@
         <h1>Dashboard de Separação</h1>
         <p>Visão operacional dos itens separados, em execução e pendentes por tarefa.</p>
     </div>
+    <div class="actions-row">
+        <button type="button" class="btn btn-light" onclick="window.location.reload()">Atualizar</button>
+    </div>
 </div>
 
 <div class="metrics-grid">
@@ -41,8 +44,8 @@
         <div class="metric-card__icon metric-card__icon--warning">↻</div>
         <div class="metric-card__content">
             <span class="metric-card__label">Atualização</span>
-            <div class="metric-card__value">3s</div>
-            <div class="metric-card__meta">Resumo automático por polling</div>
+            <div class="metric-card__value">Manual</div>
+            <div class="metric-card__meta">Atualize pelo botão ou recarregue a página</div>
         </div>
     </div>
 </div>
@@ -124,94 +127,4 @@
 {% if acesso.can_manage %}
 {% include 'partials/exclusao_modal.html' %}
 {% endif %}
-
-<script>
-(function () {
-    let requisicaoResumoEmAndamento = false;
-    let requisicaoTabelaEmAndamento = false;
-
-    function formatNumber(value) {
-        return new Intl.NumberFormat('pt-BR', {
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 2,
-        }).format(Number(value || 0));
-    }
-
-    async function refreshDashboardResumo() {
-        if (requisicaoResumoEmAndamento) {
-            return;
-        }
-        requisicaoResumoEmAndamento = true;
-        const search = window.location.search || '';
-        try {
-            const response = await fetch(`/api/dashboard/resumo/${search}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-            if (!response.ok) {
-                throw new Error('Nao foi possivel atualizar o dashboard.');
-            }
-            const data = await response.json();
-            document.getElementById('dashboard-total').textContent = formatNumber(data.total);
-            document.getElementById('dashboard-separado').textContent = formatNumber(data.separado);
-            document.getElementById('dashboard-percentual').textContent = formatNumber(data.percentual);
-            document.getElementById('dashboard-pendente').textContent = formatNumber(data.pendente);
-        } finally {
-            requisicaoResumoEmAndamento = false;
-        }
-    }
-
-    async function refreshDashboardTabela() {
-        if (requisicaoTabelaEmAndamento) {
-            return;
-        }
-        requisicaoTabelaEmAndamento = true;
-        const params = new URLSearchParams(window.location.search);
-        params.set('partial', 'table');
-        try {
-            const response = await fetch(`${window.location.pathname}?${params.toString()}`, {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            });
-            if (!response.ok) {
-                throw new Error('Nao foi possivel atualizar a tabela de separacao.');
-            }
-            const html = await response.text();
-            const target = document.getElementById('dashboard-separacao-tabela');
-            if (target) {
-                target.innerHTML = html;
-            }
-        } finally {
-            requisicaoTabelaEmAndamento = false;
-        }
-    }
-
-    const dashboardRefreshIntervalMs = 300000;
-    let dashboardRefreshTimer = null;
-
-    function agendarProximaAtualizacao(delayMs = dashboardRefreshIntervalMs) {
-        if (dashboardRefreshTimer) {
-            window.clearTimeout(dashboardRefreshTimer);
-        }
-        dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, delayMs);
-    }
-
-    async function cicloAtualizacao() {
-        dashboardRefreshTimer = null;
-        if (document.hidden) {
-            agendarProximaAtualizacao();
-            return;
-        }
-        await refreshDashboardResumo().catch(function () {});
-        await refreshDashboardTabela().catch(function () {});
-        agendarProximaAtualizacao();
-    }
-
-    refreshDashboardResumo().catch(function () {});
-    refreshDashboardTabela().catch(function () {});
-    agendarProximaAtualizacao();
-
-    document.addEventListener('visibilitychange', function () {
-        if (!document.hidden && !dashboardRefreshTimer) {
-            agendarProximaAtualizacao(400);
-        }
-    });
-})();
-</script>
 {% endblock %}

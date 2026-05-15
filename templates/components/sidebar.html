@@ -88,6 +88,11 @@
                 </a>
             </div>
         </div>
+
+        <a href="{% url 'web-minuta' %}" class="menu-link {% if request.path == '/minuta/' %}active{% endif %}">
+            <i data-lucide="files"></i>
+            <span>Minuta</span>
+        </a>
         {% endif %}
 
         {% if acesso.can_separacao or acesso.can_conferencia %}

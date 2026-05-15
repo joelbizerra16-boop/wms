@@ -94,6 +94,7 @@ class ImportadorXMLAPITests(TestCase):
         self.assertTrue(response.data['sucesso'])
         self.assertEqual(response.data['quantidade_itens_importados'], 2)
         self.assertEqual(NotaFiscal.objects.count(), 1)
+        self.assertEqual(NotaFiscal.objects.get().bairro, 'Centro')
         self.assertEqual(NotaFiscalItem.objects.count(), 2)
         self.assertEqual(Cliente.objects.count(), 1)
         self.assertEqual(Tarefa.objects.count(), 2)
@@ -208,6 +209,7 @@ class ImportadorXMLAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         nf = NotaFiscal.objects.get(numero='777')
+        self.assertEqual(nf.bairro, 'Bairro Inexistente')
         self.assertEqual(nf.rota.nome, 'AJUSTAR')
         self.assertEqual(nf.rota.bairro, 'AJUSTAR')
 
@@ -426,6 +428,58 @@ class ImportadorXMLAPITests(TestCase):
         self.assertEqual(response.data['produtos_novos'], 1)
         self.assertEqual(response.data['itens_sem_cadastro'], 0)
         self.assertTrue(TarefaItem.objects.filter(nf=item_nf.nf, produto=produto).exists())
+
+    def test_importacao_xml_agrega_itens_repetidos_sem_duplicar_pre_cadastro(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000777" versao="4.00">
+      <ide>
+        <nNF>7777</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Repetido</xNome>
+        <IE>123456777</IE>
+        <enderDest>
+          <xBairro>Centro</xBairro>
+          <CEP>01001000</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD7777</cProd>
+          <cEAN>7897777</cEAN>
+          <xProd>Produto repetido</xProd>
+          <qCom>1.00</qCom>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>PRD7777</cProd>
+          <cEAN>7897777</cEAN>
+          <xProd>Produto repetido</xProd>
+          <qCom>2.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>
+"""
+
+        response = self._upload(xml, filename='produto_repetido.xml')
+        produto = Produto.objects.get(cod_prod='PRD7777')
+        item_nf = NotaFiscalItem.objects.get(nf__numero='7777', produto=produto)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Produto.objects.filter(cod_prod='PRD7777').count(), 1)
+        self.assertEqual(item_nf.quantidade, 3)
+        self.assertEqual(TarefaItem.objects.filter(nf=item_nf.nf, produto=produto).count(), 1)
 
     def test_rejeita_xml_com_status_fiscal_invalido(self):
         xml = """<?xml version="1.0" encoding="UTF-8"?>

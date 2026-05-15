@@ -227,6 +227,8 @@ def _status_separacao_item(item):
         return 'LIBERADO COM RESTRICAO'
     if item.possui_restricao and item.tarefa.status == Tarefa.Status.CONCLUIDO_COM_RESTRICAO:
         return 'CONCLUIDO COM RESTRICAO'
+    if item.tarefa.status == Tarefa.Status.CONCLUIDO_COM_RESTRICAO:
+        return 'CONCLUIDO COM RESTRICAO'
     if item.tarefa.status == Tarefa.Status.CONCLUIDO or item.quantidade_separada >= item.quantidade_total:
         return 'SEPARADO'
     if item.quantidade_separada > 0:
@@ -591,6 +593,7 @@ def dashboard_separacao(request):
                 'status': status_item,
                 'status_badge_class': _badge_status_class(status_item),
                 'pode_liberar': item.possui_restricao and item.tarefa.status == Tarefa.Status.FECHADO_COM_RESTRICAO,
+                'pode_excluir': item.tarefa.status not in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO},
                 '_prioridade': _prioridade_operacional_dashboard(status_item, _balcao_item_tarefa(item)),
                 '_prioridade_status': _prioridade_status_dashboard(status_item),
                 '_updated_at': item.tarefa.updated_at,
@@ -669,6 +672,7 @@ def dashboard_conferencia(request):
                 'status': status,
                 'status_badge_class': _badge_status_class(status),
                 'pode_liberar': status in {'DIVERGENCIA', 'BLOQUEADA COM RESTRICAO'},
+                'pode_excluir': status not in {'CONCLUIDO', 'CONCLUIDO COM RESTRICAO'},
                 '_prioridade': _prioridade_operacional_dashboard(status, bool(nf_data.get('balcao'))),
                 '_prioridade_status': _prioridade_status_dashboard(status),
                 '_updated_at': nf.updated_at,

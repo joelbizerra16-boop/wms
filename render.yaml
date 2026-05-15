@@ -2,7 +2,8 @@ services:
   - type: web
     name: wms
     env: python
-    buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput && python manage.py create_render_superuser && python manage.py collectstatic --noinput
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    preDeployCommand: python manage.py migrate --noinput && python manage.py create_render_superuser
     startCommand: gunicorn config.wsgi:application
     envVars:
       - key: DJANGO_SETTINGS_MODULE
@@ -14,7 +15,7 @@ services:
       - key: CSRF_TRUSTED_ORIGINS
         value: https://*.onrender.com
       - key: DATABASE_URL
-        value: postgresql://postgres.qvsfsccdvuujqxceogfz:JOELRAFA010103@aws-1-us-east-1.pooler.supabase.com:6543/postgres
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: PYTHON_VERSION
@@ -24,6 +25,6 @@ services:
       - key: DJANGO_SUPERUSER_EMAIL
         value: admin@wms.com
       - key: DJANGO_SUPERUSER_PASSWORD
-        value: 123456
+        sync: false
       - key: LOG_LEVEL
         value: INFO

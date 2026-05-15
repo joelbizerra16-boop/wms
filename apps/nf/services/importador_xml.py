@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -148,6 +149,7 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
                 rota=rota,
                 status=NotaFiscal.Status.PENDENTE,
                 data_emissao=documento.data_emissao or timezone.now(),
+                bairro=(documento.bairro or '').strip(),
                 status_fiscal=documento.status_fiscal,
                 bloqueada=documento.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA,
                 ativa=documento.status_fiscal == NotaFiscal.StatusFiscal.AUTORIZADA,
@@ -159,24 +161,8 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
                 return _tratar_nf_existente(nf_existente, documento, log_user, balcao=balcao)
             raise
 
-        produtos_novos = []
-        for item in documento.itens:
-            produto, criado = _obter_ou_criar_produto_xml_seguro(item)
-            if criado:
-                produtos_novos.append(produto)
-            item_nf, item_criado = NotaFiscalItem.objects.get_or_create(
-                nf=nf,
-                produto=produto,
-                defaults={
-                    'cod_prod_xml': item.cod_prod[:50],
-                    'descricao_xml': item.descricao[:255],
-                    'cod_ean_xml': item.cod_ean[:50],
-                    'quantidade': item.quantidade,
-                },
-            )
-            if not item_criado:
-                item_nf.quantidade += item.quantidade
-                item_nf.save(update_fields=['quantidade', 'updated_at'])
+        produtos_por_codigo, produtos_novos = _resolver_produtos_importacao(documento.itens)
+        _criar_itens_nf_em_lote(nf, documento.itens, produtos_por_codigo)
 
         gerar_tarefas_separacao(nf, tarefas_lote_cache=tarefas_lote_cache)
         sincronizar_status_operacional_nf(nf)
@@ -208,7 +194,15 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
 
 
 def _tratar_nf_existente(nf, documento, usuario_log, balcao=False):
+    campos_atualizar = []
+    bairro_documento = (documento.bairro or '').strip()
+    if bairro_documento and nf.bairro != bairro_documento:
+        nf.bairro = bairro_documento
+        campos_atualizar.append('bairro')
+
     if documento.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
+        if campos_atualizar:
+            nf.save(update_fields=[*campos_atualizar, 'updated_at'])
         _bloquear_nf_cancelada(nf)
         Log.objects.create(
             usuario=usuario_log,
@@ -227,6 +221,8 @@ def _tratar_nf_existente(nf, documento, usuario_log, balcao=False):
         }
 
     if documento.status_fiscal == NotaFiscal.StatusFiscal.DENEGADA:
+        if campos_atualizar:
+            nf.save(update_fields=[*campos_atualizar, 'updated_at'])
         _bloquear_nf_denegada(nf)
         Log.objects.create(
             usuario=usuario_log,
@@ -247,7 +243,9 @@ def _tratar_nf_existente(nf, documento, usuario_log, balcao=False):
     if documento.status_fiscal == NotaFiscal.StatusFiscal.AUTORIZADA and bool(balcao) and not nf.balcao:
         # Permite promover para balcão em reimportação operacional.
         nf.balcao = True
-        nf.save(update_fields=['balcao', 'updated_at'])
+        campos_atualizar.append('balcao')
+    if campos_atualizar:
+        nf.save(update_fields=[*campos_atualizar, 'updated_at'])
     Log.objects.create(
         usuario=usuario_log,
         acao='IMPORTACAO XML DUPLICADA',
@@ -321,26 +319,47 @@ def _obter_ou_criar_cliente(documento):
     return cliente
 
 
-def _buscar_produto_cadastrado(item):
-    codigo = (item.cod_prod or '').strip()
-    if codigo:
-        produto = Produto.objects.filter(cod_prod=codigo, ativo=True).first()
-        if produto is not None:
-            return produto
+def _buscar_produtos_cadastrados_em_lote(itens):
+    codigos = {(item.cod_prod or '').strip()[:50] for item in itens if (item.cod_prod or '').strip()}
+    eans = {(item.cod_ean or '').strip()[:50] for item in itens if (item.cod_ean or '').strip()}
 
-    cod_ean = (item.cod_ean or '').strip()
-    if cod_ean:
-        return Produto.objects.filter(cod_ean=cod_ean, ativo=True).first()
+    if not codigos and not eans:
+        return {}, {}
 
-    return None
+    filtros = Q()
+    if codigos:
+        filtros |= Q(cod_prod__in=codigos)
+    if eans:
+        filtros |= Q(cod_ean__in=eans)
+
+    produtos = Produto.objects.filter(filtros, ativo=True).only(
+        'id',
+        'cod_prod',
+        'cod_ean',
+        'descricao',
+        'categoria',
+        'setor',
+        'codigo',
+        'embalagem',
+        'ativo',
+        'cadastrado_manual',
+        'incompleto',
+    )
+
+    produtos_por_codigo = {}
+    produtos_por_ean = {}
+    for produto in produtos:
+        codigo = (produto.cod_prod or '').strip()
+        ean = (produto.cod_ean or '').strip()
+        if codigo and codigo not in produtos_por_codigo:
+            produtos_por_codigo[codigo] = produto
+        if ean and ean not in produtos_por_ean:
+            produtos_por_ean[ean] = produto
+    return produtos_por_codigo, produtos_por_ean
 
 
-def _obter_ou_criar_produto_xml_seguro(item):
-    produto = _buscar_produto_cadastrado(item)
-    if produto is not None:
-        return produto, False
-
-    produto = Produto.objects.create(
+def _montar_pre_cadastro_produto(item):
+    return Produto(
         cod_prod=(item.cod_prod or '').strip()[:50],
         descricao=(item.descricao or '').strip()[:255] or 'Produto importado via XML',
         cod_ean=(item.cod_ean or '').strip()[:50] or None,
@@ -351,7 +370,94 @@ def _obter_ou_criar_produto_xml_seguro(item):
         cadastrado_manual=False,
         incompleto=True,
     )
-    return produto, True
+
+
+def _resolver_produtos_importacao(itens):
+    produtos_por_codigo, produtos_por_ean = _buscar_produtos_cadastrados_em_lote(itens)
+    specs_faltantes = {}
+    codigos_ja_existentes = set(produtos_por_codigo)
+
+    for item in itens:
+        codigo = (item.cod_prod or '').strip()[:50]
+        ean = (item.cod_ean or '').strip()[:50]
+        produto = produtos_por_codigo.get(codigo)
+        if produto is None and ean:
+            produto = produtos_por_ean.get(ean)
+        if produto is not None:
+            if codigo and codigo not in produtos_por_codigo:
+                produtos_por_codigo[codigo] = produto
+            continue
+        if codigo and codigo not in specs_faltantes:
+            specs_faltantes[codigo] = item
+
+    produtos_novos = []
+    if specs_faltantes:
+        Produto.objects.bulk_create(
+            [_montar_pre_cadastro_produto(item) for item in specs_faltantes.values()],
+            ignore_conflicts=True,
+        )
+        produtos_criados_por_codigo, produtos_criados_por_ean = _buscar_produtos_cadastrados_em_lote(specs_faltantes.values())
+        for codigo, produto in produtos_criados_por_codigo.items():
+            produtos_por_codigo[codigo] = produto
+            if codigo not in codigos_ja_existentes:
+                produtos_novos.append(produto)
+        for ean, produto in produtos_criados_por_ean.items():
+            if ean not in produtos_por_ean:
+                produtos_por_ean[ean] = produto
+
+    faltantes = []
+    for item in itens:
+        codigo = (item.cod_prod or '').strip()[:50]
+        ean = (item.cod_ean or '').strip()[:50]
+        produto = produtos_por_codigo.get(codigo)
+        if produto is None and ean:
+            produto = produtos_por_ean.get(ean)
+        if produto is None:
+            faltantes.append(codigo or item.descricao)
+            continue
+        if codigo and codigo not in produtos_por_codigo:
+            produtos_por_codigo[codigo] = produto
+
+    if faltantes:
+        raise ImportacaoXMLError(
+            'Falha ao resolver os produtos do XML: ' + ', '.join(sorted(set(faltantes))) + '.'
+        )
+
+    return produtos_por_codigo, produtos_novos
+
+
+def _criar_itens_nf_em_lote(nf, itens, produtos_por_codigo):
+    itens_agrupados = {}
+
+    for item in itens:
+        codigo = (item.cod_prod or '').strip()[:50]
+        produto = produtos_por_codigo[codigo]
+        chave = produto.id
+        existente = itens_agrupados.get(chave)
+        if existente is None:
+            itens_agrupados[chave] = {
+                'produto': produto,
+                'quantidade': item.quantidade,
+                'cod_prod_xml': codigo,
+                'descricao_xml': (item.descricao or '').strip()[:255],
+                'cod_ean_xml': (item.cod_ean or '').strip()[:50],
+            }
+            continue
+        existente['quantidade'] += item.quantidade
+
+    NotaFiscalItem.objects.bulk_create(
+        [
+            NotaFiscalItem(
+                nf=nf,
+                produto=dados['produto'],
+                quantidade=dados['quantidade'],
+                cod_prod_xml=dados['cod_prod_xml'],
+                descricao_xml=dados['descricao_xml'],
+                cod_ean_xml=dados['cod_ean_xml'],
+            )
+            for dados in itens_agrupados.values()
+        ]
+    )
 
 
 def _registrar_produtos_criados_via_xml(nf, produtos_novos, usuario_log):
@@ -368,7 +474,7 @@ def _registrar_produtos_criados_via_xml(nf, produtos_novos, usuario_log):
 
 def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
     rota = nf.rota
-    agrupados_por_setor = {}
+    agrupados_por_setor = defaultdict(list)
     itens_filtros = []
 
     for item_nf in nf.itens.select_related('produto').all():

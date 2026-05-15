@@ -52,7 +52,7 @@
                         LIBERAR DIVERGÊNCIA
                     </button>
                     {% endif %}
-                    {% if acesso.can_manage %}
+                    {% if acesso.can_manage and linha.pode_excluir %}
                     <button
                         type="button"
                         class="icon-delete js-open-exclusao-modal"
@@ -63,7 +63,9 @@
                         🗑
                     </button>
                     {% endif %}
-                    {% if not linha.pode_liberar and not acesso.can_manage %}
+                    {% if not linha.pode_liberar and not linha.pode_excluir %}
+                    <span class="muted">-</span>
+                    {% elif not linha.pode_liberar and not acesso.can_manage %}
                     <span class="muted">-</span>
                     {% endif %}
                     </div>

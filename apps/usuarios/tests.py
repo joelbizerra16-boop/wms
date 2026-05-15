@@ -122,6 +122,13 @@ class AcessoPorPerfilTests(TestCase):
         self.assertEqual(response_home.status_code, 302)
         self.assertEqual(response_home.url, '/conferencia/')
 
+    @override_settings(
+        STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+        STORAGES={
+            'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+            'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+        },
+    )
     def test_gestor_ve_menu_principal_completo(self):
         self.client.login(username='gestor', password='123456')
 
@@ -130,6 +137,7 @@ class AcessoPorPerfilTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Dashboard')
         self.assertContains(response, 'Dash Separação')
+        self.assertContains(response, 'Minuta')
         self.assertContains(response, 'Usuários')
 
     def test_separador_ve_apenas_menu_de_separacao(self):

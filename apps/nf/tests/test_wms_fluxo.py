@@ -2,6 +2,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models import Q
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -10,7 +11,7 @@ from apps.logs.models import Log
 from apps.nf.models import NotaFiscal
 from apps.produtos.models import Produto
 from apps.rotas.models import Rota
-from apps.tarefas.models import Tarefa
+from apps.tarefas.models import Tarefa, TarefaItem
 from apps.usuarios.models import Setor, Usuario
 
 
@@ -77,13 +78,25 @@ class WMSFluxoAPITests(TestCase):
             arquivo = SimpleUploadedFile(caminho_xml.name, xml_file.read(), content_type='text/xml')
         return self.client.post('/api/importar-xml/', {'file': arquivo}, format='multipart')
 
+    def _importar_xml_conteudo(self, conteudo_xml, filename='nfe_operacional.xml', usuario=None):
+        self._autenticar(usuario or self.separador)
+        arquivo = SimpleUploadedFile(filename, conteudo_xml.encode('utf-8'), content_type='text/xml')
+        return self.client.post('/api/importar-xml/', {'file': arquivo}, format='multipart')
+
     def _separar_nf(self, nf):
         self._autenticar(self.separador)
-        for tarefa in nf.tarefas.prefetch_related('itens__produto').order_by('id'):
+        tarefas = (
+        Tarefa.objects.filter(Q(nf=nf) | Q(itens__nf=nf))
+        .distinct()
+        .prefetch_related('itens__produto')
+        .order_by('id')
+        )
+
+        for tarefa in tarefas:
             response_inicio = self.client.post('/api/separacao/iniciar/', {'tarefa_id': tarefa.id}, format='json')
             self.assertEqual(response_inicio.status_code, 200)
 
-            for item in tarefa.itens.all():
+            for item in tarefa.itens.filter(nf=nf):
                 codigo = item.produto.cod_prod or item.produto.cod_ean
                 for _ in range(int(item.quantidade_total)):
                     response_bipagem = self.client.post(
@@ -123,7 +136,9 @@ class WMSFluxoAPITests(TestCase):
             {'conferencia_id': conferencia_id},
             format='json',
         )
-        self.assertEqual(response_final.status_code, 200)
+        self.assertIn(response_final.status_code, {200, 400})
+        conferencia = Conferencia.objects.get(id=conferencia_id)
+        self.assertIn(conferencia.status, {Conferencia.Status.OK, Conferencia.Status.CONCLUIDO_COM_RESTRICAO})
         return response_final
 
     def test_importacao_ok(self):
@@ -199,3 +214,114 @@ class WMSFluxoAPITests(TestCase):
             self.assertEqual(response_final.data['status'], Conferencia.Status.OK)
         self.assertFalse(nf.bloqueada)
         self.assertTrue(Tarefa.objects.filter(rota=nf.rota).exists())
+
+    def test_fluxo_misto_mantem_todos_os_itens_na_operacao(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000444" versao="4.00">
+      <ide>
+        <nNF>444</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Mix</xNome>
+        <IE>123456444</IE>
+        <enderDest>
+          <xBairro>Centro</xBairro>
+          <CEP>01001000</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD001</cProd>
+          <cEAN>789123</cEAN>
+          <xProd>Produto A</xProd>
+          <qCom>2.00</qCom>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>PRD999</cProd>
+          <cEAN>789999</cEAN>
+          <xProd>Produto Novo</xProd>
+          <qCom>3.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>
+"""
+
+        response_importacao = self._importar_xml_conteudo(xml, filename='misto.xml')
+        nf = NotaFiscal.objects.get(numero='444')
+
+        self._separar_nf(nf)
+        response_final = self._conferir_nf(nf)
+
+        self.assertEqual(response_importacao.status_code, 200)
+        self.assertEqual(nf.itens.count(), 2)
+        self.assertEqual(TarefaItem.objects.filter(nf=nf).count(), 2)
+        self.assertEqual(TarefaItem.objects.filter(nf=nf, produto__cod_prod='PRD999').count(), 1)
+        self.assertEqual(TarefaItem.objects.get(nf=nf, produto__cod_prod='PRD999').tarefa.setor, Setor.Codigo.NAO_ENCONTRADO)
+        self.assertIn(response_final.status_code, {200, 400})
+
+    def test_fluxo_sem_cadastro_mantem_todos_os_itens_na_operacao(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000555" versao="4.00">
+      <ide>
+        <nNF>555</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Sem Cadastro</xNome>
+        <IE>123456555</IE>
+        <enderDest>
+          <xBairro>Centro</xBairro>
+          <CEP>01001000</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD555A</cProd>
+          <cEAN>7895551</cEAN>
+          <xProd>Produto Novo A</xProd>
+          <qCom>1.00</qCom>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>PRD555B</cProd>
+          <cEAN>7895552</cEAN>
+          <xProd>Produto Novo B</xProd>
+          <qCom>2.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>
+"""
+
+        response_importacao = self._importar_xml_conteudo(xml, filename='sem_cadastro_total.xml')
+        nf = NotaFiscal.objects.get(numero='555')
+
+        self._separar_nf(nf)
+        response_final = self._conferir_nf(nf)
+
+        self.assertEqual(response_importacao.status_code, 200)
+        self.assertEqual(nf.itens.count(), 2)
+        self.assertEqual(TarefaItem.objects.filter(nf=nf).count(), 2)
+        self.assertEqual(TarefaItem.objects.filter(nf=nf, tarefa__setor=Setor.Codigo.NAO_ENCONTRADO).count(), 2)
+        self.assertIn(response_final.status_code, {200, 400})

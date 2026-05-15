@@ -1,0 +1,536 @@
+{% extends 'base.html' %}
+
+{% block title %}Minuta | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Módulo WMS</span>
+        <h1>MINUTA</h1>
+        <p>Controle de Minutas Operacionais</p>
+    </div>
+</div>
+
+<div class="metrics-grid minuta-metrics-grid">
+    <div class="metric-card metric-card--accent metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--info"><i data-lucide="files"></i></div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Romaneios</span>
+            <div class="metric-card__value">{{ resumo.romaneios }}</div>
+            <div class="metric-card__meta">Agrupamento operacional por carregamento</div>
+        </div>
+    </div>
+    <div class="metric-card metric-card--success metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--success"><i data-lucide="package"></i></div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">NFs</span>
+            <div class="metric-card__value">{{ resumo.itens }}</div>
+            <div class="metric-card__meta">Relacionamento principal por Número da NF</div>
+        </div>
+    </div>
+    <div class="metric-card metric-card--warning metric-card--with-icon">
+        <div class="metric-card__icon metric-card__icon--warning"><i data-lucide="triangle-alert"></i></div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">Duplicidades</span>
+            <div class="metric-card__value">{{ resumo.duplicados|default:0 }}</div>
+            <div class="metric-card__meta">Alertas operacionais por NF já vinculada</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="minuta-toolbar">
+        <form method="post" enctype="multipart/form-data" class="minuta-upload-form">
+            {% csrf_token %}
+            <input type="hidden" name="acao" value="upload">
+
+            <div class="minuta-toolbar__filters minuta-toolbar__filters--upload">
+                <div class="minuta-field minuta-field--search minuta-upload-inline">
+                    <label for="minuta-arquivo">Planilha do Romaneio</label>
+                    <div class="minuta-upload-inline__controls">
+                        <input id="minuta-arquivo" type="file" name="arquivo" accept=".xlsx,.xls" required>
+                        <button type="submit" class="btn-primary minuta-import-button" data-minuta-upload-trigger>
+                            UPLOAD EXCEL
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="minuta-toolbar__checks" aria-label="Tipos de minuta disponíveis">
+                <div class="minuta-check-row minuta-check-row--inline">
+                    <div class="minuta-checks-stack minuta-checks-stack--inline">
+                        <label class="minuta-check is-selected" for="minuta-tipo-carregamento">
+                            <input id="minuta-tipo-carregamento" type="checkbox" checked>
+                            <span>Minuta de Carregamento</span>
+                        </label>
+                        <label class="minuta-check" for="minuta-tipo-entrega">
+                            <input id="minuta-tipo-entrega" type="checkbox">
+                            <span>Minuta de Entrega</span>
+                        </label>
+                    </div>
+                    <div class="minuta-check-row__actions minuta-check-row__actions--pdf">
+                        <a
+                            href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}"
+                            data-base-href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}"
+                            class="btn btn-light minuta-pdf-button{% if not resumo.itens %} is-disabled{% endif %}"
+                            data-minuta-pdf-trigger
+                            aria-disabled="{% if not resumo.itens %}true{% else %}false{% endif %}"
+                            target="_blank"
+                            rel="noopener"
+                            download
+                        >
+                            GERAR PDF
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+        <form method="get" class="minuta-toolbar__filters">
+            <div class="minuta-field">
+                <label for="minuta-romaneio">Romaneio</label>
+                <input id="minuta-romaneio" type="text" name="romaneio" value="{{ filtros.romaneio }}" placeholder="Buscar romaneio">
+            </div>
+            <div class="minuta-field">
+                <label for="minuta-status">Status</label>
+                <select id="minuta-status" name="status">
+                    <option value="">Todos</option>
+                    {% for status in status_opcoes %}
+                    <option value="{{ status }}" {% if filtros.status == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="minuta-field minuta-field--search">
+                <label for="minuta-busca">Pesquisar</label>
+                <input id="minuta-busca" type="text" name="busca" value="{{ filtros.busca }}" placeholder="Buscar NF, cliente, romaneio, placa ou status">
+            </div>
+            <div class="actions-row minuta-filter-actions">
+                <button type="submit" class="btn btn-light">Filtrar</button>
+                <a href="{% url 'web-minuta' %}" class="btn btn-light">Limpar</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+    {% if preview %}
+    <div class="card card--soft minuta-preview-card">
+        <div class="actions-row" style="justify-content: space-between; gap: 12px;">
+            <div>
+                <h2 class="section-title" style="margin: 0;">Prévia da importação</h2>
+                <p class="muted" style="margin: 6px 0 0;">Revise as NFs sinalizadas como <strong>DUPLI</strong> e qualquer linha com cancelamento, bloqueio, inconsistência ou XML inválido. A confirmação é permitida para NFs em fila, aguardando liberação ou já vinculadas ao XML.</p>
+            </div>
+            <div class="actions-row">
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="acao" value="confirmar_importacao">
+                    <button type="submit" class="btn-primary">Confirmar importação</button>
+                </form>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="acao" value="cancelar_preview">
+                    <button type="submit" class="btn btn-light">Cancelar prévia</button>
+                </form>
+            </div>
+        </div>
+        {% if preview.erros %}
+        <div class="minuta-preview-errors">
+            {% for erro in preview.erros %}
+            <div class="minuta-preview-errors__item">{{ erro }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="card table-card">
+        <div class="actions-row minuta-table-header">
+            <div>
+                <h2 class="section-title" style="margin: 0;">Listagem de Minutas</h2>
+                <p class="muted" style="margin: 4px 0 0;">Importação e rastreabilidade baseadas em NF, com destaque automático para duplicidades operacionais.</p>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ROMANEIO</th>
+                        <th>NF</th>
+                        <th>DATA</th>
+                        <th>MOTORISTA</th>
+                        <th>PLACA</th>
+                        <th>CLIENTE</th>
+                        <th>BAIRRO</th>
+                        <th>STATUS</th>
+                        <th>AÇÕES</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for linha in linhas %}
+                    <tr class="{% if linha.duplicado %}minuta-row--duplicado{% endif %}">
+                        <td>{% firstof linha.romaneio linha.codigo_romaneio %}</td>
+                        <td>{{ linha.numero_nota }}</td>
+                        <td>{{ linha.data_saida }}</td>
+                        <td>{{ linha.motorista }}</td>
+                        <td>{{ linha.placa }}</td>
+                        <td>{% firstof linha.cliente linha.razao_social linha.fantasia linha.cliente_nf '-' %}</td>
+                        <td>{% firstof linha.bairro linha.bairro_nf '-' %}</td>
+                        <td>
+                            <span class="status-badge {% if linha.duplicado %}status-badge--danger{% elif linha.status == 'NF CANCELADA' or linha.status == 'NF DENEGADA' or linha.status == 'NF INCONSISTENTE' or linha.status == 'NF BLOQUEADA' or linha.status == 'NF INATIVA' or linha.status == 'NF COM PROBLEMA' or linha.status == 'XML INVALIDO' or linha.status == 'NF NÃO LOCALIZADA' %}status-badge--danger{% elif linha.status == 'LIBERADA' or linha.status == 'FINALIZADA' or linha.status == 'FINALIZADA COM RESTRICAO' or linha.status == 'NF VINCULADA' %}status-badge--success{% else %}status-badge--warning{% endif %}">
+                                {{ linha.status }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if linha.duplicado %}
+                            <span class="minuta-duplicidade-label">{% firstof linha.duplicidade_texto '' %}{% if not linha.duplicidade_texto %}NF vinculada ao romaneio {% firstof linha.duplicidade_romaneio_codigo '-' %}{% endif %}</span>
+                            {% elif linha.motivo_bloqueio %}
+                            <span class="minuta-duplicidade-label">{{ linha.motivo_bloqueio }}</span>
+                            {% else %}
+                            <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="empty-state">Nenhuma minuta disponível no momento.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <style>
+    .minuta-metrics-grid .metric-card__icon i {
+        width: 20px;
+        height: 20px;
+    }
+
+    .minuta-toolbar {
+        display: grid;
+        gap: 18px;
+    }
+
+    .minuta-upload-form {
+        display: grid;
+        gap: 14px;
+    }
+
+    .minuta-toolbar__filters {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .minuta-toolbar__filters--upload {
+        grid-template-columns: 1fr;
+    }
+
+    .minuta-upload-inline__controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+
+    .minuta-upload-inline__controls input[type="file"] {
+        flex: 0 1 610px;
+        max-width: 610px;
+    }
+
+    .minuta-field {
+        display: grid;
+        gap: 8px;
+    }
+
+    .minuta-field label {
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+
+    .minuta-field input,
+    .minuta-field select {
+        width: 100%;
+        min-height: 46px;
+        border: 1px solid #dbe2ea;
+        border-radius: 12px;
+        padding: 0 14px;
+        background: #f8fafc;
+        color: #0f172a;
+    }
+
+    .minuta-toolbar__checks {
+        display: grid;
+        gap: 14px;
+        padding-top: 2px;
+    }
+
+    .minuta-checks-stack {
+        display: grid;
+        gap: 14px;
+    }
+
+    .minuta-checks-stack--inline {
+        grid-template-columns: repeat(2, minmax(0, max-content));
+        align-items: center;
+        gap: 12px 18px;
+    }
+
+    .minuta-check-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px 18px;
+    }
+
+    .minuta-check-row--inline {
+        justify-content: flex-start;
+        gap: 16px;
+    }
+
+    .minuta-check-row__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .minuta-check-row__actions--pdf {
+        margin-left: 6px;
+    }
+
+    .minuta-check input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .minuta-check {
+        position: relative;
+        display: inline-flex;
+        align-items: flex-start;
+        gap: 12px;
+        color: #1e3a5f;
+        font-weight: 500;
+        font-size: 0.98rem;
+        line-height: 1.45;
+        max-width: 220px;
+        cursor: pointer;
+    }
+
+    .minuta-check::before {
+        content: '';
+        width: 22px;
+        height: 22px;
+        margin-top: 2px;
+        border: 1px solid #d6d9df;
+        border-radius: 6px;
+        background: #ffffff;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+        flex: 0 0 auto;
+    }
+
+    .minuta-check.is-selected::before {
+        background: linear-gradient(180deg, #ff6a61 0%, #ff5148 100%);
+        border-color: #ff5148;
+    }
+
+    .minuta-check.is-selected::after {
+        content: '';
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        width: 7px;
+        height: 11px;
+        border-right: 3px solid #ffffff;
+        border-bottom: 3px solid #ffffff;
+        transform: rotate(45deg);
+    }
+
+    .minuta-import-button,
+    .minuta-pdf-button {
+        min-width: 130px;
+        min-height: 46px;
+        text-align: center;
+    }
+
+    .minuta-pdf-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(180deg, #315efb 0%, #1d4ed8 100%);
+        color: #ffffff;
+        border-color: #1d4ed8;
+        cursor: pointer;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .minuta-pdf-button:hover:not(.is-disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 24px rgba(29, 78, 216, 0.22);
+        border-color: #1e40af;
+        color: #ffffff;
+    }
+
+    .minuta-pdf-button.is-loading::after {
+        content: '...';
+        margin-left: 6px;
+        letter-spacing: 0.12em;
+    }
+
+    .minuta-import-button:disabled,
+    .minuta-pdf-button.is-disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        pointer-events: none;
+    }
+
+    .minuta-preview-card {
+        border-color: #facc15;
+        background: linear-gradient(180deg, #fffef2, #ffffff);
+    }
+
+    .minuta-preview-errors {
+        margin-top: 14px;
+        display: grid;
+        gap: 8px;
+    }
+
+    .minuta-preview-errors__item {
+        border-radius: 10px;
+        background: #fff7ed;
+        color: #9a3412;
+        padding: 10px 12px;
+        font-size: 0.92rem;
+    }
+
+    .minuta-table-header {
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+
+    .minuta-filter-actions {
+        align-items: flex-end;
+    }
+
+    .minuta-row--duplicado td {
+        background: #fff1f2;
+    }
+
+    .minuta-duplicidade-label {
+        color: #b91c1c;
+        font-weight: 700;
+    }
+
+    @media (max-width: 980px) {
+        .minuta-toolbar__filters {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .minuta-check-row--inline {
+            align-items: flex-start;
+        }
+
+        .minuta-check-row__actions--pdf {
+            margin-left: 0;
+        }
+
+        .minuta-field--search {
+            grid-column: 1 / -1;
+        }
+    }
+
+    @media (max-width: 640px) {
+        .minuta-toolbar__filters {
+            grid-template-columns: 1fr;
+        }
+
+        .minuta-toolbar__checks {
+            gap: 12px;
+        }
+
+        .minuta-upload-inline__controls,
+        .minuta-check-row {
+            align-items: stretch;
+        }
+
+        .minuta-check-row--inline,
+        .minuta-checks-stack--inline {
+            grid-template-columns: 1fr;
+        }
+
+        .minuta-check-row__actions--pdf {
+            width: 100%;
+        }
+
+        .minuta-import-button,
+        .minuta-pdf-button {
+            width: 100%;
+        }
+
+        .minuta-filter-actions {
+            align-items: stretch;
+        }
+    }
+    </style>
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const carregamentoCheckbox = document.getElementById('minuta-tipo-carregamento');
+        const carregamentoLabel = carregamentoCheckbox ? carregamentoCheckbox.closest('.minuta-check') : null;
+        const entregaCheckbox = document.getElementById('minuta-tipo-entrega');
+        const entregaLabel = entregaCheckbox ? entregaCheckbox.closest('.minuta-check') : null;
+        const arquivoInput = document.getElementById('minuta-arquivo');
+        const uploadButton = document.querySelector('[data-minuta-upload-trigger]');
+        const pdfButton = document.querySelector('[data-minuta-pdf-trigger]');
+
+        if (!carregamentoCheckbox || !carregamentoLabel || !arquivoInput || !uploadButton || !entregaCheckbox || !entregaLabel) {
+            return;
+        }
+
+        const atualizarHrefPdf = function () {
+            if (!pdfButton) {
+                return;
+            }
+
+            const baseHref = pdfButton.getAttribute('data-base-href') || pdfButton.getAttribute('href');
+            const url = new URL(baseHref, window.location.origin);
+            url.searchParams.set('carregamento', carregamentoCheckbox.checked ? '1' : '0');
+            url.searchParams.set('entrega', entregaCheckbox.checked ? '1' : '0');
+            pdfButton.setAttribute('href', url.pathname + url.search);
+        };
+
+        const atualizarEstadoImportacao = function () {
+            const habilitado = carregamentoCheckbox.checked || entregaCheckbox.checked;
+            carregamentoLabel.classList.toggle('is-selected', carregamentoCheckbox.checked);
+            entregaLabel.classList.toggle('is-selected', entregaCheckbox.checked);
+            if (pdfButton) {
+                pdfButton.classList.toggle('is-disabled', !habilitado || pdfButton.getAttribute('aria-disabled') === 'true');
+            }
+            atualizarHrefPdf();
+        };
+
+        if (pdfButton) {
+            pdfButton.addEventListener('click', function (event) {
+                if (pdfButton.classList.contains('is-disabled')) {
+                    event.preventDefault();
+                    return;
+                }
+
+                pdfButton.classList.add('is-loading');
+                window.setTimeout(function () {
+                    pdfButton.classList.remove('is-loading');
+                }, 1800);
+            });
+        }
+
+        carregamentoCheckbox.addEventListener('change', atualizarEstadoImportacao);
+        entregaCheckbox.addEventListener('change', atualizarEstadoImportacao);
+        atualizarEstadoImportacao();
+    });
+    </script>
+    {% endblock %}

@@ -44,6 +44,7 @@ class NotaFiscal(BaseModel):
 		db_index=True,
 	)
 	data_emissao = models.DateTimeField(verbose_name='data de emissao', db_index=True)
+	bairro = models.CharField(max_length=100, blank=True, default='', db_index=True, verbose_name='bairro da NF')
 	status_fiscal = models.CharField(max_length=20, choices=StatusFiscal.choices, verbose_name='status fiscal')
 	bloqueada = models.BooleanField(default=False, verbose_name='bloqueada')
 	ativa = models.BooleanField(default=True, verbose_name='ativa')
@@ -58,6 +59,7 @@ class NotaFiscal(BaseModel):
 			models.Index(fields=['status'], name='nf_status_operacional_idx'),
 			models.Index(fields=['status_fiscal', 'ativa'], name='nf_status_ativa_idx'),
 			models.Index(fields=['cliente', 'rota'], name='nf_cliente_rota_idx'),
+			models.Index(fields=['bairro'], name='nf_bairro_idx'),
 		]
 
 	def __str__(self):

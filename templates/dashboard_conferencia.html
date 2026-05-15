@@ -10,6 +10,9 @@
         <h1>Dashboard de Conferência</h1>
         <p>Conferência das NFs com visão conjunta de progresso da separação e validação final.</p>
     </div>
+    <div class="actions-row">
+        <button type="button" class="btn btn-light" onclick="window.location.reload()">Atualizar</button>
+    </div>
 </div>
 
 <div class="metrics-grid">
@@ -142,101 +145,4 @@
 {% if acesso.can_manage %}
 {% include 'partials/exclusao_modal.html' %}
 {% endif %}
-
-<script>
-(function () {
-    let requisicaoResumoEmAndamento = false;
-    let requisicaoTabelaEmAndamento = false;
-
-    function formatNumber(value) {
-        return new Intl.NumberFormat('pt-BR', {
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 2,
-        }).format(Number(value || 0));
-    }
-
-    async function refreshDashboardResumo() {
-        if (requisicaoResumoEmAndamento) {
-            return;
-        }
-        requisicaoResumoEmAndamento = true;
-        const search = window.location.search || '';
-        try {
-            const response = await fetch(`/api/dashboard/resumo/${search}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-            if (!response.ok) {
-                throw new Error('Nao foi possivel atualizar o dashboard.');
-            }
-            const data = await response.json();
-
-            document.getElementById('conf-total-nfs').textContent = data.total_nfs;
-            document.getElementById('conf-conferidas').textContent = data.conferidas;
-            document.getElementById('conf-divergencias').textContent = data.divergencias;
-            document.getElementById('conf-pendentes').textContent = data.pendentes;
-            document.getElementById('conf-percentual').textContent = data.total_nfs === 0 ? '0' : formatNumber((Number(data.conferidas) / Number(data.total_nfs)) * 100);
-
-            document.getElementById('sep-total').textContent = formatNumber(data.total);
-            document.getElementById('sep-separado').textContent = formatNumber(data.separado);
-            document.getElementById('sep-execucao').textContent = formatNumber(data.em_execucao);
-            document.getElementById('sep-aguardando').textContent = formatNumber(data.aguardando);
-        } finally {
-            requisicaoResumoEmAndamento = false;
-        }
-    }
-
-    async function refreshDashboardTabela() {
-        if (requisicaoTabelaEmAndamento) {
-            return;
-        }
-        requisicaoTabelaEmAndamento = true;
-        const params = new URLSearchParams(window.location.search);
-        params.set('partial', 'table');
-        try {
-            const response = await fetch(`${window.location.pathname}?${params.toString()}`, {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            });
-            if (!response.ok) {
-                throw new Error('Nao foi possivel atualizar a tabela de conferencia.');
-            }
-            const html = await response.text();
-            const target = document.getElementById('dashboard-conferencia-tabela');
-            if (target) {
-                target.innerHTML = html;
-            }
-        } finally {
-            requisicaoTabelaEmAndamento = false;
-        }
-    }
-
-    const dashboardRefreshIntervalMs = 300000;
-    let dashboardRefreshTimer = null;
-
-    function agendarProximaAtualizacao(delayMs = dashboardRefreshIntervalMs) {
-        if (dashboardRefreshTimer) {
-            window.clearTimeout(dashboardRefreshTimer);
-        }
-        dashboardRefreshTimer = window.setTimeout(cicloAtualizacao, delayMs);
-    }
-
-    async function cicloAtualizacao() {
-        dashboardRefreshTimer = null;
-        if (document.hidden) {
-            agendarProximaAtualizacao();
-            return;
-        }
-        await refreshDashboardResumo().catch(function () {});
-        await refreshDashboardTabela().catch(function () {});
-        agendarProximaAtualizacao();
-    }
-
-    refreshDashboardResumo().catch(function () {});
-    refreshDashboardTabela().catch(function () {});
-    agendarProximaAtualizacao();
-
-    document.addEventListener('visibilitychange', function () {
-        if (!document.hidden && !dashboardRefreshTimer) {
-            agendarProximaAtualizacao(400);
-        }
-    });
-})();
-</script>
 {% endblock %}

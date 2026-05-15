@@ -10,18 +10,23 @@ class HealthCheckTests(SimpleTestCase):
 
 
 from datetime import timedelta
+import io
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+import zipfile
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import F
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
+from openpyxl import Workbook
 
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
+from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
+from apps.core.services.minuta_service import listar_minuta_itens
 from apps.logs.models import LiberacaoDivergencia, Log
 from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem
 from apps.produtos.models import Produto
@@ -29,6 +34,103 @@ from apps.rotas.models import Rota
 from apps.tarefas.models import Tarefa, TarefaItem
 from apps.usuarios.models import Setor, Usuario
 from apps.core.views_dashboard import _cliente_tarefa
+
+
+def _build_minuta_workbook(rows, carga='5081690', motorista='8003 - CLAUDIO SOUZA DE JESUS', veiculo='52 - FTG6B24/BRIDA', data_saida='12/05/2026'):
+	workbook = Workbook()
+	worksheet = workbook.active
+	worksheet.title = 'Romaneio'
+	worksheet.append(['Relatório de Montagem de Carga'])
+	worksheet.append([])
+	worksheet.append(['Filial', 'Dt. Saída', 'Carga', 'Destino', 'KM', 'Rotas', 'Qtd. Pedidos', 'Qtd. Clientes', 'Veículo', 'Motorista', 'Ajudante 1', 'Ajudante 2', 'Ajudante 3', 'N°Box', 'Transportadora'])
+	worksheet.append(['1 - BRIDA LUBRIFICANTES LTDA', data_saida, carga, 'BRIDA DISTR.', '241.423', '20,21', str(len(rows)), str(len(rows)), veiculo, motorista, ' - ', ' - ', ' - ', '-', '-'])
+	worksheet.append([])
+	worksheet.append(['Seq. Ent', 'Código', 'Fantasia', 'Fantasia', 'Razao Social', 'Razao Social', 'Carregamento', 'Número Nota', 'Número Pedido', 'Tipo Cobrança', 'Peso/Kg', 'Volume/M³', 'Valor Total'])
+	for row in rows:
+		worksheet.append(row)
+	buffer = io.BytesIO()
+	workbook.save(buffer)
+	return buffer.getvalue()
+
+
+def _build_nfe_xml(numero_nf, chave_nf, itens, rota='CAIEIRAS', inf_cpl=None):
+	partes_itens = []
+	for indice, item in enumerate(itens, start=1):
+		partes_itens.append(
+			f'''
+			<det nItem="{indice}">
+			  <prod>
+			    <cProd>{item["codigo"]}</cProd>
+			    <cEAN></cEAN>
+			    <xProd>{item["descricao"]}</xProd>
+			    <uCom>{item["unidade"]}</uCom>
+			    <qCom>{item["quantidade"]}</qCom>
+			    <vUnCom>1.00</vUnCom>
+			    <vProd>1.00</vProd>
+			  </prod>
+			</det>
+			'''.strip()
+		)
+
+	texto_inf_cpl = inf_cpl if inf_cpl is not None else f'Pedido teste - Rota: {rota}'
+
+	return f'''<?xml version="1.0" encoding="utf-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+	<NFe>
+		<infNFe versao="4.00" Id="NFe{chave_nf}">
+			<ide>
+				<cUF>35</cUF>
+				<cNF>12345678</cNF>
+				<natOp>Venda</natOp>
+				<mod>55</mod>
+				<serie>1</serie>
+				<nNF>{numero_nf}</nNF>
+				<dhEmi>2026-05-12T10:00:00-03:00</dhEmi>
+				<tpNF>1</tpNF>
+				<idDest>1</idDest>
+				<cMunFG>3550308</cMunFG>
+				<tpImp>1</tpImp>
+				<tpEmis>1</tpEmis>
+				<cDV>1</cDV>
+				<tpAmb>1</tpAmb>
+				<finNFe>1</finNFe>
+				<indFinal>0</indFinal>
+				<indPres>0</indPres>
+				<procEmi>0</procEmi>
+				<verProc>WMS</verProc>
+			</ide>
+			<dest>
+				<xNome>CLIENTE XML</xNome>
+				<IE>ISENTO</IE>
+				<enderDest>
+					<xBairro>CENTRO</xBairro>
+					<CEP>01000000</CEP>
+				</enderDest>
+			</dest>
+			{''.join(partes_itens)}
+			<transp>
+				<vol>
+					<pesoB>57.600</pesoB>
+				</vol>
+			</transp>
+			<infAdic>
+				<infCpl>{texto_inf_cpl}</infCpl>
+			</infAdic>
+		</infNFe>
+	</NFe>
+	<protNFe versao="4.00">
+		<infProt>
+			<tpAmb>1</tpAmb>
+			<verAplic>SP_NFE_PL009_V4</verAplic>
+			<chNFe>{chave_nf}</chNFe>
+			<dhRecbto>2026-05-12T10:00:01-03:00</dhRecbto>
+			<nProt>135261613421924</nProt>
+			<digVal>abc</digVal>
+			<cStat>100</cStat>
+			<xMotivo>Autorizado o uso da NF-e</xMotivo>
+		</infProt>
+	</protNFe>
+</nfeProc>'''.encode('utf-8')
 
 
 @override_settings(ROOT_URLCONF='config.urls')
@@ -160,17 +262,915 @@ class DashboardWebTests(TestCase):
 
 		self.assertEqual(response.status_code, 404)
 
-	def test_dashboard_separacao_agenda_atualizacao_automatica_a_cada_cinco_minutos(self):
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_minuta_abre_com_estrutura_visual_estatica(self):
+		response = self.client.get('/minuta/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'MINUTA')
+		self.assertContains(response, 'Controle de Minutas Operacionais')
+		self.assertContains(response, 'UPLOAD EXCEL')
+		self.assertContains(response, 'GERAR PDF')
+		self.assertContains(response, 'Minuta de Carregamento')
+		self.assertContains(response, 'Minuta de Entrega')
+		self.assertContains(response, 'target="_blank"', html=False)
+		self.assertContains(response, 'download', html=False)
+		self.assertContains(response, 'data-base-href', html=False)
+		self.assertNotContains(response, 'id="minuta-tipo-entrega" type="checkbox" disabled', html=False)
+		self.assertContains(response, 'minuta-upload-inline__controls', html=False)
+		self.assertContains(response, 'minuta-check-row--inline', html=False)
+		self.assertContains(response, 'ROMANEIO')
+		self.assertContains(response, 'NF')
+		self.assertContains(response, 'BAIRRO')
+		self.assertContains(response, 'STATUS')
+		self.assertNotContains(response, 'fetch(', html=False)
+		self.assertNotContains(response, 'setInterval', html=False)
+
+
+@override_settings(ROOT_URLCONF='config.urls')
+class MinutaImportacaoTests(TestCase):
+	def setUp(self):
+		self.client = Client()
+		self.usuario = Usuario.objects.create_user(
+			username='gestor_minuta',
+			nome='Gestor Minuta',
+			perfil=Usuario.Perfil.GESTOR,
+			setores=[Setor.Codigo.FILTROS],
+			password='123456',
+			is_active=True,
+		)
+		self.client.login(username='gestor_minuta', password='123456')
+		self.rota = Rota.objects.create(nome='CAIEIRAS', cep_inicial='01000000', cep_final='01999999')
+		self.cliente = Cliente.objects.create(nome='Cliente Minuta', inscricao_estadual='123123123')
+		self.produto = Produto.objects.create(
+			cod_prod='MIN001',
+			descricao='MOBIL SUPER 3000 5W30 24X1L',
+			cod_ean='789MIN001',
+			unidade='CX',
+			categoria=Produto.Categoria.FILTROS,
+		)
+		self.nf = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000777',
+			numero='1414802',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-12T10:00:00-03:00',
+			bairro='Centro',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=self.nf, produto=self.produto, quantidade='2.00')
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_upload_minuta_sinaliza_duplicidade_por_numero_nota(self):
+		romaneio_existente = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081000',
+			filial='BRIDA',
+			data_saida=timezone.datetime(2026, 5, 10).date(),
+			placa='ABC1D23',
+			motorista='Motorista Antigo',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=romaneio_existente,
+			nf=self.nf,
+			numero_nota=self.nf.numero,
+			status='NF VINCULADA',
+		)
+		arquivo = SimpleUploadedFile(
+			'romaneio.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Importação da minuta concluída')
+		self.assertContains(response, 'DUPLI')
+		self.assertContains(response, '5081000')
+		self.assertContains(response, self.nf.numero)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_confirmacao_importa_minuta_e_relaciona_nf_por_numero(self):
+		romaneio_existente = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081000',
+			filial='BRIDA',
+			data_saida=timezone.datetime(2026, 5, 10).date(),
+			placa='ABC1D23',
+			motorista='Motorista Antigo',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=romaneio_existente,
+			nf=self.nf,
+			numero_nota=self.nf.numero,
+			status='NF VINCULADA',
+		)
+		nf_nova = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000999',
+			numero='1419999',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-12T11:00:00-03:00',
+			bairro='Jardim Europa',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=nf_nova, produto=self.produto, quantidade='1.00')
+		arquivo = SimpleUploadedFile(
+			'romaneio.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
+				('2', '55764', 'AUTO POSTO', 'AUTO POSTO', 'Cliente Novo', 'Cliente Novo', '5081690', '1419999', '9999924701', 'MXS_15', '21.94', '0', '1644.68'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response_upload = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+		self.assertEqual(response_upload.status_code, 200)
+		self.assertContains(response_upload, 'Importação da minuta concluída')
+		self.assertContains(response_upload, 'Centro')
+		self.assertContains(response_upload, 'Jardim Europa')
+		romaneio = MinutaRomaneio.objects.get(codigo_romaneio='5081690')
+		item_nf_existente = MinutaRomaneioItem.objects.get(romaneio=romaneio, numero_nota=self.nf.numero)
+		item_nf_nova = MinutaRomaneioItem.objects.get(romaneio=romaneio, numero_nota='1419999')
+		self.assertEqual(item_nf_existente.nf_id, self.nf.id)
+		self.assertTrue(item_nf_existente.duplicado)
+		self.assertEqual(item_nf_existente.duplicidade_romaneio_codigo, '5081000')
+		self.assertFalse(item_nf_nova.duplicado)
+		self.assertEqual(item_nf_nova.nf_id, nf_nova.id)
+		self.assertEqual(item_nf_nova.status, 'XML IMPORTADO')
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_upload_minuta_bloqueia_nf_nao_localizada(self):
+		arquivo = SimpleUploadedFile(
+			'romaneio.xlsx',
+			_build_minuta_workbook([
+				('1', '55764', 'AUTO POSTO', 'AUTO POSTO', 'Cliente Novo', 'Cliente Novo', '5081690', '1419999', '9999924701', 'MXS_15', '21.94', '0', '1644.68'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'A importação atual substituiu a versão anterior')
+		self.assertContains(response, 'NF NÃO LOCALIZADA')
+		self.assertTrue(MinutaRomaneio.objects.filter(codigo_romaneio='5081690').exists())
+		self.assertTrue(MinutaRomaneioItem.objects.filter(romaneio__codigo_romaneio='5081690', numero_nota='1419999').exists())
+
+		response_confirm = self.client.post('/minuta/', {'acao': 'confirmar_importacao'}, follow=True)
+		self.assertEqual(response_confirm.status_code, 200)
+		self.assertContains(response_confirm, 'Nenhuma prévia de importação está disponível para confirmação')
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_upload_minuta_importa_nf_aguardando_liberacao(self):
+		EntradaNF.objects.create(
+			chave_nf='35260400846804000106550010000001231027966310',
+			numero_nf='123',
+			xml='xmls/xml_autorizado.xml',
+			status=EntradaNF.Status.AGUARDANDO,
+			tipo=EntradaNF.Tipo.NORMAL,
+		)
+		arquivo = SimpleUploadedFile(
+			'romaneio.xlsx',
+			_build_minuta_workbook([
+				('1', '55764', 'AUTO POSTO', 'AUTO POSTO', 'Cliente Novo', 'Cliente Novo', '5081690', '123', '9999924701', 'MXS_15', '21.94', '0', '1644.68'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Importação da minuta concluída')
+		self.assertContains(response, 'AGUARDANDO LIBERACAO')
+		self.assertContains(response, 'Cliente Fluxo Autorizado')
+		self.assertContains(response, 'Centro')
+		item = MinutaRomaneioItem.objects.get(romaneio__codigo_romaneio='5081690', numero_nota='123')
+		self.assertIsNone(item.nf_id)
+		self.assertEqual(item.status, 'AGUARDANDO LIBERACAO')
+		self.assertEqual(item.bairro, 'Centro')
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_upload_minuta_importa_nf_liberada_sem_notafiscal(self):
+		EntradaNF.objects.create(
+			chave_nf='35260400846804000106550010000001231027966311',
+			numero_nf='123',
+			xml='xmls/xml_autorizado.xml',
+			status=EntradaNF.Status.LIBERADO,
+			tipo=EntradaNF.Tipo.NORMAL,
+		)
+		arquivo = SimpleUploadedFile(
+			'romaneio.xlsx',
+			_build_minuta_workbook([
+				('1', '55764', 'AUTO POSTO', 'AUTO POSTO', 'Cliente Novo', 'Cliente Novo', '5081690', '123', '9999924701', 'MXS_15', '21.94', '0', '1644.68'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Importação da minuta concluída')
+		self.assertContains(response, 'LIBERADA')
+		item = MinutaRomaneioItem.objects.get(romaneio__codigo_romaneio='5081690', numero_nota='123')
+		self.assertIsNone(item.nf_id)
+		self.assertEqual(item.status, 'LIBERADA')
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_upload_minuta_bloqueia_nf_bloqueada(self):
+		self.nf.bloqueada = True
+		self.nf.status = NotaFiscal.Status.BLOQUEADA_COM_RESTRICAO
+		self.nf.save(update_fields=['bloqueada', 'status', 'updated_at'])
+
+		arquivo = SimpleUploadedFile(
+			'romaneio.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'NF BLOQUEADA')
+		self.assertContains(response, 'A importação atual substituiu a versão anterior')
+		self.assertTrue(MinutaRomaneio.objects.filter(codigo_romaneio='5081690').exists())
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_upload_minuta_bloqueia_nf_cancelada(self):
+		self.nf.status_fiscal = NotaFiscal.StatusFiscal.CANCELADA
+		self.nf.ativa = False
+		self.nf.bloqueada = True
+		self.nf.status = NotaFiscal.Status.BLOQUEADA_COM_RESTRICAO
+		self.nf.save(update_fields=['status_fiscal', 'ativa', 'bloqueada', 'status', 'updated_at'])
+
+		arquivo = SimpleUploadedFile(
+			'romaneio.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'NF CANCELADA')
+		self.assertContains(response, 'A importação atual substituiu a versão anterior')
+		self.assertTrue(MinutaRomaneio.objects.filter(codigo_romaneio='5081690').exists())
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_reimportacao_mesmo_romaneio_atualiza_cabecalho_e_sincroniza_itens(self):
+		arquivo_inicial = SimpleUploadedFile(
+			'romaneio_inicial.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
+				('2', '55764', 'AUTO POSTO', 'AUTO POSTO', 'Cliente Novo', 'Cliente Novo', '5081690', '1419999', '9999924701', 'MXS_15', '21.94', '0', '1644.68'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+		response_inicial = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo_inicial}, follow=True)
+		self.assertEqual(response_inicial.status_code, 200)
+
+		arquivo_reimportado = SimpleUploadedFile(
+			'romaneio_reimportado.xlsx',
+			_build_minuta_workbook(
+				[
+					('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
+				],
+				motorista='9001 - MOTORISTA NOVO',
+				veiculo='99 - XYZ1A23/BRIDA',
+			),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response_reimportado = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo_reimportado}, follow=True)
+
+		self.assertEqual(response_reimportado.status_code, 200)
+		self.assertContains(response_reimportado, 'Importação da minuta concluída')
+		self.assertEqual(MinutaRomaneio.objects.filter(codigo_romaneio='5081690').count(), 1)
+		romaneio = MinutaRomaneio.objects.get(codigo_romaneio='5081690')
+		self.assertEqual(romaneio.motorista, 'MOTORISTA NOVO')
+		self.assertEqual(romaneio.placa, 'XYZ1A23')
+		self.assertTrue(MinutaRomaneioItem.objects.filter(romaneio=romaneio, numero_nota=self.nf.numero).exists())
+		self.assertFalse(MinutaRomaneioItem.objects.filter(romaneio=romaneio, numero_nota='1419999').exists())
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_importacao_substitui_nf_fora_da_planilha_e_lista_somente_lote_importado(self):
+		romaneio = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081690',
+			filial='BRIDA',
+			data_saida=timezone.datetime(2026, 5, 12).date(),
+			placa='FTG6B24',
+			motorista='Motorista Antigo',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=romaneio,
+			nf=None,
+			numero_nota='1415057',
+			status='NF NÃO LOCALIZADA',
+			razao_social='NF fora do lote',
+		)
+
+		nf_dois = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000888',
+			numero='1419998',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-12T11:30:00-03:00',
+			bairro='Bairro 2',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=nf_dois, produto=self.produto, quantidade='1.00')
+		nf_tres = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000889',
+			numero='1419997',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-12T12:00:00-03:00',
+			bairro='Bairro 3',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=nf_tres, produto=self.produto, quantidade='1.00')
+
+		arquivo = SimpleUploadedFile(
+			'romaneio_limpo.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'CLIENTE 1', 'CLIENTE 1', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, 'PED001', 'MXS_15', '57.6', '0', '2186.36'),
+				('2', '29665', 'CLIENTE 2', 'CLIENTE 2', 'Cliente Minuta', 'Cliente Minuta', '5081690', '1419998', 'PED002', 'MXS_15', '21.94', '0', '1644.68'),
+				('3', '29666', 'CLIENTE 3', 'CLIENTE 3', 'Cliente Minuta', 'Cliente Minuta', '5081690', '1419997', 'PED003', 'MXS_15', '30.00', '0', '999.00'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Importação da minuta concluída')
+		self.assertEqual(MinutaRomaneioItem.objects.filter(romaneio__codigo_romaneio='5081690').count(), 3)
+		self.assertFalse(MinutaRomaneioItem.objects.filter(romaneio__codigo_romaneio='5081690', numero_nota='1415057').exists())
+
+		linhas, _ = listar_minuta_itens(romaneio='5081690')
+		self.assertEqual({linha['numero_nota'] for linha in linhas}, {self.nf.numero, '1419998', '1419997'})
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_reimportacao_do_mesmo_romaneio_remove_versao_antiga_com_data_anterior(self):
+		nf_nova = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000123',
+			numero='1411592',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-13T11:00:00-03:00',
+			bairro='Vila Constancia',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=nf_nova, produto=self.produto, quantidade='1.00')
+
+		arquivo_inicial = SimpleUploadedFile(
+			'romaneio_inicial.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'CLIENTE 1', 'CLIENTE 1', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, 'PED001', 'MXS_15', '57.6', '0', '2186.36'),
+				('2', '29665', 'CLIENTE FORA', 'CLIENTE FORA', 'Cliente Minuta', 'Cliente Minuta', '5081690', '1415057', 'PED002', 'MXS_15', '21.94', '0', '1644.68'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+		response_inicial = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo_inicial}, follow=True)
+		self.assertEqual(response_inicial.status_code, 200)
+		self.assertEqual(MinutaRomaneio.objects.filter(codigo_romaneio='5081690').count(), 1)
+		self.assertTrue(MinutaRomaneioItem.objects.filter(romaneio__codigo_romaneio='5081690', numero_nota='1415057').exists())
+
+		arquivo_reimportado = SimpleUploadedFile(
+			'romaneio_reimportado.xlsx',
+			_build_minuta_workbook(
+				[
+					('1', '29664', 'CLIENTE 1', 'CLIENTE 1', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, 'PED001', 'MXS_15', '57.6', '0', '2186.36'),
+					('2', '29665', 'CLIENTE 2', 'CLIENTE 2', 'Cliente Minuta', 'Cliente Minuta', '5081690', '1411592', 'PED003', 'MXS_15', '21.94', '0', '1644.68'),
+				],
+				data_saida='13/05/2026',
+			),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+		response_reimportado = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo_reimportado}, follow=True)
+
+		self.assertEqual(response_reimportado.status_code, 200)
+		self.assertContains(response_reimportado, 'Importação da minuta concluída')
+		self.assertEqual(MinutaRomaneio.objects.filter(codigo_romaneio='5081690').count(), 1)
+		romaneio = MinutaRomaneio.objects.get(codigo_romaneio='5081690')
+		self.assertEqual(romaneio.data_saida, timezone.datetime(2026, 5, 13).date())
+		self.assertEqual(set(MinutaRomaneioItem.objects.filter(romaneio=romaneio).values_list('numero_nota', flat=True)), {self.nf.numero, '1411592'})
+		self.assertFalse(MinutaRomaneioItem.objects.filter(romaneio__codigo_romaneio='5081690', numero_nota='1415057').exists())
+
+		linhas, _ = listar_minuta_itens(romaneio='5081690')
+		self.assertEqual({linha['numero_nota'] for linha in linhas}, {self.nf.numero, '1411592'})
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_listagem_padrao_mostra_apenas_lote_ativo_da_ultima_importacao(self):
+		romaneio_antigo = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081691',
+			filial='BRIDA',
+			data_saida=timezone.datetime(2026, 5, 12).date(),
+			placa='FTG6B24',
+			motorista='CLAUDIO SOUZA DE JESUS',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=romaneio_antigo,
+			numero_nota='1415057',
+			status='NF NÃO LOCALIZADA',
+			razao_social='MANOEL MESSIAS SOARES FEITOSA',
+		)
+
+		nf_dois = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000124',
+			numero='1411589',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-12T11:00:00-03:00',
+			bairro='Parque Rincao',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=nf_dois, produto=self.produto, quantidade='1.00')
+		nf_tres = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000125',
+			numero='1411593',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-12T12:00:00-03:00',
+			bairro='Cidade Jardim Cumbica',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=nf_tres, produto=self.produto, quantidade='1.00')
+
+		arquivo = SimpleUploadedFile(
+			'romaneio_ativo.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'ZEUS', 'ZEUS', 'ZEUS TRANSPORTES E ORGANIZACAO LOGISTICA LTDA', 'ZEUS TRANSPORTES E ORGANIZACAO LOGISTICA LTDA', '5081690', '1411589', 'PED001', 'MXS_15', '57.6', '0', '2186.36'),
+				('2', '29665', 'AUTO POSTO', 'AUTO POSTO', 'AUTO POSTO BRAZAO LTDA', 'AUTO POSTO BRAZAO LTDA', '5081690', '1411592', 'PED002', 'MXS_15', '21.94', '0', '1644.68'),
+				('3', '29666', 'MOTOPARTSS', 'MOTOPARTSS', 'MOTOPARTSS COMERCIO DE PECAS LTDA', 'MOTOPARTSS COMERCIO DE PECAS LTDA', '5081690', '1411593', 'PED003', 'MXS_15', '30.00', '0', '999.00'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, '5081690')
+		self.assertContains(response, '1411589')
+		self.assertContains(response, '1411592')
+		self.assertContains(response, '1411593')
+		self.assertNotContains(response, '5081691')
+		self.assertNotContains(response, '1415057')
+
+		linhas, resumo = listar_minuta_itens()
+		self.assertEqual({linha['romaneio'] for linha in linhas}, {'5081690'})
+		self.assertEqual({linha['numero_nota'] for linha in linhas}, {'1411589', '1411592', '1411593'})
+		self.assertEqual(resumo['itens'], 3)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_pdf_minuta_usa_apenas_lote_ativo(self):
+		romaneio_antigo = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081691',
+			filial='BRIDA',
+			data_saida=timezone.datetime(2026, 5, 12).date(),
+			placa='FTG6B24',
+			motorista='CLAUDIO ANTIGO',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=romaneio_antigo,
+			numero_nota='1415057',
+			status='NF NÃO LOCALIZADA',
+			razao_social='CLIENTE ANTIGO',
+		)
+
+		nf_dois = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000126',
+			numero='1411589',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-12T11:00:00-03:00',
+			bairro='Parque Rincao',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=nf_dois, produto=self.produto, quantidade='1.00')
+		nf_tres = NotaFiscal.objects.create(
+			chave_nfe='35111111111111111111550010000000011000000127',
+			numero='1411593',
+			cliente=self.cliente,
+			rota=self.rota,
+			status=NotaFiscal.Status.PENDENTE,
+			data_emissao='2026-05-12T12:00:00-03:00',
+			bairro='Cidade Jardim Cumbica',
+			status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+			bloqueada=False,
+			ativa=True,
+		)
+		NotaFiscalItem.objects.create(nf=nf_tres, produto=self.produto, quantidade='1.00')
+
+		arquivo = SimpleUploadedFile(
+			'romaneio_pdf.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'ZEUS', 'ZEUS', 'ZEUS TRANSPORTES E ORGANIZACAO LOGISTICA LTDA', 'ZEUS TRANSPORTES E ORGANIZACAO LOGISTICA LTDA', '5081690', '1411589', 'PED001', 'MXS_15', '57.6', '0.100', '2186.36'),
+				('2', '29665', 'AUTO POSTO', 'AUTO POSTO', 'AUTO POSTO BRAZAO LTDA', 'AUTO POSTO BRAZAO LTDA', '5081690', self.nf.numero, 'PED002', 'MXS_15', '21.94', '0.050', '1644.68'),
+				('3', '29666', 'MOTOPARTSS', 'MOTOPARTSS', 'MOTOPARTSS COMERCIO DE PECAS LTDA', 'MOTOPARTSS COMERCIO DE PECAS LTDA', '5081690', '1411593', 'PED003', 'MXS_15', '30.00', '0.070', '999.00'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+		self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		response = self.client.get('/minuta/pdf/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response['Content-Type'], 'application/pdf')
+		self.assertIn('minuta_carregamento_5081690.pdf', response['Content-Disposition'])
+		self.assertTrue(response.content.startswith(b'%PDF'))
+		self.assertIn(b'MINUTA DE CARREGAMENTO', response.content)
+		self.assertIn(b'Nota', response.content)
+		self.assertIn(b'Emissao', response.content)
+		self.assertIn(b'Cliente', response.content)
+		self.assertIn(b'Qtd', response.content)
+		self.assertIn(b'Peso', response.content)
+		self.assertIn(b'ROTA: CAIEIRAS', response.content)
+		self.assertIn(b'MOBIL SUPER 3000 5W30 24X1L', response.content)
+		self.assertIn(b'MIN001', response.content)
+		self.assertIn(b'CX', response.content)
+		self.assertIn(b'(1)', response.content.replace(b'\n', b''))
+		self.assertIn(b'(57,60)', response.content.replace(b'\n', b''))
+		self.assertNotIn(b'Sem itens de produto vinculados', response.content)
+		self.assertNotIn(b'NF CLIENTE BAIRRO STATUS PESO KG VOL M3 VALOR', response.content)
+		self.assertIn(b'5081690', response.content)
+		self.assertIn(b'1411589', response.content)
+		self.assertIn(self.nf.numero.encode(), response.content)
+		self.assertIn(b'1411593', response.content)
+		self.assertLess(response.content.index(b'1411593'), response.content.index(self.nf.numero.encode()))
+		self.assertLess(response.content.index(self.nf.numero.encode()), response.content.index(b'1411589'))
+		self.assertNotIn(b'5081691', response.content)
+		self.assertNotIn(b'1415057', response.content)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_pdf_minuta_resolve_itens_por_numero_quando_item_minuta_esta_sem_nf(self):
+		arquivo = SimpleUploadedFile(
+			'romaneio_fallback.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'CLIENTE 1', 'CLIENTE 1', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, 'PED001', 'MXS_15', '57.6', '0.100', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response_upload = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+		self.assertEqual(response_upload.status_code, 200)
+
+		MinutaRomaneioItem.objects.filter(numero_nota=self.nf.numero).update(nf=None)
+
+		response = self.client.get('/minuta/pdf/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertIn(self.nf.numero.encode(), response.content)
+		self.assertIn(b'MIN001', response.content)
+		self.assertIn(b'MOBIL SUPER 3000 5W30 24X1L', response.content)
+		self.assertIn(b'Qtd', response.content)
+		self.assertNotIn(b'XML nao localizado', response.content)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_pdf_minuta_usa_itens_do_xml_quando_nf_nao_existe_no_banco(self):
+		numero_nf = '1418888'
+		chave_nf = '35260500846804000106550010014188881000000001'
+		EntradaNF.objects.create(
+			chave_nf=chave_nf,
+			numero_nf=numero_nf,
+			xml=SimpleUploadedFile(
+				f'{chave_nf}.xml',
+				_build_nfe_xml(
+					numero_nf,
+					chave_nf,
+					[
+						{'codigo': '123943', 'descricao': 'MOBIL SUPER 3000 5W30 24X1L', 'quantidade': '1.0000', 'unidade': 'CX'},
+						{'codigo': '999001', 'descricao': 'FILTRO LUBRIFICANTE', 'quantidade': '2.0000', 'unidade': 'UN'},
+					],
+				),
+				content_type='application/xml',
+			),
+		)
+
+		arquivo = SimpleUploadedFile(
+			'romaneio_xml.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'CLIENTE XML', 'CLIENTE XML', 'CLIENTE XML LTDA', 'CLIENTE XML LTDA', '5081690', numero_nf, 'PED001', 'MXS_15', '57.6', '0.100', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response_upload = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+		self.assertEqual(response_upload.status_code, 200)
+
+		response = self.client.get('/minuta/pdf/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertIn(b'ROTA: CAIEIRAS', response.content)
+		self.assertIn(b'Qtd', response.content)
+		self.assertIn(b'MOBIL SUPER 3000 5W30 24X1L', response.content)
+		self.assertIn(b'FILTRO LUBRIFICANTE', response.content)
+		self.assertIn(b'123943', response.content)
+		self.assertIn(b'CX', response.content)
+		self.assertIn(b'(3)', response.content)
+		self.assertIn(b'(1)', response.content.replace(b'\n', b''))
+		self.assertIn(b'(38,40)', response.content.replace(b'\n', b''))
+		self.assertLess(response.content.index(b'FILTRO LUBRIFICANTE'), response.content.index(b'MOBIL SUPER 3000 5W30 24X1L'))
+		self.assertNotIn(b'0,000', response.content)
+		self.assertNotIn(b'XML localizado sem itens processados', response.content)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_pdf_minuta_limpa_texto_fiscal_da_rota(self):
+		numero_nf = '1417777'
+		chave_nf = '35260500846804000106550010014177771000000001'
+		EntradaNF.objects.create(
+			chave_nf=chave_nf,
+			numero_nf=numero_nf,
+			xml=SimpleUploadedFile(
+				f'{chave_nf}.xml',
+				_build_nfe_xml(
+					numero_nf,
+					chave_nf,
+					[{'codigo': '123075', 'descricao': 'PI: MOBIL SUPER MOTO 4T MX 10W30 24X1L', 'quantidade': '3.0000', 'unidade': 'CX'}],
+						inf_cpl='Pedido teste - Rota: ITAPEVI\\NTRIB APROX. R$ 240,89 FED, 71,64 EST E 0,00 MUN FONTE: IBPT',
+				),
+				content_type='application/xml',
+			),
+		)
+
+		arquivo = SimpleUploadedFile(
+			'romaneio_rota_limpa.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'CLIENTE ROTA', 'CLIENTE ROTA', 'CLIENTE ROTA LTDA', 'CLIENTE ROTA LTDA', '5081690', numero_nf, 'PED001', 'MXS_15', '57.6', '0.100', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+		response = self.client.get('/minuta/pdf/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertIn(b'ROTA: ITAPEVI', response.content)
+		self.assertNotIn(b'ITAPEVI\\N', response.content)
+		self.assertNotIn(b'TRIB APROX', response.content)
+		self.assertNotIn(b'FED', response.content)
+		self.assertNotIn(b'EST', response.content)
+		self.assertNotIn(b'MUN', response.content)
+		self.assertNotIn(b'FONTE', response.content)
+		self.assertNotIn(b'VALOR CBS', response.content)
+		self.assertNotIn(b'VALOR IBS', response.content)
+
+	def test_pdf_minuta_restringe_acesso_para_conferente(self):
+		usuario_conferente = Usuario.objects.create_user(
+			username='conferente_minuta_pdf',
+			nome='Conferente Minuta',
+			perfil=Usuario.Perfil.CONFERENTE,
+			setores=[Setor.Codigo.FILTROS],
+			password='123456',
+			is_active=True,
+		)
+		self.client.force_login(usuario_conferente)
+
+		response = self.client.get('/minuta/pdf/')
+
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(response.headers['Location'], '/conferencia/')
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_pdf_minuta_entrega_gera_pdf_individual(self):
+		arquivo = SimpleUploadedFile(
+			'romaneio_entrega.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'CLIENTE 1', 'CLIENTE 1', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, 'PED001', 'MXS_15', '57.6', '1', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+		response = self.client.get('/minuta/pdf/?carregamento=0&entrega=1')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response['Content-Type'], 'application/pdf')
+		self.assertIn('minuta_entrega_5081690.pdf', response['Content-Disposition'])
+		self.assertIn(b'MINUTA DE ENTREGA', response.content)
+		self.assertNotIn(b'Total Volumes:', response.content)
+		self.assertIn(b'Total Valor:', response.content)
+		self.assertIn(b'Carregamento: 5081690', response.content)
+		self.assertIn(b'Cliente Minuta', response.content)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_pdf_minuta_gera_zip_quando_carregamento_e_entrega_estao_marcados(self):
+		arquivo = SimpleUploadedFile(
+			'romaneio_zip.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'CLIENTE 1', 'CLIENTE 1', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, 'PED001', 'MXS_15', '57.6', '1', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+		response = self.client.get('/minuta/pdf/?carregamento=1&entrega=1')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response['Content-Type'], 'application/zip')
+		self.assertIn('minutas_5081690.zip', response['Content-Disposition'])
+		with zipfile.ZipFile(io.BytesIO(response.content), 'r') as arquivo_zip:
+			self.assertEqual(
+				set(arquivo_zip.namelist()),
+				{'minuta_carregamento_5081690.pdf', 'minuta_entrega_5081690.pdf'},
+			)
+			self.assertTrue(arquivo_zip.read('minuta_carregamento_5081690.pdf').startswith(b'%PDF'))
+			self.assertTrue(arquivo_zip.read('minuta_entrega_5081690.pdf').startswith(b'%PDF'))
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_dashboard_separacao_usa_atualizacao_manual(self):
 		response = self.client.get('/dashboard/separacao/')
 
 		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'const dashboardRefreshIntervalMs = 300000;', html=False)
+		self.assertContains(response, 'Atualizar')
+		self.assertNotContains(response, 'dashboardRefreshIntervalMs', html=False)
+		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
+		self.assertNotContains(response, 'fetch(`/api/dashboard/resumo/', html=False)
 
-	def test_dashboard_conferencia_agenda_atualizacao_automatica_a_cada_cinco_minutos(self):
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_dashboard_separacao_nao_exibe_exclusao_para_tarefa_concluida_com_restricao(self):
+		self.tarefa.status = Tarefa.Status.CONCLUIDO_COM_RESTRICAO
+		self.tarefa.save(update_fields=['status', 'updated_at'])
+		TarefaItem.objects.filter(tarefa=self.tarefa, produto=self.produto_pendente).update(
+			possui_restricao=False,
+			quantidade_separada=0,
+		)
+
+		response = self.client.get('/dashboard/separacao/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'CONCLUIDO COM RESTRICAO')
+		self.assertNotContains(response, f'data-exclusao-url="/tarefas/excluir/{self.tarefa.id}/"', html=False)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_dashboard_conferencia_usa_atualizacao_manual(self):
 		response = self.client.get('/dashboard/conferencia/')
 
 		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'const dashboardRefreshIntervalMs = 300000;', html=False)
+		self.assertContains(response, 'Atualizar')
+		self.assertNotContains(response, 'dashboardRefreshIntervalMs', html=False)
+		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
+		self.assertNotContains(response, 'fetch(`/api/dashboard/resumo/', html=False)
 
 	def test_separacao_lista_ajax_retorna_somente_tabela(self):
 		response = self.client.get('/separacao/', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
@@ -1020,6 +2020,42 @@ class LiberacaoDivergenciaWebTests(TestCase):
 		self.assertEqual(response.status_code, 302)
 		self.tarefa.refresh_from_db()
 		self.assertEqual(self.tarefa.status, Tarefa.Status.FECHADO_COM_RESTRICAO)
+
+	def test_excluir_tarefa_finalizada_permanece_bloqueado_por_status(self):
+		self.client.login(username='gestor_liberacao', password='123456')
+		self.tarefa.status = Tarefa.Status.CONCLUIDO
+		self.tarefa.save(update_fields=['status', 'updated_at'])
+
+		response = self.client.post(
+			f'/tarefas/excluir/{self.tarefa.id}/',
+			{'motivo': 'Nao faz parte da separacao'},
+			HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+		)
+
+		self.assertEqual(response.status_code, 400)
+		self.assertEqual(response.json()['erro'], 'Tarefa finalizada não pode ser excluída.')
+		self.tarefa.refresh_from_db()
+		self.assertTrue(self.tarefa.ativo)
+		self.assertFalse(LiberacaoDivergencia.objects.filter(tarefa=self.tarefa, status_novo='EXCLUIDO').exists())
+
+	def test_excluir_nf_finalizada_permanece_bloqueado_por_status(self):
+		self.client.login(username='gestor_liberacao', password='123456')
+		self.nf.status = NotaFiscal.Status.CONCLUIDO
+		self.nf.bloqueada = False
+		self.nf.save(update_fields=['status', 'bloqueada', 'updated_at'])
+		Conferencia.objects.create(nf=self.nf, conferente=self.conferente, status=Conferencia.Status.OK)
+
+		response = self.client.post(
+			f'/conferencia/excluir/{self.nf.id}/',
+			{'motivo': 'Registro encerrado indevido'},
+			HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+		)
+
+		self.assertEqual(response.status_code, 400)
+		self.assertEqual(response.json()['erro'], 'Conferência finalizada não pode ser excluída.')
+		self.nf.refresh_from_db()
+		self.assertTrue(self.nf.ativa)
+		self.assertFalse(LiberacaoDivergencia.objects.filter(nf=self.nf, tarefa__isnull=True, status_novo='EXCLUIDO').exists())
 
 
 @override_settings(ROOT_URLCONF='config.urls')
