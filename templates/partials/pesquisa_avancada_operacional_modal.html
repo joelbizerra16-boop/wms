@@ -1,0 +1,71 @@
+<div class="operacional-pesquisa-bar" style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:8px;">
+    {% if pesquisa_avancada_ativa %}
+    <span class="muted" style="font-size:0.82rem;">Período personalizado</span>
+    <a href="{{ request.path }}" class="btn btn-light" style="padding:4px 10px;font-size:0.82rem;">Voltar ao padrão</a>
+    {% endif %}
+    <button type="button" class="btn btn-light" id="btn-pesquisa-avancada" style="padding:4px 12px;font-size:0.85rem;">Pesquisa avançada</button>
+</div>
+
+<div class="modal" id="pesquisa-avancada-modal" aria-hidden="true">
+    <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="pesquisa-avancada-title">
+        <div class="modal__header">
+            <div>
+                <h3 class="modal__title" id="pesquisa-avancada-title">Pesquisa avançada</h3>
+                <p class="muted">Consulte histórico fora da operação do dia.</p>
+            </div>
+            <button type="button" class="modal__close" id="pesquisa-avancada-close" aria-label="Fechar">×</button>
+        </div>
+        <form method="get" class="modal__body">
+            <div style="display:grid;gap:12px;">
+                <div>
+                    <label for="pa-data-inicial">De</label>
+                    <input id="pa-data-inicial" type="date" name="data_inicial" value="{{ filtros_pesquisa.date_from }}">
+                </div>
+                <div>
+                    <label for="pa-data-final">Até</label>
+                    <input id="pa-data-final" type="date" name="data_final" value="{{ filtros_pesquisa.date_to }}">
+                </div>
+                <div>
+                    <label for="pa-busca">Busca</label>
+                    <input id="pa-busca" type="text" name="busca" value="{{ filtros_pesquisa.busca }}" placeholder="NF, cliente, rota...">
+                </div>
+            </div>
+            <div class="modal__actions">
+                <button type="button" class="btn btn-light" id="pesquisa-avancada-cancel">Cancelar</button>
+                <button type="submit" class="btn-primary">Consultar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function () {
+    const modal = document.getElementById('pesquisa-avancada-modal');
+    const openBtn = document.getElementById('btn-pesquisa-avancada');
+    const closeBtn = document.getElementById('pesquisa-avancada-close');
+    const cancelBtn = document.getElementById('pesquisa-avancada-cancel');
+    if (!modal || !openBtn) {
+        return;
+    }
+    function abrir() {
+        modal.setAttribute('aria-hidden', 'false');
+        modal.classList.add('is-open');
+    }
+    function fechar() {
+        modal.setAttribute('aria-hidden', 'true');
+        modal.classList.remove('is-open');
+    }
+    openBtn.addEventListener('click', abrir);
+    if (closeBtn) {
+        closeBtn.addEventListener('click', fechar);
+    }
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', fechar);
+    }
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) {
+            fechar();
+        }
+    });
+})();
+</script>

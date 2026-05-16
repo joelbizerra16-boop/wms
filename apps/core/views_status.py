@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.core.services.visibilidade_operacional_service import get_nfs_monitoramento_conferencia
-from apps.core.operacional_periodo import resolver_periodo_operacional_request
+from apps.core.operacional_periodo import resolver_periodo_dashboard_request
 from apps.core.views_dashboard import calcular_indicadores_volume_separacao, collect_itens_filtrados_dashboard_separacao
 from apps.nf.models import NotaFiscal
 from apps.nf.services.consistencia_service import separacao_concluida_nf
@@ -119,7 +119,7 @@ def _dashboard_resumo_payload(request):
     from django.conf import settings
     from django.core.cache import cache
 
-    date_from, date_to, busca = resolver_periodo_operacional_request(request)
+    date_from, date_to, busca = resolver_periodo_dashboard_request(request)
     cache_ttl = int(getattr(settings, 'DASHBOARD_CACHE_TTL', 15))
     cache_key = ':'.join(
         [

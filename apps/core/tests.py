@@ -1337,6 +1337,19 @@ class MinutaImportacaoTests(TestCase):
 		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
 		self.assertContains(response, 'fetch(window.location.href', html=False)
 		self.assertContains(response, 'window.wmsManualRefresh', html=False)
+		self.assertContains(response, 'Pesquisa avançada', html=False)
+		self.assertContains(response, 'pesquisa-avancada-modal', html=False)
+		self.assertNotContains(response, 'operacional-periodo-form', html=False)
+		self.assertNotContains(response, 'Hoje + ontem', html=False)
+
+	def test_separacao_lista_abre_sem_filtros_visiveis(self):
+		response = self.client.get('/separacao/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Pesquisa avançada', html=False)
+		self.assertContains(response, 'pesquisa-avancada-modal', html=False)
+		self.assertNotContains(response, 'operacional-periodo-form', html=False)
+		self.assertNotContains(response, 'Hoje + ontem', html=False)
 
 	def test_separacao_lista_ajax_retorna_somente_tabela(self):
 		response = self.client.get('/separacao/', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
@@ -1367,29 +1380,38 @@ class MinutaImportacaoTests(TestCase):
 		self.assertNotContains(response, 'Dashboard de Conferência')
 
 	def test_dashboard_separacao_respeita_filtro_de_periodo(self):
-		data_com_dados = self.tarefa.created_at.date()
-		data_sem_dados = data_com_dados - timedelta(days=1)
+		hoje = timezone.localdate()
+		data_sem_dados = hoje - timedelta(days=30)
 		response = self.client.get(f'/dashboard/separacao/?data_inicial={data_sem_dados.isoformat()}&data_final={data_sem_dados.isoformat()}')
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'Nenhum item de separação encontrado.')
 
-		response_no_dia_correto = self.client.get(f'/dashboard/separacao/?data_inicial={data_com_dados.isoformat()}&data_final={data_com_dados.isoformat()}')
+		response_no_dia_correto = self.client.get(f'/dashboard/separacao/?data_inicial={hoje.isoformat()}&data_final={hoje.isoformat()}')
 		self.assertEqual(response_no_dia_correto.status_code, 200)
 		self.assertContains(response_no_dia_correto, self.nf.numero)
 
-	def test_dashboard_separacao_sem_filtro_usa_janela_hoje_e_ontem(self):
+	def test_dashboard_separacao_sem_filtro_usa_somente_hoje(self):
+		from django.core.cache import cache
+
 		data_antiga = timezone.now() - timedelta(days=3)
-		Tarefa.objects.filter(id=self.tarefa.id).update(created_at=data_antiga, updated_at=data_antiga)
-		NotaFiscal.objects.filter(id=self.nf.id).update(data_emissao=data_antiga)
+		Tarefa.objects.filter(id=self.tarefa.id).update(
+			created_at=data_antiga,
+			updated_at=data_antiga,
+			ativo=False,
+		)
+		NotaFiscal.objects.filter(id=self.nf.id).update(
+			created_at=data_antiga,
+			updated_at=data_antiga,
+			data_emissao=data_antiga,
+		)
+		cache.clear()
 
 		response = self.client.get('/dashboard/separacao/')
 
 		self.assertEqual(response.status_code, 200)
-		hoje = timezone.localdate()
-		ontem = (hoje - timedelta(days=1)).isoformat()
-		self.assertEqual(response.context['filtros']['date_from'], ontem)
-		self.assertEqual(response.context['filtros']['date_to'], hoje.isoformat())
-		self.assertContains(response, 'Nenhum item de separação encontrado.')
+		hoje = timezone.localdate().isoformat()
+		self.assertEqual(response.context['filtros']['date_from'], hoje)
+		self.assertEqual(response.context['filtros']['date_to'], hoje)
 		self.assertEqual(response.context['indicadores']['total'], 0)
 
 	def test_dashboard_conferencia_respeita_filtro_de_periodo(self):
@@ -1404,18 +1426,20 @@ class MinutaImportacaoTests(TestCase):
 		self.assertContains(response_no_dia_correto, 'name="data_inicial"', html=False)
 		self.assertContains(response_no_dia_correto, 'name="data_final"', html=False)
 
-	def test_dashboard_conferencia_sem_filtro_usa_janela_hoje_e_ontem(self):
+	def test_dashboard_conferencia_sem_filtro_usa_somente_hoje(self):
+		from django.core.cache import cache
+
 		data_antiga = timezone.now() - timedelta(days=3)
 		NotaFiscal.objects.filter(id=self.nf.id).update(created_at=data_antiga, data_emissao=data_antiga, updated_at=data_antiga)
 		Conferencia.objects.filter(id=self.conferencia.id).update(created_at=data_antiga, updated_at=data_antiga)
+		cache.clear()
 
 		response = self.client.get('/dashboard/conferencia/')
 
 		self.assertEqual(response.status_code, 200)
-		hoje = timezone.localdate()
-		ontem = (hoje - timedelta(days=1)).isoformat()
-		self.assertEqual(response.context['filtros']['date_from'], ontem)
-		self.assertEqual(response.context['filtros']['date_to'], hoje.isoformat())
+		hoje = timezone.localdate().isoformat()
+		self.assertEqual(response.context['filtros']['date_from'], hoje)
+		self.assertEqual(response.context['filtros']['date_to'], hoje)
 		self.assertContains(response, 'Nenhuma NF encontrada.')
 
 	def test_dashboard_conferencia_marca_nf_como_concluida_quando_itens_estao_totalmente_conferidos(self):

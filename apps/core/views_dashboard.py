@@ -20,6 +20,7 @@ from apps.core.nf_utils import resolve_nf_numero
 from apps.core.operacional_periodo import (
     filtros_template_periodo,
     parse_date_param,
+    resolver_periodo_dashboard_request,
     resolver_periodo_operacional_request,
 )
 from apps.logs.models import LiberacaoDivergencia
@@ -584,7 +585,7 @@ def _nf_liberacao(liberacao):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def dashboard_separacao(request):
-    date_from, date_to, busca = resolver_periodo_operacional_request(request)
+    date_from, date_to, busca = resolver_periodo_dashboard_request(request)
     itens_filtrados = collect_itens_filtrados_dashboard_separacao(request.user, date_from, date_to, busca)
     indicadores = calcular_indicadores_volume_separacao(itens_filtrados)
     logger.info(
@@ -645,7 +646,7 @@ def dashboard_conferencia(request):
     from django.conf import settings as django_settings
 
     inicio = time.perf_counter()
-    date_from, date_to, busca = resolver_periodo_operacional_request(request)
+    date_from, date_to, busca = resolver_periodo_dashboard_request(request)
     nfs_disponiveis = get_nfs_monitoramento_conferencia(
         request.user,
         data_inicio=date_from,
