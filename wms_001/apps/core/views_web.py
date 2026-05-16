@@ -46,7 +46,7 @@ from apps.usuarios.forms import UsuarioForm
 
 logger = logging.getLogger(__name__)
 SCAN_SESSION_KEY = 'scan_entradas_nf_ids'
-MAX_XML_FILES_POR_ENVIO = 500
+MAX_XML_FILES_POR_ENVIO = 700
 MAX_XML_FILES_POR_LOTE = 100
 
 
@@ -306,6 +306,8 @@ def importar_xml_web(request):
         balcao = request.POST.get('balcao') in {'1', 'on', 'true', 'True'}
         tipo_entrada = EntradaNF.Tipo.BALCAO if balcao else EntradaNF.Tipo.NORMAL
         xml_files = request.FILES.getlist('xml_files')
+        print(len(xml_files))
+        logger.info('Importacao XML recebeu %s arquivo(s).', len(xml_files))
         resultados = {
             'sucesso': 0,
             'duplicadas': 0,

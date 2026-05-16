@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
 import json
 
@@ -70,7 +70,7 @@ from apps.usuarios.forms import UsuarioForm
 
 logger = logging.getLogger(__name__)
 SCAN_SESSION_KEY = 'scan_entradas_nf_ids'
-MAX_XML_FILES_POR_ENVIO = 500
+MAX_XML_FILES_POR_ENVIO = 700
 MAX_XML_FILES_POR_LOTE = 100
 
 
@@ -513,6 +513,8 @@ def importar_xml_web(request):
         balcao = request.POST.get('balcao') in {'1', 'on', 'true', 'True'}
         tipo_entrada = EntradaNF.Tipo.BALCAO if balcao else EntradaNF.Tipo.NORMAL
         xml_files = request.FILES.getlist('xml_files')
+        print(len(xml_files))
+        logger.info('Importacao XML recebeu %s arquivo(s).', len(xml_files))
         resultados = {
             'sucesso': 0,
             'duplicadas': 0,
@@ -531,6 +533,7 @@ def importar_xml_web(request):
         else:
             for inicio in range(0, len(xml_files), MAX_XML_FILES_POR_LOTE):
                 lote = xml_files[inicio:inicio + MAX_XML_FILES_POR_LOTE]
+                lote_preparado = []
                 for xml_file in lote:
                     nome_arquivo = getattr(xml_file, 'name', 'arquivo_sem_nome')
                     if not nome_arquivo.lower().endswith('.xml'):
@@ -549,47 +552,14 @@ def importar_xml_web(request):
 
                     try:
                         resumo_nfe = extrair_resumo_nfe_xml(xml_file)
-                        chave_nfe = resumo_nfe['chave_nfe']
-                        numero_nf = resumo_nfe['numero_nf']
-                        nota_existente = NotaFiscal.objects.filter(chave_nfe=chave_nfe).first()
-                        status_inicial = EntradaNF.Status.PROCESSADO if nota_existente else EntradaNF.Status.AGUARDANDO
-                        entrada, created = EntradaNF.objects.get_or_create(
-                            chave_nf=chave_nfe,
-                            defaults={
-                                'numero_nf': numero_nf,
-                                'xml': xml_file,
-                                'status': status_inicial,
-                                'tipo': tipo_entrada,
-                            },
+                        lote_preparado.append(
+                            {
+                                'xml_file': xml_file,
+                                'arquivo': nome_arquivo,
+                                'chave_nfe': resumo_nfe['chave_nfe'],
+                                'numero_nf': resumo_nfe['numero_nf'],
+                            }
                         )
-                        if created or not entrada.xml_backup_gzip:
-                            store_entrada_xml_backup(entrada, xml_file)
-                        if created:
-                            resultados['sucesso'] += 1
-                            resultados['detalhes'].append(
-                                {
-                                    'status': 'sucesso',
-                                    'mensagem': (
-                                        'NF já existente no sistema. Entrada marcada como PROCESSADO.'
-                                        if nota_existente
-                                        else 'XML recebido. NF adicionada à fila de entradas.'
-                                    ),
-                                    'nf': numero_nf,
-                                    'chave_nfe': chave_nfe,
-                                    'arquivo': nome_arquivo,
-                                }
-                            )
-                        else:
-                            resultados['duplicadas'] += 1
-                            resultados['detalhes'].append(
-                                {
-                                    'status': 'duplicada',
-                                    'mensagem': 'Chave já cadastrada na fila de entradas.',
-                                    'nf': entrada.numero_nf or '-',
-                                    'chave_nfe': entrada.chave_nf,
-                                    'arquivo': nome_arquivo,
-                                }
-                            )
                     except ImportacaoXMLError as exc:
                         resultados['erros'] += 1
                         resultados['detalhes'].append(
@@ -600,6 +570,81 @@ def importar_xml_web(request):
                         resultados['detalhes'].append(
                             _resultado_erro_importacao(str(exc), arquivo=nome_arquivo)
                         )
+
+                if not lote_preparado:
+                    continue
+
+                chaves_lote = [item['chave_nfe'] for item in lote_preparado]
+                entradas_existentes = {
+                    entrada.chave_nf: entrada
+                    for entrada in EntradaNF.objects.filter(chave_nf__in=chaves_lote)
+                }
+                chaves_notas_existentes = set(
+                    NotaFiscal.objects.filter(chave_nfe__in=chaves_lote).values_list('chave_nfe', flat=True)
+                )
+
+                with transaction.atomic():
+                    for item in lote_preparado:
+                        chave_nfe = item['chave_nfe']
+                        numero_nf = item['numero_nf']
+                        nome_arquivo = item['arquivo']
+                        xml_file = item['xml_file']
+
+                        entrada_existente = entradas_existentes.get(chave_nfe)
+                        if entrada_existente is not None:
+                            resultados['duplicadas'] += 1
+                            resultados['detalhes'].append(
+                                {
+                                    'status': 'duplicada',
+                                    'mensagem': 'Chave já cadastrada na fila de entradas.',
+                                    'nf': entrada_existente.numero_nf or '-',
+                                    'chave_nfe': entrada_existente.chave_nf,
+                                    'arquivo': nome_arquivo,
+                                }
+                            )
+                            continue
+
+                        try:
+                            status_inicial = (
+                                EntradaNF.Status.PROCESSADO if chave_nfe in chaves_notas_existentes else EntradaNF.Status.AGUARDANDO
+                            )
+                            entrada = EntradaNF.objects.create(
+                                chave_nf=chave_nfe,
+                                numero_nf=numero_nf,
+                                xml=xml_file,
+                                status=status_inicial,
+                                tipo=tipo_entrada,
+                            )
+                            if not entrada.xml_backup_gzip:
+                                store_entrada_xml_backup(entrada, xml_file)
+                            entradas_existentes[chave_nfe] = entrada
+                            resultados['sucesso'] += 1
+                            resultados['detalhes'].append(
+                                {
+                                    'status': 'sucesso',
+                                    'mensagem': (
+                                        'NF já existente no sistema. Entrada marcada como PROCESSADO.'
+                                        if chave_nfe in chaves_notas_existentes
+                                        else 'XML recebido. NF adicionada à fila de entradas.'
+                                    ),
+                                    'nf': numero_nf,
+                                    'chave_nfe': chave_nfe,
+                                    'arquivo': nome_arquivo,
+                                }
+                            )
+                        except IntegrityError:
+                            entrada_existente = EntradaNF.objects.filter(chave_nf=chave_nfe).first()
+                            entradas_existentes[chave_nfe] = entrada_existente
+                            resultados['duplicadas'] += 1
+                            resultados['detalhes'].append(
+                                {
+                                    'status': 'duplicada',
+                                    'mensagem': 'Chave já cadastrada na fila de entradas.',
+                                    'nf': (entrada_existente.numero_nf if entrada_existente else numero_nf) or '-',
+                                    'chave_nfe': chave_nfe,
+                                    'arquivo': nome_arquivo,
+                                }
+                            )
 
             if resultados['sucesso']:
                 messages.success(request, f"XMLs recebidos na fila: {resultados['sucesso']}")

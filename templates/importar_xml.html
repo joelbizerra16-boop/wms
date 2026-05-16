@@ -27,7 +27,7 @@
         </div>
         <label for="xml_files">Arquivos XML</label>
         <input id="xml_files" name="xml_files" type="file" accept=".xml,text/xml" multiple required>
-        <small id="xml-files-help" class="text-muted">Máximo de 200 arquivos por envio no navegador.</small>
+        <small id="xml-files-help" class="text-muted">Máximo de 700 arquivos por envio no navegador.</small>
         <div class="actions-row" style="margin-top:14px;">
             <button type="submit" class="btn-warning" id="btn-enviar-xml">Enviar para fila</button>
             <a href="{% url 'web-fila-entradas-nf' %}" class="btn btn-light">Abrir fila de NFs</a>
@@ -99,19 +99,23 @@
         const input = document.getElementById('xml_files');
         const button = document.getElementById('btn-enviar-xml');
         const loader = document.getElementById('importacao-loader');
+        const maxFiles = 700;
 
         form.addEventListener('submit', function (event) {
             const files = input && input.files ? input.files.length : 0;
-            if (files > 200) {
+            if (files > maxFiles) {
                 event.preventDefault();
-                alert('Máximo de 200 arquivos por envio.');
+                alert(`Máximo de ${maxFiles} arquivos por envio.`);
                 return;
             }
             if (button) {
                 button.disabled = true;
-                button.textContent = 'Processando...';
+                button.textContent = files > 0 ? `Processando ${files} XMLs...` : 'Processando...';
             }
-            if (loader) loader.style.display = 'block';
+            if (loader) {
+                loader.textContent = files > 0 ? `Processando ${files} XMLs...` : 'Importação em andamento...';
+                loader.style.display = 'block';
+            }
         });
     })();
 </script>

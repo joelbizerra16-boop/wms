@@ -115,6 +115,8 @@ WHITENOISE_MAX_AGE = config('WHITENOISE_MAX_AGE', default=31536000, cast=int)
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+DATA_UPLOAD_MAX_MEMORY_SIZE = config('DATA_UPLOAD_MAX_MEMORY_SIZE', default=524288000, cast=int)
+FILE_UPLOAD_MAX_MEMORY_SIZE = config('FILE_UPLOAD_MAX_MEMORY_SIZE', default=524288000, cast=int)
 
 STORAGES = {
     'default': {

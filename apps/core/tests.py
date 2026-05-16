@@ -27,6 +27,7 @@ from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
 from apps.core.services.minuta_service import listar_minuta_itens
+from apps.core.views_web import MAX_XML_FILES_POR_ENVIO
 from apps.logs.models import LiberacaoDivergencia, Log
 from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem
 from apps.produtos.models import Produto
@@ -2198,6 +2199,31 @@ class LimpezaImportacaoWebTests(TestCase):
 		self.assertTrue(
 			Log.objects.filter(usuario=self.admin, acao='XML STORAGE INCONSISTENTE', detalhe__icontains='backup persistente').exists()
 		)
+
+	def test_tela_importacao_xml_exibe_limite_de_700_arquivos(self):
+		self.client.login(username='admin_limpeza', password='123456')
+
+		response = self.client.get('/importar/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, f'Máximo de {MAX_XML_FILES_POR_ENVIO} arquivos por envio no navegador.', html=False)
+
+	def test_importacao_xml_bloqueia_envio_acima_de_700_arquivos(self):
+		self.client.login(username='admin_limpeza', password='123456')
+		arquivos = [
+			SimpleUploadedFile(f'xml-{indice}.xml', b'<xml/>', content_type='text/xml')
+			for indice in range(MAX_XML_FILES_POR_ENVIO + 1)
+		]
+
+		response = self.client.post('/importar/', {'xml_files': arquivos}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(
+			response,
+			f'Limite máximo de {MAX_XML_FILES_POR_ENVIO} arquivos por envio. Divida o lote e tente novamente.',
+			html=False,
+		)
+		self.assertEqual(EntradaNF.objects.count(), 0)
 
 	def test_bloqueia_limpeza_sem_base_maior_que_60_dias(self):
 		self.client.login(username='admin_limpeza', password='123456')
