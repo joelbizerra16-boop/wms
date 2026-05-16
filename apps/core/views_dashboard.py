@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 import logging
 
+from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.paginator import Paginator
 from django.db.models import F, Prefetch, Q
@@ -24,6 +25,7 @@ from apps.usuarios.access import build_access_context, require_profiles
 from apps.usuarios.models import Setor, Usuario
 
 logger = logging.getLogger(__name__)
+CONFERENCIA_RESUMO_CACHE_TTL = 60
 
 
 STATUS_TAREFA_DASHBOARD_SEPARACAO = {
@@ -632,22 +634,10 @@ def dashboard_conferencia(request):
         data_fim=date_to,
         busca=busca,
     )
-    nf_ids = [nf.get('id') for nf in nfs_disponiveis if nf.get('id') is not None]
-    nf_por_id = {
-        nf.id: nf
-        for nf in NotaFiscal.objects.select_related('cliente', 'rota').defer('bairro')
-        .prefetch_related('itens__produto')
-        .filter(id__in=nf_ids)
-    }
-
     linhas = []
     for nf_data in nfs_disponiveis:
-        nf = nf_por_id.get(nf_data['id'])
-        if nf is None:
-            continue
-        data_referencia = timezone.localtime(nf.created_at).date() if nf.created_at else (
-            nf.data_emissao.date() if nf.data_emissao else timezone.localdate()
-        )
+        data_referencia_valor = nf_data.get('data_referencia') or ''
+        data_referencia = date.fromisoformat(data_referencia_valor) if data_referencia_valor else timezone.localdate()
         if date_from and data_referencia < date_from:
             continue
         if date_to and data_referencia > date_to:
@@ -677,7 +667,7 @@ def dashboard_conferencia(request):
                 'pode_excluir': status not in {'CONCLUIDO', 'CONCLUIDO COM RESTRICAO'},
                 '_prioridade': _prioridade_operacional_dashboard(status, bool(nf_data.get('balcao'))),
                 '_prioridade_status': _prioridade_status_dashboard(status),
-                '_updated_at': nf.updated_at,
+                '_updated_ts': float(nf_data.get('updated_ts') or 0),
             }
         )
 
@@ -696,13 +686,13 @@ def dashboard_conferencia(request):
         key=lambda linha: (
             linha['_prioridade'],
             linha['_prioridade_status'],
-            -linha['_updated_at'].timestamp(),
+            -linha['_updated_ts'],
         )
     )
     for linha in linhas:
         linha.pop('_prioridade', None)
         linha.pop('_prioridade_status', None)
-        linha.pop('_updated_at', None)
+        linha.pop('_updated_ts', None)
 
     total_nfs = len(linhas)
     conferidas = sum(1 for linha in linhas if linha['status'] in {'CONCLUIDO', 'CONCLUIDO COM RESTRICAO', 'OK'})
@@ -710,14 +700,29 @@ def dashboard_conferencia(request):
     pendentes = max(total_nfs - conferidas, 0)
     percentual_concluido = 0 if total_nfs == 0 else round(conferidas / total_nfs * 100, 2)
 
-    itens_separacao = list(
-        TarefaItem.objects.select_related('tarefa', 'tarefa__nf', 'tarefa__nf__cliente', 'produto', 'nf', 'nf__cliente')
-        .defer('nf__bairro', 'tarefa__nf__bairro')
-        .filter(tarefa__ativo=True)
-        .filter(Q(tarefa__nf__isnull=True) | ~Q(tarefa__nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
+    resumo_cache_key = ':'.join(
+        [
+            'dashboard',
+            'conferencia',
+            'resumo-separacao',
+            str(getattr(request.user, 'id', 'anon')),
+            date_from.isoformat() if date_from else '',
+            date_to.isoformat() if date_to else '',
+            busca or '',
+        ]
     )
-    itens_separacao_filtrados = _filtrar_itens_separacao(itens_separacao, date_from, date_to, busca)
-    paginacao = _paginar_lista(request, linhas)
+    resumo_separacao = cache.get(resumo_cache_key)
+    if resumo_separacao is None:
+        itens_separacao = list(
+            TarefaItem.objects.select_related('tarefa', 'tarefa__nf', 'tarefa__nf__cliente', 'produto', 'nf', 'nf__cliente')
+            .defer('nf__bairro', 'tarefa__nf__bairro')
+            .filter(tarefa__ativo=True)
+            .filter(Q(tarefa__nf__isnull=True) | ~Q(tarefa__nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
+        )
+        itens_separacao_filtrados = _filtrar_itens_separacao(itens_separacao, date_from, date_to, busca)
+        resumo_separacao = _resumo_status_separacao(itens_separacao_filtrados)
+        cache.set(resumo_cache_key, resumo_separacao, CONFERENCIA_RESUMO_CACHE_TTL)
+    paginacao = _paginar_lista(request, linhas, por_pagina=50)
 
     contexto = {
         'indicadores': {
@@ -727,7 +732,7 @@ def dashboard_conferencia(request):
             'divergencias': divergencias,
             'pendentes': pendentes,
         },
-        'resumo_separacao': _resumo_status_separacao(itens_separacao_filtrados),
+        'resumo_separacao': resumo_separacao,
         'linhas': paginacao['page_obj'],
         'filtros': {
             'date_from': date_from.isoformat() if date_from else '',

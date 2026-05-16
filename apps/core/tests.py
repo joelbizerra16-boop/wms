@@ -1172,6 +1172,14 @@ class MinutaImportacaoTests(TestCase):
 		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
 		self.assertNotContains(response, 'fetch(`/api/dashboard/resumo/', html=False)
 
+	def test_conferencia_lista_usa_atualizacao_manual(self):
+		response = self.client.get('/conferencia/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Atualizar')
+		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
+		self.assertNotContains(response, 'fetch(window.location.href', html=False)
+
 	def test_separacao_lista_ajax_retorna_somente_tabela(self):
 		response = self.client.get('/separacao/', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 

@@ -1,5 +1,6 @@
 import logging
 
+from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Prefetch
 from django.utils import timezone
@@ -13,6 +14,7 @@ from apps.tarefas.services.separacao_service import listar_tarefas_disponiveis
 from apps.usuarios.models import Setor
 
 logger = logging.getLogger(__name__)
+CONFERENCIA_MONITORAMENTO_CACHE_TTL = 60
 
 
 def _nome_cliente_nf(nf):
@@ -126,6 +128,19 @@ def get_nfs_para_conferencia(usuario, data_inicio=None, data_fim=None, busca=Non
 
 def get_nfs_monitoramento_conferencia(usuario, data_inicio=None, data_fim=None, busca=None):
     busca = (busca or '').strip().lower()
+    cache_key = ':'.join(
+        [
+            'dashboard',
+            'conferencia',
+            str(getattr(usuario, 'id', 'anon')),
+            data_inicio.isoformat() if data_inicio else '',
+            data_fim.isoformat() if data_fim else '',
+            busca,
+        ]
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     nfs_operacionais = get_nfs_para_conferencia(
         usuario,
         data_inicio=data_inicio,
@@ -197,6 +212,8 @@ def get_nfs_monitoramento_conferencia(usuario, data_inicio=None, data_fim=None, 
                 'conferencia_liberada': True,
                 'conferencia_bloqueio_motivo': '',
                 'balcao': nf.balcao,
+                'updated_ts': nf.updated_at.timestamp(),
+                'data_referencia': data_ref.isoformat(),
                 'progresso': {
                     'esperado': esperado,
                     'conferido': conferido,
@@ -218,6 +235,7 @@ def get_nfs_monitoramento_conferencia(usuario, data_inicio=None, data_fim=None, 
         len(historico),
         len(combinado),
     )
+    cache.set(cache_key, combinado, CONFERENCIA_MONITORAMENTO_CACHE_TTL)
     return combinado
 
 

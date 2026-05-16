@@ -4,7 +4,7 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
     preDeployCommand: python manage.py migrate --noinput && python manage.py create_render_superuser
-    startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers $WEB_CONCURRENCY --timeout $GUNICORN_TIMEOUT
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.prod
@@ -28,3 +28,7 @@ services:
         sync: false
       - key: LOG_LEVEL
         value: INFO
+      - key: WEB_CONCURRENCY
+        value: 2
+      - key: GUNICORN_TIMEOUT
+        value: 180

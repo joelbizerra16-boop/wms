@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import F, Prefetch, Q
 from django.utils import timezone
@@ -48,6 +49,7 @@ STATUS_CONFERENCIA_FINALIZADA = {
 }
 
 STATUS_CONFERENCIA_RESERVA_ITENS = STATUS_CONFERENCIA_EM_FLUXO | STATUS_CONFERENCIA_FINALIZADA
+CONFERENCIA_LIST_CACHE_TTL = 30
 
 
 def _normalizar_setor_operacional(valor):
@@ -86,6 +88,12 @@ def _nf_pertence_a_setores_usuario(nf, usuario):
     if not setores_nf:
         return False
     return bool(setores_nf.intersection(setores_usuario))
+
+
+def _cache_key_nfs_disponiveis(usuario):
+	if usuario is None:
+		return 'conferencia:nfs:anon'
+	return f'conferencia:nfs:{usuario.id}'
 
 
 def _validar_setor_nf(nf, usuario):
@@ -237,6 +245,10 @@ def avaliar_liberacao_conferencia(nf):
 def listar_nfs_disponiveis(usuario=None):
     if usuario is not None and not _usuario_pode_ver_todos_setores(usuario) and not _setores_usuario(usuario):
         return []
+    cache_key = _cache_key_nfs_disponiveis(usuario)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     tarefas_prefetch = Prefetch(
         'tarefas',
         queryset=Tarefa.objects.only('id', 'nf_id', 'rota_id', 'tipo', 'setor').order_by('id'),
@@ -379,7 +391,10 @@ def listar_nfs_disponiveis(usuario=None):
                 'conferencia_liberada': validacao_fluxo['liberado'],
                 'conferencia_bloqueio_motivo': validacao_fluxo['motivo'],
                 'balcao': nf.balcao,
-                '_updated_ts': nf.updated_at.timestamp(),
+                'updated_ts': nf.updated_at.timestamp(),
+                'data_referencia': timezone.localtime(nf.created_at).date().isoformat() if nf.created_at else (
+                    nf.data_emissao.date().isoformat() if nf.data_emissao else timezone.localdate().isoformat()
+                ),
                 'progresso': progresso,
                 'itens_pendentes_conferencia': itens_pendentes_conferencia,
                 'bloqueado': bloqueado,
@@ -393,9 +408,8 @@ def listar_nfs_disponiveis(usuario=None):
                 ),
             }
         )
-    disponiveis.sort(key=lambda nf: (0 if nf['balcao'] else 1, -nf['_updated_ts']))
-    for nf in disponiveis:
-        nf.pop('_updated_ts', None)
+    disponiveis.sort(key=lambda nf: (0 if nf['balcao'] else 1, -nf['updated_ts']))
+    cache.set(cache_key, disponiveis, CONFERENCIA_LIST_CACHE_TTL)
     return disponiveis
 
 

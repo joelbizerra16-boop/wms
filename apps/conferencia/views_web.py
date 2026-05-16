@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Prefetch
 from django.http import Http404, HttpResponseForbidden
@@ -30,6 +31,23 @@ def _render(request, template_name, context=None):
     if context:
         base_context.update(context)
     return render(request, template_name, base_context)
+
+
+def _pagination_query(request):
+    params = request.GET.copy()
+    params.pop('page', None)
+    query = params.urlencode()
+    return f'&{query}' if query else ''
+
+
+def _paginar_lista(request, itens, por_pagina=50):
+    paginador = Paginator(itens, por_pagina)
+    page_obj = paginador.get_page(request.GET.get('page'))
+    return {
+        'page_obj': page_obj,
+        'is_paginated': page_obj.has_other_pages(),
+        'pagination_query': _pagination_query(request),
+    }
 
 
 def _obter_conferencia_contexto(nf_id, usuario):
@@ -184,7 +202,11 @@ def _aceitar_conferencia(nf, usuario):
 
 @require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 def conferencia_lista_web(request):
-    contexto = {'nfs': listar_nfs_disponiveis(request.user)}
+    paginacao = _paginar_lista(request, listar_nfs_disponiveis(request.user), por_pagina=50)
+    contexto = {
+        'nfs': paginacao['page_obj'],
+        **paginacao,
+    }
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return _render(request, 'partials/conferencia_lista_tabela.html', contexto)
     return _render(request, 'conferencia_lista.html', contexto)
