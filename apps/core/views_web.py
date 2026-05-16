@@ -1,5 +1,6 @@
 import gzip
 import logging
+import traceback
 from datetime import datetime
 from io import BytesIO
 
@@ -1091,6 +1092,7 @@ def liberar_entrada_nf_web(request, entrada_id):
             f'Entrada {entrada.chave_nf} já estava processada como NF no sistema.',
         )
     except Exception:
+        traceback.print_exc()
         logger.exception(
             'LIBERAR_ENTRADA_FALHA entrada_id=%s chave=%s tipo=%s user_id=%s',
             entrada.id,

@@ -3,6 +3,7 @@ from decimal import Decimal
 from io import BytesIO
 import logging
 import re
+import traceback
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -976,6 +977,7 @@ def minuta(request):
                 messages.error(request, str(exc))
                 return redirect('web-minuta')
             except Exception as exc:
+                traceback.print_exc()
                 logger.exception('Erro inesperado ao confirmar importacao da minuta: user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
                 messages.error(request, f'Erro ao gerar minuta: {str(exc)}')
                 return redirect('web-minuta')
@@ -1003,6 +1005,7 @@ def minuta(request):
                 messages.error(request, str(exc))
                 return redirect('web-minuta')
             except Exception as exc:
+                traceback.print_exc()
                 logger.exception('Erro inesperado ao gerar minuta no upload: user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
                 messages.error(request, f'Erro ao gerar minuta: {str(exc)}')
                 return redirect('web-minuta')
