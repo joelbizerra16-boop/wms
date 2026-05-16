@@ -130,6 +130,39 @@ class ConferenciaWebTests(TestCase):
         ]
         self.assertFalse(consultas_por_nf)
 
+    def test_listar_nfs_disponiveis_mantem_volume_baixo_de_queries(self):
+        for indice in range(2, 6):
+            nf = NotaFiscal.objects.create(
+                chave_nfe=f'35111111111111111111550010000000011000001{indice:03d}',
+                numero=f'1510{indice:03d}',
+                cliente=self.cliente,
+                rota=self.rota,
+                data_emissao='2026-04-24T10:00:00-03:00',
+                status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+                bloqueada=False,
+                ativa=True,
+            )
+            NotaFiscalItem.objects.create(nf=nf, produto=self.produto, quantidade='10.00')
+            tarefa = Tarefa.objects.create(
+                nf=nf,
+                tipo=Tarefa.Tipo.FILTRO,
+                setor=Setor.Codigo.FILTROS,
+                rota=self.rota,
+                status=Tarefa.Status.CONCLUIDO,
+            )
+            TarefaItem.objects.create(
+                tarefa=tarefa,
+                produto=self.produto,
+                quantidade_total='10.00',
+                quantidade_separada='10.00',
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            nfs = listar_nfs_disponiveis(self.usuario)
+
+        self.assertGreaterEqual(len(nfs), 5)
+        self.assertLessEqual(len(queries.captured_queries), 8)
+
     def test_bipagem_atualiza_quantidade_e_feedback(self):
         self._iniciar()
 

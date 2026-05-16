@@ -249,9 +249,22 @@ def listar_nfs_disponiveis(usuario=None):
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
+    tarefa_itens_prefetch = Prefetch(
+        'itens',
+        queryset=TarefaItem.objects.select_related('tarefa').only(
+            'id',
+            'tarefa_id',
+            'nf_id',
+            'quantidade_total',
+            'quantidade_separada',
+            'possui_restricao',
+            'tarefa__id',
+            'tarefa__status',
+        ),
+    )
     tarefas_prefetch = Prefetch(
         'tarefas',
-        queryset=Tarefa.objects.only('id', 'nf_id', 'rota_id', 'tipo', 'setor').order_by('id'),
+        queryset=Tarefa.objects.only('id', 'nf_id', 'rota_id', 'tipo', 'setor').prefetch_related(tarefa_itens_prefetch).order_by('id'),
     )
     itens_prefetch = Prefetch(
         'itens',
@@ -262,6 +275,19 @@ def listar_nfs_disponiveis(usuario=None):
             'quantidade',
             'produto__id',
             'produto__categoria',
+        ),
+    )
+    itens_tarefa_prefetch = Prefetch(
+        'itens_tarefa',
+        queryset=TarefaItem.objects.select_related('tarefa').only(
+            'id',
+            'tarefa_id',
+            'nf_id',
+            'quantidade_total',
+            'quantidade_separada',
+            'possui_restricao',
+            'tarefa__id',
+            'tarefa__status',
         ),
     )
     conferencias_prefetch = Prefetch(
@@ -297,7 +323,7 @@ def listar_nfs_disponiveis(usuario=None):
     nfs = (
         NotaFiscal.objects.select_related('cliente', 'rota')
         .defer('bairro')
-        .prefetch_related(tarefas_prefetch, itens_prefetch, conferencias_prefetch)
+        .prefetch_related(tarefas_prefetch, itens_prefetch, itens_tarefa_prefetch, conferencias_prefetch)
         .filter(status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA, ativa=True)
         .order_by('-data_emissao')
     )

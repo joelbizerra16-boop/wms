@@ -5,6 +5,28 @@ from apps.nf.models import NotaFiscal
 from apps.tarefas.models import Tarefa, TarefaItem
 
 
+def _itens_tarefa_prefetch_nf(nf):
+    cache = getattr(nf, '_prefetched_objects_cache', {})
+    itens_relacionados = {}
+
+    tarefas = cache.get('tarefas')
+    if tarefas is not None:
+        for tarefa in tarefas:
+            for item in getattr(tarefa, '_prefetched_objects_cache', {}).get('itens', []):
+                itens_relacionados[item.id] = item
+
+    itens_tarefa = cache.get('itens_tarefa')
+    if itens_tarefa is not None:
+        for item in itens_tarefa:
+            itens_relacionados[item.id] = item
+
+    if itens_relacionados:
+        return list(itens_relacionados.values())
+    if tarefas is not None or itens_tarefa is not None:
+        return []
+    return None
+
+
 def _conferencias_validas_nf(nf):
     conferencias = getattr(nf, '_prefetched_objects_cache', {}).get('conferencias')
     if conferencias is not None:
@@ -49,10 +71,14 @@ def atualizar_status_nf(nf):
     if nf is None:
         return None
 
-    itens_com_restricao = list(
-        TarefaItem.objects.select_related('tarefa')
-        .filter(nf=nf, possui_restricao=True)
-    )
+    itens_prefetch = _itens_tarefa_prefetch_nf(nf)
+    if itens_prefetch is not None:
+        itens_com_restricao = [item for item in itens_prefetch if item.possui_restricao]
+    else:
+        itens_com_restricao = list(
+            TarefaItem.objects.select_related('tarefa')
+            .filter(nf=nf, possui_restricao=True)
+        )
     conferencias_validas = _conferencias_validas_nf(nf)
     ultima_conferencia = _ultima_conferencia(nf, conferencias_validas)
     status_base = _status_base_nf(nf, conferencias_validas)

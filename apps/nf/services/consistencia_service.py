@@ -6,6 +6,28 @@ from apps.nf.models import NotaFiscal
 from apps.tarefas.models import Tarefa, TarefaItem
 
 
+def _itens_separacao_prefetch_nf(nf):
+    cache = getattr(nf, '_prefetched_objects_cache', {})
+    itens_relacionados = {}
+
+    tarefas = cache.get('tarefas')
+    if tarefas is not None:
+        for tarefa in tarefas:
+            for item in getattr(tarefa, '_prefetched_objects_cache', {}).get('itens', []):
+                itens_relacionados[item.id] = item
+
+    itens_tarefa = cache.get('itens_tarefa')
+    if itens_tarefa is not None:
+        for item in itens_tarefa:
+            itens_relacionados[item.id] = item
+
+    if itens_relacionados:
+        return list(itens_relacionados.values())
+    if tarefas is not None or itens_tarefa is not None:
+        return []
+    return None
+
+
 def _conferencias_validas_nf(nf):
     conferencias = getattr(nf, '_prefetched_objects_cache', {}).get('conferencias')
     if conferencias is not None:
@@ -14,6 +36,12 @@ def _conferencias_validas_nf(nf):
 
 
 def separacao_concluida_nf(nf):
+    itens_prefetch = _itens_separacao_prefetch_nf(nf)
+    if itens_prefetch is not None:
+        if not itens_prefetch:
+            return False
+        return not any(item.quantidade_separada < item.quantidade_total for item in itens_prefetch)
+
     tarefas_nf = (
         Tarefa.objects.filter(Q(nf=nf) | Q(itens__nf=nf))
         .prefetch_related('itens')
