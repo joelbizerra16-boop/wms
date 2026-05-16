@@ -4,12 +4,7 @@
 {% block op_title %}Conferência{% endblock %}
 
 {% block content %}
-<div class="box">
-    <div class="actions-row" style="justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <h1 style="margin: 0;">Conferência</h1>
-        <button type="button" class="btn btn-light" onclick="refreshPage(this)">Atualizar</button>
-    </div>
-    {% include 'partials/pesquisa_avancada_operacional_modal.html' %}
+<div class="box box--operacional">
     <div id="conteudo-dinamico">
         {% include 'partials/conferencia_lista_tabela.html' %}
     </div>
@@ -20,6 +15,8 @@
 <script>
 (function () {
     let requisicaoEmAndamento = false;
+    let refreshTimer = null;
+    const REFRESH_MS = 60000;
 
     async function refreshListaConferencia() {
         if (requisicaoEmAndamento) {
@@ -38,12 +35,33 @@
             if (target) {
                 target.innerHTML = html;
             }
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                window.lucide.createIcons();
+            }
         } finally {
             requisicaoEmAndamento = false;
         }
     }
 
+    async function cicloAtualizacao() {
+        refreshTimer = null;
+        if (document.hidden) {
+            refreshTimer = window.setTimeout(cicloAtualizacao, REFRESH_MS);
+            return;
+        }
+        await refreshListaConferencia().catch(function () {});
+        refreshTimer = window.setTimeout(cicloAtualizacao, REFRESH_MS);
+    }
+
     window.wmsManualRefresh = refreshListaConferencia;
+
+    refreshTimer = window.setTimeout(cicloAtualizacao, REFRESH_MS);
+
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && !refreshTimer) {
+            refreshTimer = window.setTimeout(cicloAtualizacao, 500);
+        }
+    });
 })();
 </script>
 {% endblock %}

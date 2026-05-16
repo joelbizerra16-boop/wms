@@ -4,9 +4,7 @@
 {% block op_title %}Separação{% endblock %}
 
 {% block content %}
-<div class="box">
-    <h1>Separação</h1>
-    {% include 'partials/pesquisa_avancada_operacional_modal.html' %}
+<div class="box box--operacional">
     <div id="conteudo-dinamico">
         {% include 'partials/separacao_lista_tabela.html' %}
     </div>
@@ -35,6 +33,9 @@
             if (target) {
                 target.innerHTML = html;
             }
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                window.lucide.createIcons();
+            }
         } finally {
             requisicaoEmAndamento = false;
         }
@@ -42,21 +43,25 @@
 
     let refreshTimer = null;
 
+    const REFRESH_MS = 60000;
+
     async function cicloAtualizacao() {
         refreshTimer = null;
         if (document.hidden) {
-            refreshTimer = window.setTimeout(cicloAtualizacao, 10000);
+            refreshTimer = window.setTimeout(cicloAtualizacao, REFRESH_MS);
             return;
         }
         await refreshListaSeparacao().catch(function () {});
-        refreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+        refreshTimer = window.setTimeout(cicloAtualizacao, REFRESH_MS);
     }
 
-    refreshTimer = window.setTimeout(cicloAtualizacao, 8000);
+    window.wmsManualRefresh = refreshListaSeparacao;
+
+    refreshTimer = window.setTimeout(cicloAtualizacao, REFRESH_MS);
 
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden && !refreshTimer) {
-            refreshTimer = window.setTimeout(cicloAtualizacao, 400);
+            refreshTimer = window.setTimeout(cicloAtualizacao, 500);
         }
     });
 })();

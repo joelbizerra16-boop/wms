@@ -172,6 +172,17 @@
                 font-size: 18px;
             }
         }
+
+        .box--operacional {
+            padding: 0;
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+        }
+
+        .box--operacional .table-card {
+            margin-top: 0;
+        }
     </style>
 </head>
 <body class="operacional" style="padding-left:0 !important; padding-top:0 !important; margin:0;">
@@ -186,7 +197,7 @@
         </div>
         <div class="header-op__right">
             <span class="header-op__user">{{ usuario.nome|default:usuario.username }}</span>
-            <button type="button" class="btn-refresh" aria-label="Atualizar página" onclick="refreshPage(this)">
+            <button type="button" class="btn-refresh" aria-label="Recarregar lista" onclick="refreshPage(this)">
                 <i data-lucide="refresh-cw"></i>
             </button>
             {% if request.user.is_authenticated and request.user.perfil.tipo != "GESTOR" %}

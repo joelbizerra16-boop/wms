@@ -1339,27 +1339,31 @@ class MinutaImportacaoTests(TestCase):
 		self.assertContains(response, 'refreshDashboardConferencia', html=False)
 		self.assertContains(response, '/api/dashboard/resumo/', html=False)
 
-	def test_conferencia_lista_usa_atualizacao_manual(self):
+	def test_conferencia_lista_usa_atualizacao_automatica_ajax(self):
 		response = self.client.get('/conferencia/')
 
 		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Atualizar')
-		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
+		self.assertNotContains(response, 'btn btn-light', html=False)
+		self.assertContains(response, 'cicloAtualizacao', html=False)
+		self.assertContains(response, 'REFRESH_MS = 60000', html=False)
 		self.assertContains(response, 'fetch(window.location.href', html=False)
 		self.assertContains(response, 'window.wmsManualRefresh', html=False)
-		self.assertContains(response, 'Pesquisa avançada', html=False)
-		self.assertContains(response, 'pesquisa-avancada-modal', html=False)
+		self.assertContains(response, 'btn-refresh', html=False)
+		self.assertNotContains(response, 'Pesquisa avançada', html=False)
+		self.assertNotContains(response, 'pesquisa-avancada-modal', html=False)
 		self.assertNotContains(response, 'operacional-periodo-form', html=False)
 		self.assertNotContains(response, 'Hoje + ontem', html=False)
+		self.assertNotContains(response, 'btn btn-light', html=False)
 
 	def test_separacao_lista_abre_sem_filtros_visiveis(self):
 		response = self.client.get('/separacao/')
 
 		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Pesquisa avançada', html=False)
-		self.assertContains(response, 'pesquisa-avancada-modal', html=False)
+		self.assertNotContains(response, 'Pesquisa avançada', html=False)
+		self.assertNotContains(response, 'pesquisa-avancada-modal', html=False)
 		self.assertNotContains(response, 'operacional-periodo-form', html=False)
 		self.assertNotContains(response, 'Hoje + ontem', html=False)
+		self.assertContains(response, 'btn-refresh', html=False)
 
 	def test_separacao_lista_ajax_retorna_somente_tabela(self):
 		response = self.client.get('/separacao/', HTTP_X_REQUESTED_WITH='XMLHttpRequest')

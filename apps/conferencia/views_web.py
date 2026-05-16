@@ -205,21 +205,14 @@ def _aceitar_conferencia(nf, usuario):
 
 @require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 def conferencia_lista_web(request):
-    from apps.core.operacional_periodo import (
-        filtros_template_periodo,
-        resolver_periodo_operacional_request,
-        usuario_informou_periodo,
-    )
+    from apps.core.operacional_periodo import resolver_periodo_operacional_request
     from apps.core.services.visibilidade_operacional_service import get_nfs_para_conferencia
 
     date_from, date_to, busca = resolver_periodo_operacional_request(request)
     nfs = get_nfs_para_conferencia(request.user, data_inicio=date_from, data_fim=date_to, busca=busca)
     paginacao = _paginar_lista(request, nfs, por_pagina=50)
-    busca_exibicao = (request.GET.get('busca') or request.GET.get('q') or '').strip()
     contexto = {
         'nfs': paginacao['page_obj'],
-        'filtros_pesquisa': filtros_template_periodo(date_from, date_to, busca_exibicao or busca),
-        'pesquisa_avancada_ativa': usuario_informou_periodo(request) or bool(busca_exibicao),
         **paginacao,
     }
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':

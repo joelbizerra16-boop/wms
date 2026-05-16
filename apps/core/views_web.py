@@ -77,7 +77,6 @@ from apps.core.operacional_periodo import (
     filtrar_queryset_created_at,
     filtros_template_periodo,
     resolver_periodo_operacional_request,
-    usuario_informou_periodo,
 )
 from apps.core.scan_store import clear_scan_entrada_ids, get_scan_entrada_ids, set_scan_entrada_ids
 
@@ -1155,23 +1154,13 @@ def liberar_entrada_nf_web(request, entrada_id):
     return redirect('web-fila-entradas-nf')
 
 
-def _contexto_pesquisa_avancada_lista(request, date_from, date_to, busca):
-    busca_exibicao = (request.GET.get('busca') or request.GET.get('q') or '').strip()
-    return {
-        'filtros_pesquisa': filtros_template_periodo(date_from, date_to, busca_exibicao or busca),
-        'pesquisa_avancada_ativa': usuario_informou_periodo(request) or bool(busca_exibicao),
-    }
-
-
 @require_profiles(Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
 def separacao_lista_web(request):
     if _usuario_sem_setor_operacional(request.user):
-        date_from, date_to, busca = resolver_periodo_operacional_request(request)
         contexto = {
             'tarefas': [],
             'is_paginated': False,
             'pagination_query': '',
-            **_contexto_pesquisa_avancada_lista(request, date_from, date_to, busca),
         }
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return _render(request, 'partials/separacao_lista_tabela.html', contexto)
@@ -1184,7 +1173,6 @@ def separacao_lista_web(request):
     )
     contexto = {
         'tarefas': paginacao['page_obj'],
-        **_contexto_pesquisa_avancada_lista(request, date_from, date_to, busca),
         **paginacao,
     }
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
