@@ -279,7 +279,7 @@ def avaliar_liberacao_conferencia(nf):
     }
 
 
-def listar_nfs_disponiveis(usuario=None):
+def listar_nfs_disponiveis(usuario=None, *, somente_leitura=False):
     if usuario is not None and not _usuario_pode_ver_todos_setores(usuario) and not _setores_usuario(usuario):
         return []
     cache_key = _cache_key_nfs_disponiveis(usuario)
@@ -370,7 +370,8 @@ def listar_nfs_disponiveis(usuario=None):
         consistencia = sanear_consistencia_nf(nf, actor=usuario)
         if not consistencia['valida']:
             continue
-        atualizar_status_nf(nf)
+        if not somente_leitura:
+            atualizar_status_nf(nf)
 
         validacao_fluxo = avaliar_liberacao_conferencia(nf)
         if not _nf_pertence_a_setores_usuario(nf, usuario):

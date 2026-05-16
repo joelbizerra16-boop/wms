@@ -116,6 +116,7 @@ BIPAGEM_SLOW_LOG_MS = config('BIPAGEM_SLOW_LOG_MS', default=150, cast=int)
 DASHBOARD_CACHE_TTL = config('DASHBOARD_CACHE_TTL', default=15, cast=int)
 OPERATIONAL_PAGE_SIZE = config('OPERATIONAL_PAGE_SIZE', default=50, cast=int)
 SCAN_CONFIRM_ASYNC_MIN_ITEMS = config('SCAN_CONFIRM_ASYNC_MIN_ITEMS', default=5, cast=int)
+DASHBOARD_CONFERENCIA_HISTORICO_LIMIT = config('DASHBOARD_CONFERENCIA_HISTORICO_LIMIT', default=100, cast=int)
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},

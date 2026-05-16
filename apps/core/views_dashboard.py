@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 import logging
+import time
 
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
@@ -653,6 +654,9 @@ def dashboard_separacao(request):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def dashboard_conferencia(request):
+    from django.conf import settings as django_settings
+
+    inicio = time.perf_counter()
     date_from, date_to, busca = _resolver_periodo_e_busca(request, default_today=True)
     nfs_disponiveis = get_nfs_monitoramento_conferencia(
         request.user,
@@ -662,13 +666,6 @@ def dashboard_conferencia(request):
     )
     linhas = []
     for nf_data in nfs_disponiveis:
-        data_referencia_valor = nf_data.get('data_referencia') or ''
-        data_referencia = date.fromisoformat(data_referencia_valor) if data_referencia_valor else timezone.localdate()
-        if date_from and data_referencia < date_from:
-            continue
-        if date_to and data_referencia > date_to:
-            continue
-
         status_raw = (nf_data.get('status') or 'PENDENTE').strip().upper()
         status = status_raw.replace('_', ' ')
         progresso = nf_data.get('progresso') or {}
@@ -739,17 +736,17 @@ def dashboard_conferencia(request):
     )
     resumo_separacao = cache.get(resumo_cache_key)
     if resumo_separacao is None:
-        itens_separacao = list(
-            TarefaItem.objects.select_related('tarefa', 'tarefa__nf', 'tarefa__nf__cliente', 'produto', 'nf', 'nf__cliente')
-            .defer('nf__bairro', 'tarefa__nf__bairro')
-            .filter(tarefa__ativo=True)
-            .filter(Q(tarefa__nf__isnull=True) | ~Q(tarefa__nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
+        itens_separacao_filtrados = collect_itens_filtrados_dashboard_separacao(
+            request.user,
+            date_from,
+            date_to,
+            busca,
         )
-        itens_separacao_filtrados = _filtrar_itens_separacao(itens_separacao, date_from, date_to, busca)
         resumo_separacao = _resumo_status_separacao(itens_separacao_filtrados)
         cache.set(resumo_cache_key, resumo_separacao, CONFERENCIA_RESUMO_CACHE_TTL)
     paginacao = _paginar_lista(request, linhas, por_pagina=50)
 
+    nf_detalhe_param = request.GET.get('nf_detalhe')
     contexto = {
         'indicadores': {
             'total_nfs': total_nfs,
@@ -765,9 +762,21 @@ def dashboard_conferencia(request):
             'date_to': date_to.isoformat() if date_to else '',
             'busca': request.GET.get('busca', request.GET.get('q', '')),
         },
-        'detalhe_nf': _build_detalhe_nf_context(request, request.GET.get('nf_detalhe')),
+        'detalhe_nf': _build_detalhe_nf_context(request, nf_detalhe_param) if nf_detalhe_param else None,
         **paginacao,
     }
+    elapsed_ms = (time.perf_counter() - inicio) * 1000
+    logger.warning(
+        'DASH_CONFERENCIA_TEMPO %.2f ms nfs=%s linhas=%s user_id=%s',
+        elapsed_ms,
+        len(nfs_disponiveis),
+        len(linhas),
+        getattr(request.user, 'id', None),
+    )
+    if django_settings.DEBUG and elapsed_ms >= float(getattr(django_settings, 'REQUEST_SLOW_LOG_MS', 300)):
+        from django.db import connection
+
+        logger.warning('DASH_CONFERENCIA_QUERIES %s', len(connection.queries))
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest' and request.GET.get('partial') == 'table':
         return _render(request, 'partials/dashboard_conferencia_tabela.html', contexto)
     return _render(request, 'dashboard_conferencia.html', contexto)

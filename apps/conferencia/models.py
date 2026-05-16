@@ -32,6 +32,7 @@ class Conferencia(BaseModel):
 		indexes = [
 			models.Index(fields=['nf', 'status'], name='conf_nf_status_idx'),
 			models.Index(fields=['conferente', 'status'], name='conf_user_status_idx'),
+			models.Index(fields=['status', 'updated_at'], name='conf_status_updated_idx'),
 		]
 
 	def __str__(self):
