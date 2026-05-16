@@ -1,6 +1,7 @@
 from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
+import logging
 import re
 import xml.etree.ElementTree as ET
 import zipfile
@@ -33,6 +34,8 @@ from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, ope
 from apps.usuarios.access import build_access_context, require_profiles
 from apps.usuarios.models import Usuario
 
+
+logger = logging.getLogger(__name__)
 
 MINUTA_PREVIEW_SESSION_KEY = 'minuta_import_preview'
 SEFAZ_NS = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
@@ -972,6 +975,10 @@ def minuta(request):
             except MinutaImportacaoError as exc:
                 messages.error(request, str(exc))
                 return redirect('web-minuta')
+            except Exception as exc:
+                logger.exception('Erro inesperado ao confirmar importacao da minuta: user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
+                messages.error(request, f'Erro ao gerar minuta: {str(exc)}')
+                return redirect('web-minuta')
             request.session.pop(MINUTA_PREVIEW_SESSION_KEY, None)
             messages.success(
                 request,
@@ -990,7 +997,15 @@ def minuta(request):
                 messages.error(request, str(exc))
                 return redirect('web-minuta')
 
-            resultado = confirmar_importacao_minuta(preview, request.user, validar_restricoes=False)
+            try:
+                resultado = confirmar_importacao_minuta(preview, request.user, validar_restricoes=False)
+            except MinutaImportacaoError as exc:
+                messages.error(request, str(exc))
+                return redirect('web-minuta')
+            except Exception as exc:
+                logger.exception('Erro inesperado ao gerar minuta no upload: user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
+                messages.error(request, f'Erro ao gerar minuta: {str(exc)}')
+                return redirect('web-minuta')
             request.session.pop(MINUTA_PREVIEW_SESSION_KEY, None)
 
             if preview['resumo'].get('bloqueadas'):

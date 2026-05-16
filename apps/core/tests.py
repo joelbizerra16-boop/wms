@@ -26,7 +26,7 @@ from openpyxl import Workbook
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
-from apps.core.services.minuta_service import listar_minuta_itens
+from apps.core.services.minuta_service import MinutaImportacaoError, listar_minuta_itens
 from apps.core.views_web import MAX_XML_FILES_POR_ENVIO
 from apps.logs.models import LiberacaoDivergencia, Log
 from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem
@@ -376,6 +376,28 @@ class MinutaImportacaoTests(TestCase):
 		self.assertContains(response, 'DUPLI')
 		self.assertContains(response, '5081000')
 		self.assertContains(response, self.nf.numero)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	@patch('apps.core.views.confirmar_importacao_minuta', side_effect=MinutaImportacaoError('Estrutura da minuta ainda não está sincronizada no banco. Execute as migrations antes de confirmar a importação.'))
+	def test_upload_minuta_trata_erro_de_confirmacao_sem_500(self, _confirmar_importacao_mock):
+		arquivo = SimpleUploadedFile(
+			'romaneio_erro.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Estrutura da minuta ainda não está sincronizada no banco')
 
 	@override_settings(
 		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
