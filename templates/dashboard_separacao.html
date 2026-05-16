@@ -15,7 +15,7 @@
     </div>
 </div>
 
-<div class="metrics-grid">
+<div class="metrics-grid{% if defer_load %} metrics-grid--loading{% endif %}">
     <div class="metric-card metric-card--accent metric-card--with-icon">
         <div class="metric-card__icon metric-card__icon--info">📦</div>
         <div class="metric-card__content">
@@ -50,11 +50,9 @@
     </div>
 </div>
 
-{% if indicadores.total == 0 %}
-<div class="card">
+<div id="dashboard-separacao-empty" class="card" style="{% if not defer_load and indicadores.total == 0 %}display:block{% else %}display:none{% endif %};">
     <div class="empty-state">Nenhum volume de separação no período filtrado.</div>
 </div>
-{% endif %}
 
 <div class="card">
     <form method="get" class="filter-form">
@@ -119,8 +117,12 @@
 </div>
 {% endif %}
 
-<div id="dashboard-separacao-tabela">
+<div id="dashboard-separacao-tabela" class="{% if defer_load %}dashboard-panel--loading{% endif %}">
+    {% if defer_load %}
+    <div class="card"><div class="empty-state">Carregando tabela operacional...</div></div>
+    {% else %}
     {% include 'partials/dashboard_separacao_tabela.html' %}
+    {% endif %}
 </div>
 
 {% include 'partials/liberacao_divergencia_modal.html' %}
@@ -170,6 +172,14 @@
                 updateMetric('dashboard-separado', resumo.separado);
                 updateMetric('dashboard-percentual', resumo.percentual);
                 updateMetric('dashboard-pendente', resumo.pendente);
+                const metricsGrid = document.querySelector('.metrics-grid');
+                if (metricsGrid) {
+                    metricsGrid.classList.remove('metrics-grid--loading');
+                }
+                const emptyCard = document.getElementById('dashboard-separacao-empty');
+                if (emptyCard) {
+                    emptyCard.style.display = Number(resumo.total || 0) === 0 ? 'block' : 'none';
+                }
             }
 
             if (responseTabela.ok) {
@@ -177,6 +187,7 @@
                 const target = document.getElementById('dashboard-separacao-tabela');
                 if (target) {
                     target.innerHTML = html;
+                    target.classList.remove('dashboard-panel--loading');
                 }
             }
         } finally {
@@ -189,6 +200,12 @@
 
     window.refreshDashboardSeparacao = refreshDashboardSeparacao;
     window.wmsManualRefresh = refreshDashboardSeparacao;
+
+    {% if defer_load %}
+    document.addEventListener('DOMContentLoaded', function () {
+        refreshDashboardSeparacao().catch(function () {});
+    });
+    {% endif %}
 
     setInterval(function () {
         if (!document.hidden) {

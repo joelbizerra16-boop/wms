@@ -15,7 +15,7 @@
     </div>
 </div>
 
-<div class="metrics-grid">
+<div class="metrics-grid{% if defer_load %} metrics-grid--loading{% endif %}">
     <div class="metric-card metric-card--accent metric-card--with-icon">
         <div class="metric-card__icon metric-card__icon--info">🧾</div>
         <div class="metric-card__content">
@@ -50,7 +50,7 @@
     </div>
 </div>
 
-<div class="card card--soft">
+<div class="card card--soft{% if defer_load %} dashboard-panel--loading{% endif %}" id="dashboard-conferencia-resumo-sep">
     <h2 class="section-title">Status Geral da Separação</h2>
     <div class="detail-list">
         <div class="detail-item">
@@ -137,8 +137,12 @@
 </div>
 {% endif %}
 
-<div id="dashboard-conferencia-tabela">
+<div id="dashboard-conferencia-tabela" class="{% if defer_load %}dashboard-panel--loading{% endif %}">
+    {% if defer_load %}
+    <div class="card"><div class="empty-state">Carregando tabela operacional...</div></div>
+    {% else %}
     {% include 'partials/dashboard_conferencia_tabela.html' %}
+    {% endif %}
 </div>
 
 {% include 'partials/liberacao_divergencia_modal.html' %}
@@ -193,6 +197,14 @@
                 updateMetric('sep-separado', resumo.separado);
                 updateMetric('sep-execucao', resumo.em_execucao);
                 updateMetric('sep-aguardando', resumo.aguardando);
+                const metricsGrid = document.querySelector('.metrics-grid');
+                if (metricsGrid) {
+                    metricsGrid.classList.remove('metrics-grid--loading');
+                }
+                const resumoSep = document.getElementById('dashboard-conferencia-resumo-sep');
+                if (resumoSep) {
+                    resumoSep.classList.remove('dashboard-panel--loading');
+                }
             }
 
             if (responseTabela.ok) {
@@ -200,6 +212,7 @@
                 const target = document.getElementById('dashboard-conferencia-tabela');
                 if (target) {
                     target.innerHTML = html;
+                    target.classList.remove('dashboard-panel--loading');
                 }
             }
         } finally {
@@ -212,6 +225,12 @@
 
     window.refreshDashboardConferencia = refreshDashboardConferencia;
     window.wmsManualRefresh = refreshDashboardConferencia;
+
+    {% if defer_load %}
+    document.addEventListener('DOMContentLoaded', function () {
+        refreshDashboardConferencia().catch(function () {});
+    });
+    {% endif %}
 
     setInterval(function () {
         if (!document.hidden) {

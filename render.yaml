@@ -4,7 +4,7 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
     preDeployCommand: python manage.py create_render_superuser
-    startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --worker-class gthread --workers 4 --threads 8 --timeout 300 --keep-alive 5
+    startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --worker-class gthread --workers 4 --threads 8 --timeout 120 --keep-alive 5
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.prod
@@ -33,7 +33,7 @@ services:
       - key: GUNICORN_THREADS
         value: 8
       - key: GUNICORN_TIMEOUT
-        value: 300
+        value: 120
       - key: DB_CONN_MAX_AGE
         value: 300
       - key: CACHE_DEFAULT_TIMEOUT

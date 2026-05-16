@@ -260,11 +260,12 @@ class StatusTarefaAPIView(APIView):
         try:
             sincronizar_conclusao_automatica_tarefa(tarefa)
             tarefa.refresh_from_db()
+            if tarefa.status not in {Tarefa.Status.ABERTO, Tarefa.Status.EM_EXECUCAO}:
+                return Response({'erro': 'Tarefa nao esta ativa para operacao'}, status=status.HTTP_404_NOT_FOUND)
             if tarefa.nf_id and tarefa.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
                 return Response({'erro': 'Tarefa indisponivel'}, status=status.HTTP_404_NOT_FOUND)
 
             itens_brutos = listar_itens_tarefa_para_exibicao_seguro(tarefa)
-            print(f'ITENS EXIBICAO: {len(itens_brutos)}')
             itens = [
                 {
                     'produto': item.get('produto') or '',

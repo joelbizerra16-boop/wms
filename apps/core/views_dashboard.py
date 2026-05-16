@@ -69,6 +69,24 @@ def _pagination_query(request):
     return f'&{query}' if query else ''
 
 
+def _dashboard_ajax_partial(request):
+    if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+        return None
+    return (request.GET.get('partial') or '').strip()
+
+
+def _empty_paginacao(request):
+    from django.conf import settings
+
+    paginador = Paginator([], int(getattr(settings, 'OPERATIONAL_PAGE_SIZE', 50)))
+    page_obj = paginador.get_page(request.GET.get('page'))
+    return {
+        'page_obj': page_obj,
+        'is_paginated': False,
+        'pagination_query': _pagination_query(request),
+    }
+
+
 def _paginar_lista(request, itens, por_pagina=None):
     if por_pagina is None:
         from django.conf import settings
@@ -583,23 +601,7 @@ def _nf_liberacao(liberacao):
     return (liberacao.nf_numero or '-'), None
 
 
-@require_profiles(Usuario.Perfil.GESTOR)
-def dashboard_separacao(request):
-    date_from, date_to, busca = resolver_periodo_dashboard_request(request)
-    itens_filtrados = collect_itens_filtrados_dashboard_separacao(request.user, date_from, date_to, busca)
-    indicadores = calcular_indicadores_volume_separacao(itens_filtrados)
-    logger.info(
-        'dashboard_separacao indicadores total=%s separado=%s pendente=%s em_execucao=%s filtros=%s',
-        indicadores['total'],
-        indicadores['separado'],
-        indicadores['pendente'],
-        indicadores['em_execucao'],
-        {
-            'data_inicial': date_from.isoformat() if date_from else '',
-            'data_final': date_to.isoformat() if date_to else '',
-            'busca': busca,
-        },
-    )
+def _montar_linhas_dashboard_separacao(itens_filtrados):
     linhas = []
     for item in itens_filtrados:
         status_item = _status_separacao_item(item)
@@ -628,31 +630,51 @@ def dashboard_separacao(request):
         linha.pop('_prioridade', None)
         linha.pop('_prioridade_status', None)
         linha.pop('_updated_at', None)
+    return linhas
+
+
+def _contexto_dashboard_separacao_dados(request, date_from, date_to, busca):
+    itens_filtrados = collect_itens_filtrados_dashboard_separacao(request.user, date_from, date_to, busca)
+    indicadores = calcular_indicadores_volume_separacao(itens_filtrados)
+    linhas = _montar_linhas_dashboard_separacao(itens_filtrados)
     paginacao = _paginar_lista(request, linhas)
-    contexto = {
+    return {
         'indicadores': indicadores,
         'linhas': paginacao['page_obj'],
         'filtros': filtros_template_periodo(date_from, date_to, busca),
         'detalhe_nf': _build_detalhe_nf_context(request, request.GET.get('nf_detalhe')),
+        'defer_load': False,
         **paginacao,
     }
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' and request.GET.get('partial') == 'table':
-        return _render(request, 'partials/dashboard_separacao_tabela.html', contexto)
-    return _render(request, 'dashboard_separacao.html', contexto)
 
 
 @require_profiles(Usuario.Perfil.GESTOR)
-def dashboard_conferencia(request):
-    from django.conf import settings as django_settings
-
-    inicio = time.perf_counter()
+def dashboard_separacao(request):
     date_from, date_to, busca = resolver_periodo_dashboard_request(request)
-    nfs_disponiveis = get_nfs_monitoramento_conferencia(
-        request.user,
-        data_inicio=date_from,
-        data_fim=date_to,
-        busca=busca,
-    )
+    partial = _dashboard_ajax_partial(request)
+
+    if partial == 'table':
+        contexto = _contexto_dashboard_separacao_dados(request, date_from, date_to, busca)
+        return _render(request, 'partials/dashboard_separacao_tabela.html', contexto)
+
+    contexto = {
+        'defer_load': True,
+        'filtros': filtros_template_periodo(date_from, date_to, busca),
+        'detalhe_nf': _build_detalhe_nf_context(request, request.GET.get('nf_detalhe')),
+        'indicadores': {
+            'total': 0,
+            'separado': 0,
+            'pendente': 0,
+            'percentual': 0,
+            'em_execucao': 0,
+        },
+        'linhas': [],
+        **_empty_paginacao(request),
+    }
+    return _render(request, 'dashboard_separacao.html', contexto)
+
+
+def _montar_linhas_dashboard_conferencia(nfs_disponiveis):
     linhas = []
     for nf_data in nfs_disponiveis:
         status_raw = (nf_data.get('status') or 'PENDENTE').strip().upper()
@@ -671,7 +693,6 @@ def dashboard_conferencia(request):
                 'itens': int(esperados),
                 'conferidos': int(conferidos),
                 'faltantes': faltantes,
-                # Lista operacional de conferência só inclui NFs com separação pronta.
                 'separacao_pendente': 'NAO',
                 'status': status,
                 'status_badge_class': _badge_status_class(status),
@@ -682,18 +703,6 @@ def dashboard_conferencia(request):
                 '_updated_ts': float(nf_data.get('updated_ts') or 0),
             }
         )
-
-    logger.debug(
-        'dashboard_conferencia consistencia total_lista_operacional=%s total_dashboard_filtrado=%s filtros=%s',
-        len(nfs_disponiveis),
-        len(linhas),
-        {
-            'data_inicial': date_from.isoformat() if date_from else '',
-            'data_final': date_to.isoformat() if date_to else '',
-            'busca': busca,
-        },
-    )
-
     linhas.sort(
         key=lambda linha: (
             linha['_prioridade'],
@@ -705,13 +714,25 @@ def dashboard_conferencia(request):
         linha.pop('_prioridade', None)
         linha.pop('_prioridade_status', None)
         linha.pop('_updated_ts', None)
+    return linhas
 
+
+def _indicadores_dashboard_conferencia(linhas):
     total_nfs = len(linhas)
     conferidas = sum(1 for linha in linhas if linha['status'] in {'CONCLUIDO', 'CONCLUIDO COM RESTRICAO', 'OK'})
     divergencias = sum(1 for linha in linhas if linha['status'] in {'DIVERGENCIA', 'BLOQUEADA COM RESTRICAO'})
     pendentes = max(total_nfs - conferidas, 0)
     percentual_concluido = 0 if total_nfs == 0 else round(conferidas / total_nfs * 100, 2)
+    return {
+        'total_nfs': total_nfs,
+        'conferidas': conferidas,
+        'percentual_concluido': percentual_concluido,
+        'divergencias': divergencias,
+        'pendentes': pendentes,
+    }
 
+
+def _resumo_separacao_dashboard_conferencia_cached(request, date_from, date_to, busca):
     resumo_cache_key = ':'.join(
         [
             'dashboard',
@@ -733,37 +754,68 @@ def dashboard_conferencia(request):
         )
         resumo_separacao = _resumo_status_separacao(itens_separacao_filtrados)
         cache.set(resumo_cache_key, resumo_separacao, CONFERENCIA_RESUMO_CACHE_TTL)
-    paginacao = _paginar_lista(request, linhas, por_pagina=50)
+    return resumo_separacao
 
+
+def _contexto_dashboard_conferencia_dados(request, date_from, date_to, busca):
+    nfs_disponiveis = get_nfs_monitoramento_conferencia(
+        request.user,
+        data_inicio=date_from,
+        data_fim=date_to,
+        busca=busca,
+    )
+    linhas = _montar_linhas_dashboard_conferencia(nfs_disponiveis)
+    paginacao = _paginar_lista(request, linhas, por_pagina=50)
     nf_detalhe_param = request.GET.get('nf_detalhe')
-    contexto = {
-        'indicadores': {
-            'total_nfs': total_nfs,
-            'conferidas': conferidas,
-            'percentual_concluido': percentual_concluido,
-            'divergencias': divergencias,
-            'pendentes': pendentes,
-        },
-        'resumo_separacao': resumo_separacao,
+    return {
+        'indicadores': _indicadores_dashboard_conferencia(linhas),
+        'resumo_separacao': _resumo_separacao_dashboard_conferencia_cached(request, date_from, date_to, busca),
         'linhas': paginacao['page_obj'],
         'filtros': filtros_template_periodo(date_from, date_to, busca),
         'detalhe_nf': _build_detalhe_nf_context(request, nf_detalhe_param) if nf_detalhe_param else None,
+        'defer_load': False,
         **paginacao,
     }
-    elapsed_ms = (time.perf_counter() - inicio) * 1000
-    logger.warning(
-        'DASH_CONFERENCIA_TEMPO %.2f ms nfs=%s linhas=%s user_id=%s',
-        elapsed_ms,
-        len(nfs_disponiveis),
-        len(linhas),
-        getattr(request.user, 'id', None),
-    )
-    if django_settings.DEBUG and elapsed_ms >= float(getattr(django_settings, 'REQUEST_SLOW_LOG_MS', 300)):
-        from django.db import connection
 
-        logger.warning('DASH_CONFERENCIA_QUERIES %s', len(connection.queries))
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' and request.GET.get('partial') == 'table':
+
+@require_profiles(Usuario.Perfil.GESTOR)
+def dashboard_conferencia(request):
+    from django.conf import settings as django_settings
+
+    inicio = time.perf_counter()
+    date_from, date_to, busca = resolver_periodo_dashboard_request(request)
+    partial = _dashboard_ajax_partial(request)
+
+    if partial == 'table':
+        contexto = _contexto_dashboard_conferencia_dados(request, date_from, date_to, busca)
+        elapsed_ms = (time.perf_counter() - inicio) * 1000
+        logger.warning(
+            'DASH_CONFERENCIA_TEMPO %.2f ms partial=table user_id=%s',
+            elapsed_ms,
+            getattr(request.user, 'id', None),
+        )
+        if django_settings.DEBUG and elapsed_ms >= float(getattr(django_settings, 'REQUEST_SLOW_LOG_MS', 300)):
+            from django.db import connection
+
+            logger.warning('DASH_CONFERENCIA_QUERIES %s', len(connection.queries))
         return _render(request, 'partials/dashboard_conferencia_tabela.html', contexto)
+
+    nf_detalhe_param = request.GET.get('nf_detalhe')
+    contexto = {
+        'defer_load': True,
+        'filtros': filtros_template_periodo(date_from, date_to, busca),
+        'detalhe_nf': _build_detalhe_nf_context(request, nf_detalhe_param) if nf_detalhe_param else None,
+        'indicadores': {
+            'total_nfs': 0,
+            'conferidas': 0,
+            'percentual_concluido': 0,
+            'divergencias': 0,
+            'pendentes': 0,
+        },
+        'resumo_separacao': {'total': 0, 'separado': 0, 'em_execucao': 0, 'aguardando': 0},
+        'linhas': [],
+        **_empty_paginacao(request),
+    }
     return _render(request, 'dashboard_conferencia.html', contexto)
 
 

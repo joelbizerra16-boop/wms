@@ -146,6 +146,9 @@ def _build_nfe_xml(numero_nf, chave_nf, itens, rota='CAIEIRAS', inf_cpl=None):
 @override_settings(ROOT_URLCONF='config.urls')
 class DashboardWebTests(TestCase):
 	def setUp(self):
+		from django.core.cache import cache
+
+		cache.clear()
 		self.client = Client()
 		self.usuario = Usuario.objects.create_user(
 			username='gestor_dashboard',
@@ -209,25 +212,29 @@ class DashboardWebTests(TestCase):
 
 	def test_dashboard_separacao_exibe_indicadores_e_linhas(self):
 		response = self.client.get('/dashboard/separacao/')
+		tabela = self.client.get('/dashboard/separacao/?partial=table', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 
 		self.assertEqual(response.status_code, 200)
+		self.assertTrue(response.context['defer_load'])
 		self.assertContains(response, 'Dashboard de Separação')
-		self.assertContains(response, '1410289')
-		self.assertContains(response, 'Rodrigo')
-		self.assertContains(response, '123223')
-		self.assertContains(response, 'EM EXECUCAO')
+		self.assertContains(response, 'Carregando tabela operacional')
+		self.assertEqual(tabela.status_code, 200)
+		self.assertContains(tabela, '1410289')
+		self.assertContains(tabela, 'Rodrigo')
+		self.assertContains(tabela, '123223')
+		self.assertContains(tabela, 'EM EXECUCAO')
 
 	def test_dashboard_separacao_mantem_itens_concluidos_no_periodo(self):
 		TarefaItem.objects.filter(tarefa=self.tarefa).update(quantidade_separada=F('quantidade_total'))
 		self.tarefa.status = Tarefa.Status.CONCLUIDO
 		self.tarefa.save(update_fields=['status', 'updated_at'])
 
-		response = self.client.get('/dashboard/separacao/')
+		tabela = self.client.get('/dashboard/separacao/?partial=table', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 
-		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, '1410289')
-		self.assertContains(response, 'SEPARADO')
-		self.assertGreater(response.context['indicadores']['separado'], 0)
+		self.assertEqual(tabela.status_code, 200)
+		self.assertContains(tabela, '1410289')
+		self.assertContains(tabela, 'SEPARADO')
+		self.assertGreater(tabela.context['indicadores']['separado'], 0)
 
 	def test_dashboard_conferencia_exibe_nf_e_resumo(self):
 		response = self.client.get('/dashboard/conferencia/')
@@ -306,6 +313,9 @@ class DashboardWebTests(TestCase):
 @override_settings(ROOT_URLCONF='config.urls')
 class MinutaImportacaoTests(TestCase):
 	def setUp(self):
+		from django.core.cache import cache
+
+		cache.clear()
 		self.client = Client()
 		self.usuario = Usuario.objects.create_user(
 			username='gestor_minuta',
@@ -1382,11 +1392,17 @@ class MinutaImportacaoTests(TestCase):
 	def test_dashboard_separacao_respeita_filtro_de_periodo(self):
 		hoje = timezone.localdate()
 		data_sem_dados = hoje - timedelta(days=30)
-		response = self.client.get(f'/dashboard/separacao/?data_inicial={data_sem_dados.isoformat()}&data_final={data_sem_dados.isoformat()}')
+		response = self.client.get(
+			f'/dashboard/separacao/?data_inicial={data_sem_dados.isoformat()}&data_final={data_sem_dados.isoformat()}&partial=table',
+			HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+		)
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'Nenhum item de separação encontrado.')
 
-		response_no_dia_correto = self.client.get(f'/dashboard/separacao/?data_inicial={hoje.isoformat()}&data_final={hoje.isoformat()}')
+		response_no_dia_correto = self.client.get(
+			f'/dashboard/separacao/?data_inicial={hoje.isoformat()}&data_final={hoje.isoformat()}&partial=table',
+			HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+		)
 		self.assertEqual(response_no_dia_correto.status_code, 200)
 		self.assertContains(response_no_dia_correto, self.nf.numero)
 
@@ -1417,14 +1433,17 @@ class MinutaImportacaoTests(TestCase):
 	def test_dashboard_conferencia_respeita_filtro_de_periodo(self):
 		data_com_dados = self.nf.created_at.date()
 		data_sem_dados = data_com_dados - timedelta(days=1)
-		response = self.client.get(f'/dashboard/conferencia/?data_inicial={data_sem_dados.isoformat()}&data_final={data_sem_dados.isoformat()}')
+		response = self.client.get(
+			f'/dashboard/conferencia/?data_inicial={data_sem_dados.isoformat()}&data_final={data_sem_dados.isoformat()}&partial=table',
+			HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+		)
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'Nenhuma NF encontrada.')
 
-		response_no_dia_correto = self.client.get(f'/dashboard/conferencia/?data_inicial={data_com_dados.isoformat()}&data_final={data_com_dados.isoformat()}')
-		self.assertEqual(response_no_dia_correto.status_code, 200)
-		self.assertContains(response_no_dia_correto, 'name="data_inicial"', html=False)
-		self.assertContains(response_no_dia_correto, 'name="data_final"', html=False)
+		response_shell = self.client.get(f'/dashboard/conferencia/?data_inicial={data_com_dados.isoformat()}&data_final={data_com_dados.isoformat()}')
+		self.assertEqual(response_shell.status_code, 200)
+		self.assertContains(response_shell, 'name="data_inicial"', html=False)
+		self.assertContains(response_shell, 'name="data_final"', html=False)
 
 	def test_dashboard_conferencia_sem_filtro_usa_somente_hoje(self):
 		from django.core.cache import cache
@@ -1440,7 +1459,9 @@ class MinutaImportacaoTests(TestCase):
 		hoje = timezone.localdate().isoformat()
 		self.assertEqual(response.context['filtros']['date_from'], hoje)
 		self.assertEqual(response.context['filtros']['date_to'], hoje)
-		self.assertContains(response, 'Nenhuma NF encontrada.')
+		self.assertTrue(response.context['defer_load'])
+		tabela = self.client.get('/dashboard/conferencia/?partial=table', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+		self.assertContains(tabela, 'Nenhuma NF encontrada.')
 
 	def test_dashboard_conferencia_marca_nf_como_concluida_quando_itens_estao_totalmente_conferidos(self):
 		item_tarefa = TarefaItem.objects.get(tarefa=self.tarefa, produto=self.produto_pendente)
@@ -1463,10 +1484,10 @@ class MinutaImportacaoTests(TestCase):
 		self.conferencia.status = Conferencia.Status.OK
 		self.conferencia.save(update_fields=['status', 'updated_at'])
 
-		response = self.client.get('/dashboard/conferencia/')
+		tabela = self.client.get('/dashboard/conferencia/?partial=table', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 
-		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, '1410289')
+		self.assertEqual(tabela.status_code, 200)
+		self.assertContains(tabela, self.nf.numero)
 		self.assertContains(response, 'OK')
 
 	def test_dashboard_conferencia_detalhe_nf_exibe_historico_de_separacao_quando_nao_ha_bipagem_conferencia(self):

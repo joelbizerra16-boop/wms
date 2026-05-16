@@ -1465,6 +1465,23 @@ tbody tr:hover {
     color: var(--muted);
 }
 
+.metrics-grid--loading .metric-card__value,
+.dashboard-panel--loading .detail-item__value {
+    color: transparent;
+    background: linear-gradient(90deg, #e8edf5 0%, #f4f7fb 50%, #e8edf5 100%);
+    background-size: 200% 100%;
+    animation: wms-skeleton-shimmer 1.2s ease-in-out infinite;
+    border-radius: 6px;
+    min-height: 1.4rem;
+    min-width: 3rem;
+    display: inline-block;
+}
+
+@keyframes wms-skeleton-shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+}
+
 .modal {
     position: fixed;
     inset: 0;
