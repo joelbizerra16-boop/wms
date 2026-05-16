@@ -71,7 +71,7 @@ from apps.usuarios.forms import UsuarioForm
 logger = logging.getLogger(__name__)
 SCAN_SESSION_KEY = 'scan_entradas_nf_ids'
 MAX_XML_FILES_POR_ENVIO = 700
-MAX_XML_FILES_POR_LOTE = 100
+MAX_XML_FILES_POR_LOTE = 50
 
 
 def _bool_post(request, key, default=False):

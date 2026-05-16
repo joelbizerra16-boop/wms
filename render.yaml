@@ -32,3 +32,9 @@ services:
         value: 2
       - key: GUNICORN_TIMEOUT
         value: 300
+      - key: DATA_UPLOAD_MAX_NUMBER_FILES
+        value: 1000
+      - key: DATA_UPLOAD_MAX_MEMORY_SIZE
+        value: 262144000
+      - key: FILE_UPLOAD_MAX_MEMORY_SIZE
+        value: 262144000
