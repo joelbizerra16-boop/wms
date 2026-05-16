@@ -5,7 +5,7 @@ import re
 import unicodedata
 import uuid
 
-from django.db import transaction
+from django.db import OperationalError, ProgrammingError, transaction
 from django.db.models import Q
 from openpyxl import load_workbook
 
@@ -574,36 +574,42 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
 
 
 def _obter_lote_minuta_ativo():
-    return (
-        MinutaRomaneio.objects.order_by('-created_at', '-id')
-        .values_list('importacao_lote', flat=True)
-        .first()
-    )
+    try:
+        return (
+            MinutaRomaneio.objects.order_by('-created_at', '-id')
+            .values_list('importacao_lote', flat=True)
+            .first()
+        )
+    except (ProgrammingError, OperationalError):
+        return None
 
 
 def consultar_minuta_itens_queryset(romaneio='', status='', busca=''):
-    queryset = MinutaRomaneioItem.objects.select_related('romaneio', 'nf', 'nf__rota', 'romaneio__usuario_importacao').all()
-    lote_ativo = _obter_lote_minuta_ativo()
-    if lote_ativo:
-        queryset = queryset.filter(romaneio__importacao_lote=lote_ativo)
-    else:
-        queryset = queryset.none()
-    if romaneio:
-        queryset = queryset.filter(romaneio__codigo_romaneio__icontains=romaneio)
-    if status:
-        queryset = queryset.filter(status=status)
-    if busca:
-        queryset = queryset.filter(
-            Q(numero_nota__icontains=busca)
-            | Q(fantasia__icontains=busca)
-            | Q(razao_social__icontains=busca)
-            | Q(romaneio__placa__icontains=busca)
-            | Q(romaneio__motorista__icontains=busca)
-            | Q(romaneio__codigo_romaneio__icontains=busca)
-            | Q(status__icontains=busca)
-        )
+    try:
+        queryset = MinutaRomaneioItem.objects.select_related('romaneio', 'nf', 'nf__rota', 'romaneio__usuario_importacao').all()
+        lote_ativo = _obter_lote_minuta_ativo()
+        if lote_ativo:
+            queryset = queryset.filter(romaneio__importacao_lote=lote_ativo)
+        else:
+            queryset = queryset.none()
+        if romaneio:
+            queryset = queryset.filter(romaneio__codigo_romaneio__icontains=romaneio)
+        if status:
+            queryset = queryset.filter(status=status)
+        if busca:
+            queryset = queryset.filter(
+                Q(numero_nota__icontains=busca)
+                | Q(fantasia__icontains=busca)
+                | Q(razao_social__icontains=busca)
+                | Q(romaneio__placa__icontains=busca)
+                | Q(romaneio__motorista__icontains=busca)
+                | Q(romaneio__codigo_romaneio__icontains=busca)
+                | Q(status__icontains=busca)
+            )
 
-    return queryset.order_by('-romaneio__data_saida', 'romaneio__codigo_romaneio', 'numero_nota')
+        return queryset.order_by('-romaneio__data_saida', 'romaneio__codigo_romaneio', 'numero_nota')
+    except (ProgrammingError, OperationalError):
+        return MinutaRomaneioItem.objects.none()
 
 
 def listar_minuta_itens(romaneio='', status='', busca=''):

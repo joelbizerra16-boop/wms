@@ -868,7 +868,12 @@ def relatorio_liberacoes(request):
     liberacoes = (
         LiberacaoDivergencia.objects.select_related('usuario', 'nf', 'tarefa', 'tarefa__nf', 'nf__cliente')
         .defer('nf__bairro', 'tarefa__nf__bairro')
-        .prefetch_related('tarefa__itens__nf')
+        .prefetch_related(
+            Prefetch(
+                'tarefa__itens',
+                queryset=TarefaItem.objects.select_related('nf').defer('nf__bairro'),
+            )
+        )
         .all()
     )
 
