@@ -3,8 +3,8 @@ services:
     name: wms
     env: python
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
-    preDeployCommand: python manage.py migrate --noinput && python manage.py create_render_superuser
-    startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --worker-class gthread --workers $WEB_CONCURRENCY --threads $GUNICORN_THREADS --timeout $GUNICORN_TIMEOUT
+    preDeployCommand: python manage.py create_render_superuser
+    startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --timeout 300 --workers 2
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.prod
@@ -30,15 +30,11 @@ services:
         value: INFO
       - key: WEB_CONCURRENCY
         value: 2
-      - key: GUNICORN_THREADS
-        value: 4
       - key: GUNICORN_TIMEOUT
-        value: 600
-      - key: GUNICORN_CMD_ARGS
-        value: --worker-class gthread --threads 4 --timeout 600
+        value: 300
       - key: DATA_UPLOAD_MAX_NUMBER_FILES
         value: 1000
       - key: DATA_UPLOAD_MAX_MEMORY_SIZE
-        value: 262144000
+        value: 52428800
       - key: FILE_UPLOAD_MAX_MEMORY_SIZE
-        value: 262144000
+        value: 52428800

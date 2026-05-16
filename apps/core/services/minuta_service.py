@@ -1,11 +1,12 @@
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 import re
 import unicodedata
 import uuid
 
-from django.db import OperationalError, ProgrammingError, transaction
+from django.db import connection, OperationalError, ProgrammingError, transaction
 from django.db.models import Q
 from openpyxl import load_workbook
 
@@ -17,6 +18,15 @@ from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, ope
 
 class MinutaImportacaoError(Exception):
     pass
+
+
+@lru_cache(maxsize=1)
+def _tabelas_minuta_disponiveis():
+    try:
+        tabelas = set(connection.introspection.table_names())
+    except (OperationalError, ProgrammingError):
+        return False
+    return {'core_minutaromaneio', 'core_minutaromaneioitem'}.issubset(tabelas)
 
 
 def _texto_limpo(valor):
@@ -378,11 +388,15 @@ def montar_preview_importacao_minuta(arquivo, usuario):
         usuario,
     )
 
-    itens_existentes = list(
-        MinutaRomaneioItem.objects.select_related('romaneio__usuario_importacao')
-        .filter(numero_nota__in=numeros_notas)
-        .order_by('numero_nota', '-romaneio__data_saida', '-created_at')
-    )
+    if _tabelas_minuta_disponiveis():
+        itens_existentes = list(
+            MinutaRomaneioItem.objects.select_related('romaneio__usuario_importacao')
+            .filter(numero_nota__in=numeros_notas)
+            .order_by('numero_nota', '-romaneio__data_saida', '-created_at')
+        )
+    else:
+        itens_existentes = []
+        erros.append('Estrutura da minuta ainda não está sincronizada no banco. O preview será exibido sem validar duplicidades históricas.')
     itens_por_nota = defaultdict(list)
     for item in itens_existentes:
         itens_por_nota[item.numero_nota].append(item)
@@ -491,6 +505,8 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
     linhas = preview.get('linhas', [])
     if not linhas:
         raise MinutaImportacaoError('Nenhuma prévia de importação da minuta foi encontrada para confirmação.')
+    if not _tabelas_minuta_disponiveis():
+        raise MinutaImportacaoError('Estrutura da minuta ainda não está sincronizada no banco. Execute as migrations antes de confirmar a importação.')
     if validar_restricoes:
         _validar_preview_minuta_confirmavel(preview)
 
@@ -574,6 +590,8 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
 
 
 def _obter_lote_minuta_ativo():
+    if not _tabelas_minuta_disponiveis():
+        return None
     try:
         return (
             MinutaRomaneio.objects.order_by('-created_at', '-id')
@@ -585,6 +603,8 @@ def _obter_lote_minuta_ativo():
 
 
 def consultar_minuta_itens_queryset(romaneio='', status='', busca=''):
+    if not _tabelas_minuta_disponiveis():
+        return MinutaRomaneioItem.objects.none()
     try:
         queryset = MinutaRomaneioItem.objects.select_related('romaneio', 'nf', 'nf__rota', 'romaneio__usuario_importacao').all()
         lote_ativo = _obter_lote_minuta_ativo()

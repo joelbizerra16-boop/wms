@@ -23,7 +23,7 @@ def nota_fiscal_bairro_disponivel(alias='default'):
 	try:
 		return 'bairro' in _nota_fiscal_colunas(alias)
 	except (OperationalError, ProgrammingError):
-		return True
+		return False
 
 
 def nota_fiscal_bairro_valor(nf):
