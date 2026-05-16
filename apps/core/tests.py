@@ -953,6 +953,69 @@ class MinutaImportacaoTests(TestCase):
 			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
 		},
 	)
+	def test_minuta_exibe_card_de_nfs_nao_encontradas(self):
+		MinutaRomaneio.objects.create(
+			codigo_romaneio='5081690',
+			filial='BRIDA',
+			data_saida=timezone.datetime(2026, 5, 12).date(),
+			placa='FTG6B24',
+			motorista='CLAUDIO',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=MinutaRomaneio.objects.get(codigo_romaneio='5081690'),
+			numero_nota='1415057',
+			status='NF NÃO LOCALIZADA',
+			razao_social='CLIENTE ANTIGO',
+		)
+
+		response = self.client.get('/minuta/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'NFs Não Encontradas')
+		self.assertContains(response, 'NF(s) não localizadas na base de dados')
+		self.assertContains(response, '>1<', html=False)
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
+	def test_pdf_minuta_exige_confirmacao_quando_existem_inconsistencias(self):
+		MinutaRomaneio.objects.create(
+			codigo_romaneio='5081690',
+			filial='BRIDA',
+			data_saida=timezone.datetime(2026, 5, 12).date(),
+			placa='FTG6B24',
+			motorista='CLAUDIO',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=MinutaRomaneio.objects.get(codigo_romaneio='5081690'),
+			numero_nota='1415057',
+			status='NF NÃO LOCALIZADA',
+			razao_social='CLIENTE ANTIGO',
+		)
+
+		response = self.client.get('/minuta/pdf/', follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Foram encontradas divergências que podem afetar a geração do PDF. Confirme para continuar.')
+
+		response_confirmado = self.client.get('/minuta/pdf/?confirmar_alertas=1')
+
+		self.assertEqual(response_confirmado.status_code, 200)
+		self.assertEqual(response_confirmado['Content-Type'], 'application/pdf')
+
+	@override_settings(
+		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+		STORAGES={
+			'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+		},
+	)
 	def test_pdf_minuta_resolve_itens_por_numero_quando_item_minuta_esta_sem_nf(self):
 		arquivo = SimpleUploadedFile(
 			'romaneio_fallback.xlsx',

@@ -19,6 +19,10 @@ from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, ope
 logger = logging.getLogger(__name__)
 
 
+MINUTA_STATUS_NAO_ENCONTRADA = {'NF NÃO LOCALIZADA', 'XML INVALIDO', 'NF COM PROBLEMA'}
+MINUTA_STATUS_INCONSISTENTE = {'NF CANCELADA', 'NF DENEGADA', 'NF INCONSISTENTE', 'NF BLOQUEADA', 'NF INATIVA'}
+
+
 class MinutaImportacaoError(Exception):
     pass
 
@@ -66,6 +70,35 @@ def _mensagem_erro_estrutura_minuta(diagnostico):
         f"tabelas_encontradas={diagnostico.get('tabelas_encontradas')} "
         f"tabelas_faltantes={diagnostico.get('tabelas_faltantes')}"
     )
+
+
+def get_minuta_inconsistencias(linhas):
+    nfs_nao_encontradas = 0
+    xml_erros = 0
+    duplicidades = 0
+    inconsistencias = 0
+
+    for linha in linhas:
+        status = (linha.get('status') or '').strip()
+        duplicado = bool(linha.get('duplicado'))
+        tem_nf_vinculada = bool(linha.get('nf_id'))
+
+        if duplicado:
+            duplicidades += 1
+        if status == 'XML INVALIDO':
+            xml_erros += 1
+        if status in MINUTA_STATUS_NAO_ENCONTRADA or not tem_nf_vinculada:
+            nfs_nao_encontradas += 1
+        if status in MINUTA_STATUS_INCONSISTENTE:
+            inconsistencias += 1
+
+    return {
+        'nfs_nao_encontradas': nfs_nao_encontradas,
+        'xml_erros': xml_erros,
+        'duplicidades': duplicidades,
+        'inconsistencias': inconsistencias,
+        'possui_alertas': any([nfs_nao_encontradas, xml_erros, duplicidades, inconsistencias]),
+    }
 
 
 def _texto_limpo(valor):
@@ -701,6 +734,7 @@ def listar_minuta_itens(romaneio='', status='', busca=''):
     linhas = [
         {
             'romaneio': item.romaneio.codigo_romaneio,
+            'nf_id': item.nf_id,
             'numero_nota': item.numero_nota,
             'data_saida': item.romaneio.data_saida.strftime('%d/%m/%Y') if item.romaneio.data_saida else '-',
             'motorista': item.romaneio.motorista or '-',
@@ -720,12 +754,17 @@ def listar_minuta_itens(romaneio='', status='', busca=''):
         for item in queryset
     ]
 
+    inconsistencias = get_minuta_inconsistencias(linhas)
+
     resumo = {
         'romaneios': len({linha['romaneio'] for linha in linhas}),
         'itens': len(linhas),
         'erros': 0,
         'duplicados': sum(1 for linha in linhas if linha['duplicado']),
         'bloqueadas': sum(1 for linha in linhas if linha['status'] in {'NF CANCELADA', 'NF DENEGADA', 'NF INCONSISTENTE', 'NF BLOQUEADA', 'NF INATIVA', 'NF COM PROBLEMA', 'XML INVALIDO', 'NF NÃO LOCALIZADA'}),
+        'nfs_nao_encontradas': inconsistencias['nfs_nao_encontradas'],
+        'xml_erros': inconsistencias['xml_erros'],
+        'inconsistencias': inconsistencias['inconsistencias'],
         'atualizacao': 'Manual',
     }
     return linhas, resumo

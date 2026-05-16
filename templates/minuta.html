@@ -37,6 +37,14 @@
             <div class="metric-card__meta">Alertas operacionais por NF já vinculada</div>
         </div>
     </div>
+    <div class="metric-card metric-card--with-icon minuta-metric-card-alert{% if minuta_inconsistencias.nfs_nao_encontradas %} minuta-metric-card-alert--active{% endif %}">
+        <div class="metric-card__icon minuta-metric-card-alert__icon"><i data-lucide="search-x"></i></div>
+        <div class="metric-card__content">
+            <span class="metric-card__label">NFs Não Encontradas</span>
+            <div class="metric-card__value">{{ minuta_inconsistencias.nfs_nao_encontradas|default:0 }}</div>
+            <div class="metric-card__meta">NF(s) não localizadas na base de dados</div>
+        </div>
+    </div>
 </div>
 
 <div class="card">
@@ -73,6 +81,8 @@
                         <a
                             href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}"
                             data-base-href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}"
+                            data-confirmar-alertas="0"
+                            data-inconsistencias='{"nfs_nao_encontradas": {{ minuta_inconsistencias.nfs_nao_encontradas|default:0 }}, "xml_erros": {{ minuta_inconsistencias.xml_erros|default:0 }}, "duplicidades": {{ minuta_inconsistencias.duplicidades|default:0 }}, "inconsistencias": {{ minuta_inconsistencias.inconsistencias|default:0 }}}'
                             class="btn btn-light minuta-pdf-button{% if not resumo.itens %} is-disabled{% endif %}"
                             data-minuta-pdf-trigger
                             aria-disabled="{% if not resumo.itens %}true{% else %}false{% endif %}"
@@ -200,7 +210,42 @@
         </div>
     </div>
 
+    <div class="modal" id="minuta-pdf-modal" aria-hidden="true">
+        <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="minuta-pdf-modal-title">
+            <div class="modal__header">
+                <h3 class="modal__title" id="minuta-pdf-modal-title">ATENÇÃO</h3>
+                <button type="button" class="modal__close js-close-minuta-modal" aria-label="Fechar">×</button>
+            </div>
+            <div class="modal__body">
+                <p>Foram encontradas divergências que podem afetar a geração do PDF.</p>
+                <div class="minuta-modal-summary">
+                    <div class="minuta-modal-summary__row"><span>NF não encontrada na base:</span><strong id="minuta-modal-nfs-nao-encontradas">0</strong></div>
+                    <div class="minuta-modal-summary__row"><span>Erros de XML:</span><strong id="minuta-modal-xml-erros">0</strong></div>
+                    <div class="minuta-modal-summary__row"><span>Duplicidades:</span><strong id="minuta-modal-duplicidades">0</strong></div>
+                    <div class="minuta-modal-summary__row"><span>Outras inconsistências:</span><strong id="minuta-modal-inconsistencias">0</strong></div>
+                </div>
+                <div class="modal__actions">
+                    <button type="button" class="btn btn-light js-close-minuta-modal">Cancelar</button>
+                    <button type="button" class="btn-primary" id="minuta-modal-confirmar">Continuar e Gerar PDF</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <style>
+    .minuta-metric-card-alert {
+        border-top: 4px solid #ef4444;
+    }
+
+    .minuta-metric-card-alert--active {
+        box-shadow: 0 16px 34px rgba(239, 68, 68, 0.16);
+    }
+
+    .minuta-metric-card-alert__icon {
+        background: #fee2e2;
+        color: #dc2626;
+    }
+
     .minuta-metrics-grid .metric-card__icon i {
         width: 20px;
         height: 20px;
@@ -427,6 +472,24 @@
         font-weight: 700;
     }
 
+    .minuta-modal-summary {
+        display: grid;
+        gap: 10px;
+        margin: 18px 0 6px;
+        padding: 14px 16px;
+        border-radius: 14px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+    }
+
+    .minuta-modal-summary__row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        color: #334155;
+    }
+
     @media (max-width: 980px) {
         .minuta-toolbar__filters {
             grid-template-columns: 1fr 1fr;
@@ -487,6 +550,13 @@
         const arquivoInput = document.getElementById('minuta-arquivo');
         const uploadButton = document.querySelector('[data-minuta-upload-trigger]');
         const pdfButton = document.querySelector('[data-minuta-pdf-trigger]');
+        const pdfModal = document.getElementById('minuta-pdf-modal');
+        const pdfModalConfirmar = document.getElementById('minuta-modal-confirmar');
+        const pdfModalNfsNaoEncontradas = document.getElementById('minuta-modal-nfs-nao-encontradas');
+        const pdfModalXmlErros = document.getElementById('minuta-modal-xml-erros');
+        const pdfModalDuplicidades = document.getElementById('minuta-modal-duplicidades');
+        const pdfModalInconsistencias = document.getElementById('minuta-modal-inconsistencias');
+        let pendingPdfHref = '';
 
         if (!carregamentoCheckbox || !carregamentoLabel || !arquivoInput || !uploadButton || !entregaCheckbox || !entregaLabel) {
             return;
@@ -501,7 +571,39 @@
             const url = new URL(baseHref, window.location.origin);
             url.searchParams.set('carregamento', carregamentoCheckbox.checked ? '1' : '0');
             url.searchParams.set('entrega', entregaCheckbox.checked ? '1' : '0');
+            url.searchParams.delete('confirmar_alertas');
             pdfButton.setAttribute('href', url.pathname + url.search);
+        };
+
+        const obterInconsistencias = function () {
+            if (!pdfButton) {
+                return {nfs_nao_encontradas: 0, xml_erros: 0, duplicidades: 0, inconsistencias: 0};
+            }
+            try {
+                return JSON.parse(pdfButton.getAttribute('data-inconsistencias') || '{}');
+            } catch (error) {
+                return {nfs_nao_encontradas: 0, xml_erros: 0, duplicidades: 0, inconsistencias: 0};
+            }
+        };
+
+        const abrirModalPdf = function (href) {
+            const inconsistencias = obterInconsistencias();
+            pendingPdfHref = href;
+            pdfModalNfsNaoEncontradas.textContent = inconsistencias.nfs_nao_encontradas || 0;
+            pdfModalXmlErros.textContent = inconsistencias.xml_erros || 0;
+            pdfModalDuplicidades.textContent = inconsistencias.duplicidades || 0;
+            pdfModalInconsistencias.textContent = inconsistencias.inconsistencias || 0;
+            pdfModal.classList.add('is-open');
+            pdfModal.setAttribute('aria-hidden', 'false');
+        };
+
+        const fecharModalPdf = function () {
+            if (!pdfModal) {
+                return;
+            }
+            pdfModal.classList.remove('is-open');
+            pdfModal.setAttribute('aria-hidden', 'true');
+            pendingPdfHref = '';
         };
 
         const atualizarEstadoImportacao = function () {
@@ -521,7 +623,44 @@
                     return;
                 }
 
+                const inconsistencias = obterInconsistencias();
+                const possuiAlertas = (inconsistencias.nfs_nao_encontradas || 0) > 0
+                    || (inconsistencias.xml_erros || 0) > 0
+                    || (inconsistencias.duplicidades || 0) > 0
+                    || (inconsistencias.inconsistencias || 0) > 0;
+
+                if (possuiAlertas && pdfModal) {
+                    event.preventDefault();
+                    abrirModalPdf(pdfButton.getAttribute('href'));
+                    return;
+                }
+
                 pdfButton.classList.add('is-loading');
+                window.setTimeout(function () {
+                    pdfButton.classList.remove('is-loading');
+                }, 1800);
+            });
+        }
+
+        if (pdfModal && pdfModalConfirmar) {
+            pdfModal.querySelectorAll('.js-close-minuta-modal').forEach(function (button) {
+                button.addEventListener('click', fecharModalPdf);
+            });
+            pdfModal.addEventListener('click', function (event) {
+                if (event.target === pdfModal) {
+                    fecharModalPdf();
+                }
+            });
+            pdfModalConfirmar.addEventListener('click', function () {
+                if (!pendingPdfHref) {
+                    fecharModalPdf();
+                    return;
+                }
+                const url = new URL(pendingPdfHref, window.location.origin);
+                url.searchParams.set('confirmar_alertas', '1');
+                fecharModalPdf();
+                pdfButton.classList.add('is-loading');
+                window.open(url.pathname + url.search, '_blank', 'noopener');
                 window.setTimeout(function () {
                     pdfButton.classList.remove('is-loading');
                 }, 1800);

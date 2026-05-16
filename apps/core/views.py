@@ -27,6 +27,7 @@ from apps.core.services.minuta_service import (
     MinutaImportacaoError,
     consultar_minuta_itens_queryset,
     confirmar_importacao_minuta,
+    get_minuta_inconsistencias,
     listar_minuta_itens,
     montar_preview_importacao_minuta,
 )
@@ -1053,6 +1054,7 @@ def minuta(request):
         'usuario': request.user,
         'filtros': filtros,
         'resumo': resumo,
+        'minuta_inconsistencias': get_minuta_inconsistencias(linhas),
         'linhas': preview['linhas'] if preview else linhas,
         'preview': preview,
         'status_opcoes': [
@@ -1095,6 +1097,21 @@ def minuta_pdf(request):
 
     queryset = consultar_minuta_itens_queryset(**filtros)
     itens = list(queryset)
+    inconsistencias = get_minuta_inconsistencias([
+        {
+            'nf_id': item.nf_id,
+            'status': item.status,
+            'duplicado': item.duplicado,
+        }
+        for item in itens
+    ])
+    confirmacao_alertas = (request.GET.get('confirmar_alertas') or '').strip() in {'1', 'true', 'True'}
+    if inconsistencias['possui_alertas'] and not confirmacao_alertas:
+        messages.warning(
+            request,
+            'Foram encontradas divergências que podem afetar a geração do PDF. Confirme para continuar.',
+        )
+        return redirect('web-minuta')
     nome_romaneio = _nome_exportacao_minuta(itens, fallback=filtros['romaneio'] or 'lote-ativo')
     try:
         arquivos = []
