@@ -28,7 +28,7 @@ from apps.core.services.minuta_service import (
     listar_minuta_itens,
     montar_preview_importacao_minuta,
 )
-from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem
+from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem, nota_fiscal_bairro_valor
 from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, open_entrada_xml
 from apps.usuarios.access import build_access_context, require_profiles
 from apps.usuarios.models import Usuario
@@ -298,7 +298,7 @@ def _nome_exportacao_minuta(itens, fallback='lote-ativo'):
 
 
 def _cidade_entrega_minuta(item):
-    cidade = (item.bairro or getattr(getattr(item, 'nf', None), 'bairro', '') or '').strip()
+    cidade = (item.bairro or nota_fiscal_bairro_valor(getattr(item, 'nf', None)) or '').strip()
     return cidade or '-'
 
 

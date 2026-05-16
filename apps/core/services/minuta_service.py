@@ -10,7 +10,7 @@ from django.db.models import Q
 from openpyxl import load_workbook
 
 from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
-from apps.nf.models import EntradaNF, NotaFiscal
+from apps.nf.models import EntradaNF, NotaFiscal, nota_fiscal_bairro_valor
 from apps.nf.services.importador_xml import ImportacaoXMLError, analisar_xml_nfe
 from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, open_entrada_xml
 
@@ -131,7 +131,7 @@ def _serializar_data(valor):
 def _bairro_nf(nf):
     if nf is None:
         return ''
-    return (getattr(nf, 'bairro', '') or getattr(getattr(nf, 'rota', None), 'bairro', '') or '').strip()
+    return (nota_fiscal_bairro_valor(nf) or getattr(getattr(nf, 'rota', None), 'bairro', '') or '').strip()
 
 
 def _status_operacional_nf_minuta(nf):

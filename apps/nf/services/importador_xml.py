@@ -15,7 +15,7 @@ from django.utils import timezone
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.logs.models import Log
-from apps.nf.models import NotaFiscal, NotaFiscalItem
+from apps.nf.models import NotaFiscal, NotaFiscalItem, nota_fiscal_bairro_disponivel, nota_fiscal_bairro_valor
 from apps.nf.services.status_service import sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
 from apps.rotas.services.roteirizacao_service import definir_rota
@@ -118,6 +118,8 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
     documento = _extrair_documento(tree.getroot())
     log_user = _obter_usuario_log(usuario)
 
+    usar_bairro_nf = nota_fiscal_bairro_disponivel()
+
     with transaction.atomic():
         nf_existente = (
             NotaFiscal.objects.select_related('rota', 'cliente')
@@ -127,7 +129,13 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
         )
 
         if nf_existente:
-            resultado_existente = _tratar_nf_existente(nf_existente, documento, log_user, balcao=balcao)
+            resultado_existente = _tratar_nf_existente(
+                nf_existente,
+                documento,
+                log_user,
+                balcao=balcao,
+                usar_bairro_nf=usar_bairro_nf,
+            )
             _executar_validacao_final_automatica()
             return resultado_existente
 
@@ -142,23 +150,32 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
         cliente = _obter_ou_criar_cliente(documento)
         rota = definir_rota(documento.cep, documento.bairro)
         try:
-            nf = NotaFiscal.objects.create(
-                chave_nfe=documento.chave_nfe,
-                numero=documento.numero,
-                cliente=cliente,
-                rota=rota,
-                status=NotaFiscal.Status.PENDENTE,
-                data_emissao=documento.data_emissao or timezone.now(),
-                bairro=(documento.bairro or '').strip(),
-                status_fiscal=documento.status_fiscal,
-                bloqueada=documento.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA,
-                ativa=documento.status_fiscal == NotaFiscal.StatusFiscal.AUTORIZADA,
-                balcao=bool(balcao),
-            )
+            dados_nf = {
+                'chave_nfe': documento.chave_nfe,
+                'numero': documento.numero,
+                'cliente': cliente,
+                'rota': rota,
+                'status': NotaFiscal.Status.PENDENTE,
+                'data_emissao': documento.data_emissao or timezone.now(),
+                'status_fiscal': documento.status_fiscal,
+                'bloqueada': documento.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA,
+                'ativa': documento.status_fiscal == NotaFiscal.StatusFiscal.AUTORIZADA,
+                'balcao': bool(balcao),
+            }
+            if usar_bairro_nf:
+                dados_nf['bairro'] = (documento.bairro or '').strip()
+
+            nf = NotaFiscal.objects.create(**dados_nf)
         except IntegrityError as exc:
             nf_existente = NotaFiscal.objects.filter(chave_nfe=documento.chave_nfe).first()
             if nf_existente:
-                return _tratar_nf_existente(nf_existente, documento, log_user, balcao=balcao)
+                return _tratar_nf_existente(
+                    nf_existente,
+                    documento,
+                    log_user,
+                    balcao=balcao,
+                    usar_bairro_nf=usar_bairro_nf,
+                )
             raise
 
         produtos_por_codigo, produtos_novos = _resolver_produtos_importacao(documento.itens)
@@ -193,10 +210,11 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
         }
 
 
-def _tratar_nf_existente(nf, documento, usuario_log, balcao=False):
+def _tratar_nf_existente(nf, documento, usuario_log, balcao=False, usar_bairro_nf=True):
     campos_atualizar = []
     bairro_documento = (documento.bairro or '').strip()
-    if bairro_documento and nf.bairro != bairro_documento:
+    bairro_atual = nota_fiscal_bairro_valor(nf)
+    if usar_bairro_nf and bairro_documento and bairro_atual != bairro_documento:
         nf.bairro = bairro_documento
         campos_atualizar.append('bairro')
 

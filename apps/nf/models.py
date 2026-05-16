@@ -1,4 +1,7 @@
-from django.db import models
+from functools import lru_cache
+
+from django.db import connections, models
+from django.db.utils import OperationalError, ProgrammingError
 
 from apps.clientes.models import Cliente
 from apps.core.models import BaseModel
@@ -6,7 +9,45 @@ from apps.produtos.models import Produto
 from apps.rotas.models import Rota
 
 
+@lru_cache(maxsize=None)
+def _nota_fiscal_colunas(alias):
+	connection = connections[alias]
+	with connection.cursor() as cursor:
+		return {
+			coluna.name
+			for coluna in connection.introspection.get_table_description(cursor, 'nf_notafiscal')
+		}
+
+
+def nota_fiscal_bairro_disponivel(alias='default'):
+	try:
+		return 'bairro' in _nota_fiscal_colunas(alias)
+	except (OperationalError, ProgrammingError):
+		return True
+
+
+def nota_fiscal_bairro_valor(nf):
+	if nf is None:
+		return ''
+	bairro = nf.__dict__.get('bairro', '')
+	return (bairro or '').strip()
+
+
+class NotaFiscalQuerySet(models.QuerySet):
+	def with_legacy_bairro_compat(self):
+		if nota_fiscal_bairro_disponivel(self.db):
+			return self
+		return self.defer('bairro')
+
+
+class NotaFiscalManager(models.Manager.from_queryset(NotaFiscalQuerySet)):
+	def get_queryset(self):
+		return super().get_queryset().with_legacy_bairro_compat()
+
+
 class NotaFiscal(BaseModel):
+	objects = NotaFiscalManager()
+
 	class Status(models.TextChoices):
 		PENDENTE = 'PENDENTE', 'Pendente'
 		EM_CONFERENCIA = 'EM_CONFERENCIA', 'Em conferencia'

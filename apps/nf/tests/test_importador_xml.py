@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
@@ -212,6 +214,51 @@ class ImportadorXMLAPITests(TestCase):
         self.assertEqual(nf.bairro, 'Bairro Inexistente')
         self.assertEqual(nf.rota.nome, 'AJUSTAR')
         self.assertEqual(nf.rota.bairro, 'AJUSTAR')
+
+    @patch('apps.nf.services.importador_xml.nota_fiscal_bairro_disponivel', return_value=False)
+    def test_importacao_legada_sem_coluna_bairro_permanece_funcional(self, bairro_disponivel_mock):
+        self._cadastrar_produtos(('PRD777', 'Produto sem rota', '789777', Produto.Categoria.NAO_ENCONTRADO))
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000778" versao="4.00">
+      <ide>
+        <nNF>778</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Legado</xNome>
+        <IE>99887766</IE>
+        <enderDest>
+          <xBairro>Bairro Inexistente</xBairro>
+          <CEP>99999999</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD777</cProd>
+          <cEAN>789777</cEAN>
+          <xProd>Produto sem rota</xProd>
+          <qCom>1.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>
+"""
+
+        response = self._upload(xml, filename='sem_coluna_bairro.xml')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['sucesso'])
+        nf = NotaFiscal.objects.get(numero='778')
+        self.assertEqual(nf.rota.nome, 'AJUSTAR')
+        bairro_disponivel_mock.assert_called()
 
     def test_importacao_com_produtos_categorizados_aparece_na_lista_de_separacao_do_gestor(self):
         Produto.objects.create(cod_prod='PRD001', descricao='Produto A', cod_ean='789123', categoria=Produto.Categoria.LUBRIFICANTE)

@@ -37,6 +37,15 @@ from apps.usuarios.models import Setor, Usuario
 from apps.core.views_dashboard import _cliente_tarefa
 
 
+class NotaFiscalLegacyCompatTests(SimpleTestCase):
+	@patch('apps.nf.models.nota_fiscal_bairro_disponivel', return_value=False)
+	def test_queryset_omite_bairro_quando_coluna_nao_existe(self, bairro_disponivel_mock):
+		queryset = NotaFiscal.objects.all()
+
+		self.assertIn('bairro', queryset.query.deferred_loading[0])
+		bairro_disponivel_mock.assert_called()
+
+
 def _build_minuta_workbook(rows, carga='5081690', motorista='8003 - CLAUDIO SOUZA DE JESUS', veiculo='52 - FTG6B24/BRIDA', data_saida='12/05/2026'):
 	workbook = Workbook()
 	worksheet = workbook.active
