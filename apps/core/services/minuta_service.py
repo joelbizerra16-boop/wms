@@ -19,8 +19,11 @@ from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, ope
 logger = logging.getLogger(__name__)
 
 
-MINUTA_STATUS_NAO_ENCONTRADA = {'NF NÃO LOCALIZADA', 'XML INVALIDO', 'NF COM PROBLEMA'}
-MINUTA_STATUS_INCONSISTENTE = {'NF CANCELADA', 'NF DENEGADA', 'NF INCONSISTENTE', 'NF BLOQUEADA', 'NF INATIVA'}
+MINUTA_STATUS_NAO_LOCALIZADA = {'NF NÃO LOCALIZADA'}
+MINUTA_STATUS_XML_ERRO = {'XML INVALIDO', 'ERRO XML'}
+MINUTA_STATUS_CANCELADA = {'NF CANCELADA', 'CANCELADA'}
+MINUTA_STATUS_INCONSISTENTE = {'NF INCONSISTENTE', 'INCONSISTENTE', 'NF COM PROBLEMA', 'NF DENEGADA', 'NF BLOQUEADA', 'NF INATIVA'}
+MINUTA_STATUS_DUPLICADA = {'DUPLICADA', 'DUPLI'}
 
 
 class MinutaImportacaoError(Exception):
@@ -73,31 +76,41 @@ def _mensagem_erro_estrutura_minuta(diagnostico):
 
 
 def get_minuta_inconsistencias(linhas):
-    nfs_nao_encontradas = 0
+    nfs_nao_localizadas = 0
     xml_erros = 0
     duplicidades = 0
+    canceladas = 0
+    status_vazios = 0
     inconsistencias = 0
 
     for linha in linhas:
         status = (linha.get('status') or '').strip()
         duplicado = bool(linha.get('duplicado'))
-        tem_nf_vinculada = bool(linha.get('nf_id'))
 
-        if duplicado:
+        if not status:
+            status_vazios += 1
+        if duplicado or status in MINUTA_STATUS_DUPLICADA:
             duplicidades += 1
-        if status == 'XML INVALIDO':
+        if status in MINUTA_STATUS_XML_ERRO:
             xml_erros += 1
-        if status in MINUTA_STATUS_NAO_ENCONTRADA or not tem_nf_vinculada:
-            nfs_nao_encontradas += 1
+        if status in MINUTA_STATUS_NAO_LOCALIZADA:
+            nfs_nao_localizadas += 1
+        if status in MINUTA_STATUS_CANCELADA:
+            canceladas += 1
         if status in MINUTA_STATUS_INCONSISTENTE:
             inconsistencias += 1
 
+    total_problemas = nfs_nao_localizadas + xml_erros + duplicidades + canceladas + inconsistencias + status_vazios
+
     return {
-        'nfs_nao_encontradas': nfs_nao_encontradas,
+        'nfs_nao_localizadas': nfs_nao_localizadas,
         'xml_erros': xml_erros,
         'duplicidades': duplicidades,
+        'canceladas': canceladas,
+        'status_vazios': status_vazios,
         'inconsistencias': inconsistencias,
-        'possui_alertas': any([nfs_nao_encontradas, xml_erros, duplicidades, inconsistencias]),
+        'total_problemas': total_problemas,
+        'possui_alertas': total_problemas > 0,
     }
 
 
@@ -743,6 +756,7 @@ def listar_minuta_itens(romaneio='', status='', busca=''):
             'bairro': item.bairro or _bairro_nf(item.nf) or '-',
             'status': item.status,
             'duplicado': item.duplicado,
+            'possui_inconsistencia': bool(item.duplicado) or not (item.status or '').strip() or (item.status or '').strip() in (MINUTA_STATUS_NAO_LOCALIZADA | MINUTA_STATUS_XML_ERRO | MINUTA_STATUS_CANCELADA | MINUTA_STATUS_INCONSISTENTE | MINUTA_STATUS_DUPLICADA),
             'duplicidade_texto': (
                 f"NF vinculada ao romaneio {item.duplicidade_romaneio_codigo} em {item.duplicidade_data_saida.strftime('%d/%m/%Y') if item.duplicidade_data_saida else '-'}"
                 if item.duplicado
@@ -762,9 +776,10 @@ def listar_minuta_itens(romaneio='', status='', busca=''):
         'erros': 0,
         'duplicados': sum(1 for linha in linhas if linha['duplicado']),
         'bloqueadas': sum(1 for linha in linhas if linha['status'] in {'NF CANCELADA', 'NF DENEGADA', 'NF INCONSISTENTE', 'NF BLOQUEADA', 'NF INATIVA', 'NF COM PROBLEMA', 'XML INVALIDO', 'NF NÃO LOCALIZADA'}),
-        'nfs_nao_encontradas': inconsistencias['nfs_nao_encontradas'],
+        'nfs_nao_localizadas': inconsistencias['nfs_nao_localizadas'],
         'xml_erros': inconsistencias['xml_erros'],
         'inconsistencias': inconsistencias['inconsistencias'],
+        'total_problemas': inconsistencias['total_problemas'],
         'atualizacao': 'Manual',
     }
     return linhas, resumo

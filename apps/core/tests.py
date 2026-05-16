@@ -953,7 +953,7 @@ class MinutaImportacaoTests(TestCase):
 			'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
 		},
 	)
-	def test_minuta_exibe_card_de_nfs_nao_encontradas(self):
+	def test_minuta_exibe_card_de_inconsistencias_sem_contar_aguardando_liberacao(self):
 		MinutaRomaneio.objects.create(
 			codigo_romaneio='5081690',
 			filial='BRIDA',
@@ -968,13 +968,25 @@ class MinutaImportacaoTests(TestCase):
 			status='NF NÃO LOCALIZADA',
 			razao_social='CLIENTE ANTIGO',
 		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=MinutaRomaneio.objects.get(codigo_romaneio='5081690'),
+			numero_nota='1415058',
+			status='AGUARDANDO LIBERACAO',
+			razao_social='CLIENTE OK',
+		)
+		MinutaRomaneioItem.objects.create(
+			romaneio=MinutaRomaneio.objects.get(codigo_romaneio='5081690'),
+			numero_nota='1415059',
+			status='XML INVALIDO',
+			razao_social='CLIENTE XML',
+		)
 
 		response = self.client.get('/minuta/')
 
 		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'NFs Não Encontradas')
-		self.assertContains(response, 'NF(s) não localizadas na base de dados')
-		self.assertContains(response, '>1<', html=False)
+		self.assertContains(response, 'NFs Com Inconsistência')
+		self.assertContains(response, 'NF(s) com problemas operacionais na minuta')
+		self.assertContains(response, '>2<', html=False)
 
 	@override_settings(
 		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
@@ -1002,7 +1014,7 @@ class MinutaImportacaoTests(TestCase):
 		response = self.client.get('/minuta/pdf/', follow=True)
 
 		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Foram encontradas divergências que podem afetar a geração do PDF. Confirme para continuar.')
+		self.assertContains(response, 'Foram encontradas inconsistências operacionais que podem impactar a geração do PDF.')
 
 		response_confirmado = self.client.get('/minuta/pdf/?confirmar_alertas=1')
 

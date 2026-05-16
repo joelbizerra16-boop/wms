@@ -37,12 +37,12 @@
             <div class="metric-card__meta">Alertas operacionais por NF já vinculada</div>
         </div>
     </div>
-    <div class="metric-card metric-card--with-icon minuta-metric-card-alert{% if minuta_inconsistencias.nfs_nao_encontradas %} minuta-metric-card-alert--active{% endif %}">
+    <div class="metric-card metric-card--with-icon minuta-metric-card-alert{% if minuta_inconsistencias.total_problemas %} minuta-metric-card-alert--active{% endif %}">
         <div class="metric-card__icon minuta-metric-card-alert__icon"><i data-lucide="search-x"></i></div>
         <div class="metric-card__content">
-            <span class="metric-card__label">NFs Não Encontradas</span>
-            <div class="metric-card__value">{{ minuta_inconsistencias.nfs_nao_encontradas|default:0 }}</div>
-            <div class="metric-card__meta">NF(s) não localizadas na base de dados</div>
+            <span class="metric-card__label">NFs Com Inconsistência</span>
+            <div class="metric-card__value">{{ minuta_inconsistencias.total_problemas|default:0 }}</div>
+            <div class="metric-card__meta">NF(s) com problemas operacionais na minuta</div>
         </div>
     </div>
 </div>
@@ -82,7 +82,7 @@
                             href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}"
                             data-base-href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}"
                             data-confirmar-alertas="0"
-                            data-inconsistencias='{"nfs_nao_encontradas": {{ minuta_inconsistencias.nfs_nao_encontradas|default:0 }}, "xml_erros": {{ minuta_inconsistencias.xml_erros|default:0 }}, "duplicidades": {{ minuta_inconsistencias.duplicidades|default:0 }}, "inconsistencias": {{ minuta_inconsistencias.inconsistencias|default:0 }}}'
+                            data-inconsistencias='{"nfs_nao_localizadas": {{ minuta_inconsistencias.nfs_nao_localizadas|default:0 }}, "xml_erros": {{ minuta_inconsistencias.xml_erros|default:0 }}, "duplicidades": {{ minuta_inconsistencias.duplicidades|default:0 }}, "inconsistencias": {{ minuta_inconsistencias.inconsistencias|default:0 }}, "canceladas": {{ minuta_inconsistencias.canceladas|default:0 }}, "status_vazios": {{ minuta_inconsistencias.status_vazios|default:0 }}, "total_problemas": {{ minuta_inconsistencias.total_problemas|default:0 }}}'
                             class="btn btn-light minuta-pdf-button{% if not resumo.itens %} is-disabled{% endif %}"
                             data-minuta-pdf-trigger
                             aria-disabled="{% if not resumo.itens %}true{% else %}false{% endif %}"
@@ -177,7 +177,7 @@
                 </thead>
                 <tbody>
                     {% for linha in linhas %}
-                    <tr class="{% if linha.duplicado %}minuta-row--duplicado{% endif %}">
+                    <tr class="{% if linha.possui_inconsistencia %}minuta-row--duplicado{% endif %}">
                         <td>{% firstof linha.romaneio linha.codigo_romaneio %}</td>
                         <td>{{ linha.numero_nota }}</td>
                         <td>{{ linha.data_saida }}</td>
@@ -186,8 +186,8 @@
                         <td>{% firstof linha.cliente linha.razao_social linha.fantasia linha.cliente_nf '-' %}</td>
                         <td>{% firstof linha.bairro linha.bairro_nf '-' %}</td>
                         <td>
-                            <span class="status-badge {% if linha.duplicado %}status-badge--danger{% elif linha.status == 'NF CANCELADA' or linha.status == 'NF DENEGADA' or linha.status == 'NF INCONSISTENTE' or linha.status == 'NF BLOQUEADA' or linha.status == 'NF INATIVA' or linha.status == 'NF COM PROBLEMA' or linha.status == 'XML INVALIDO' or linha.status == 'NF NÃO LOCALIZADA' %}status-badge--danger{% elif linha.status == 'LIBERADA' or linha.status == 'FINALIZADA' or linha.status == 'FINALIZADA COM RESTRICAO' or linha.status == 'NF VINCULADA' %}status-badge--success{% else %}status-badge--warning{% endif %}">
-                                {{ linha.status }}
+                            <span class="status-badge {% if linha.possui_inconsistencia %}status-badge--danger{% elif linha.status == 'LIBERADA' or linha.status == 'FINALIZADA' or linha.status == 'FINALIZADA COM RESTRICAO' or linha.status == 'NF VINCULADA' %}status-badge--success{% else %}status-badge--warning{% endif %}">
+                                {{ linha.status|default:'-' }}
                             </span>
                         </td>
                         <td>
@@ -217,12 +217,14 @@
                 <button type="button" class="modal__close js-close-minuta-modal" aria-label="Fechar">×</button>
             </div>
             <div class="modal__body">
-                <p>Foram encontradas divergências que podem afetar a geração do PDF.</p>
+                <p>Foram encontradas inconsistências operacionais que podem impactar a geração do PDF.</p>
                 <div class="minuta-modal-summary">
-                    <div class="minuta-modal-summary__row"><span>NF não encontrada na base:</span><strong id="minuta-modal-nfs-nao-encontradas">0</strong></div>
+                    <div class="minuta-modal-summary__row"><span>NF não localizada:</span><strong id="minuta-modal-nfs-nao-localizadas">0</strong></div>
+                    <div class="minuta-modal-summary__row"><span>Duplicadas:</span><strong id="minuta-modal-duplicidades">0</strong></div>
                     <div class="minuta-modal-summary__row"><span>Erros de XML:</span><strong id="minuta-modal-xml-erros">0</strong></div>
-                    <div class="minuta-modal-summary__row"><span>Duplicidades:</span><strong id="minuta-modal-duplicidades">0</strong></div>
                     <div class="minuta-modal-summary__row"><span>Outras inconsistências:</span><strong id="minuta-modal-inconsistencias">0</strong></div>
+                    <div class="minuta-modal-summary__row"><span>Canceladas:</span><strong id="minuta-modal-canceladas">0</strong></div>
+                    <div class="minuta-modal-summary__row"><span>Status vazio:</span><strong id="minuta-modal-status-vazios">0</strong></div>
                 </div>
                 <div class="modal__actions">
                     <button type="button" class="btn btn-light js-close-minuta-modal">Cancelar</button>
@@ -552,10 +554,12 @@
         const pdfButton = document.querySelector('[data-minuta-pdf-trigger]');
         const pdfModal = document.getElementById('minuta-pdf-modal');
         const pdfModalConfirmar = document.getElementById('minuta-modal-confirmar');
-        const pdfModalNfsNaoEncontradas = document.getElementById('minuta-modal-nfs-nao-encontradas');
+        const pdfModalNfsNaoLocalizadas = document.getElementById('minuta-modal-nfs-nao-localizadas');
         const pdfModalXmlErros = document.getElementById('minuta-modal-xml-erros');
         const pdfModalDuplicidades = document.getElementById('minuta-modal-duplicidades');
         const pdfModalInconsistencias = document.getElementById('minuta-modal-inconsistencias');
+        const pdfModalCanceladas = document.getElementById('minuta-modal-canceladas');
+        const pdfModalStatusVazios = document.getElementById('minuta-modal-status-vazios');
         let pendingPdfHref = '';
 
         if (!carregamentoCheckbox || !carregamentoLabel || !arquivoInput || !uploadButton || !entregaCheckbox || !entregaLabel) {
@@ -577,22 +581,24 @@
 
         const obterInconsistencias = function () {
             if (!pdfButton) {
-                return {nfs_nao_encontradas: 0, xml_erros: 0, duplicidades: 0, inconsistencias: 0};
+                return {nfs_nao_localizadas: 0, xml_erros: 0, duplicidades: 0, inconsistencias: 0, canceladas: 0, status_vazios: 0, total_problemas: 0};
             }
             try {
                 return JSON.parse(pdfButton.getAttribute('data-inconsistencias') || '{}');
             } catch (error) {
-                return {nfs_nao_encontradas: 0, xml_erros: 0, duplicidades: 0, inconsistencias: 0};
+                return {nfs_nao_localizadas: 0, xml_erros: 0, duplicidades: 0, inconsistencias: 0, canceladas: 0, status_vazios: 0, total_problemas: 0};
             }
         };
 
         const abrirModalPdf = function (href) {
             const inconsistencias = obterInconsistencias();
             pendingPdfHref = href;
-            pdfModalNfsNaoEncontradas.textContent = inconsistencias.nfs_nao_encontradas || 0;
+            pdfModalNfsNaoLocalizadas.textContent = inconsistencias.nfs_nao_localizadas || 0;
             pdfModalXmlErros.textContent = inconsistencias.xml_erros || 0;
             pdfModalDuplicidades.textContent = inconsistencias.duplicidades || 0;
             pdfModalInconsistencias.textContent = inconsistencias.inconsistencias || 0;
+            pdfModalCanceladas.textContent = inconsistencias.canceladas || 0;
+            pdfModalStatusVazios.textContent = inconsistencias.status_vazios || 0;
             pdfModal.classList.add('is-open');
             pdfModal.setAttribute('aria-hidden', 'false');
         };
@@ -624,10 +630,7 @@
                 }
 
                 const inconsistencias = obterInconsistencias();
-                const possuiAlertas = (inconsistencias.nfs_nao_encontradas || 0) > 0
-                    || (inconsistencias.xml_erros || 0) > 0
-                    || (inconsistencias.duplicidades || 0) > 0
-                    || (inconsistencias.inconsistencias || 0) > 0;
+                const possuiAlertas = (inconsistencias.total_problemas || 0) > 0;
 
                 if (possuiAlertas && pdfModal) {
                     event.preventDefault();

@@ -1099,7 +1099,6 @@ def minuta_pdf(request):
     itens = list(queryset)
     inconsistencias = get_minuta_inconsistencias([
         {
-            'nf_id': item.nf_id,
             'status': item.status,
             'duplicado': item.duplicado,
         }
@@ -1109,7 +1108,7 @@ def minuta_pdf(request):
     if inconsistencias['possui_alertas'] and not confirmacao_alertas:
         messages.warning(
             request,
-            'Foram encontradas divergências que podem afetar a geração do PDF. Confirme para continuar.',
+            'Foram encontradas inconsistências operacionais que podem impactar a geração do PDF.',
         )
         return redirect('web-minuta')
     nome_romaneio = _nome_exportacao_minuta(itens, fallback=filtros['romaneio'] or 'lote-ativo')
