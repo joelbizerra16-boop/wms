@@ -10,13 +10,20 @@ import xml.etree.ElementTree as ET
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
+from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.logs.models import Log
-from apps.nf.models import NotaFiscal, NotaFiscalItem, nota_fiscal_bairro_disponivel, nota_fiscal_bairro_valor
+from apps.nf.models import (
+    NotaFiscal,
+    NotaFiscalItem,
+    invalidar_cache_colunas_nota_fiscal,
+    nota_fiscal_bairro_disponivel,
+    nota_fiscal_bairro_valor,
+)
 from apps.nf.services.status_service import sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
 from apps.rotas.services.roteirizacao_service import definir_rota
@@ -24,6 +31,62 @@ from apps.tarefas.models import Tarefa, TarefaItem
 
 
 logger = logging.getLogger(__name__)
+
+
+def _erro_coluna_bairro_nf(exc):
+    mensagem = str(exc).lower()
+    return (
+        'nf_notafiscal' in mensagem
+        and 'bairro' in mensagem
+        and ('does not exist' in mensagem or 'undefinedcolumn' in mensagem)
+    )
+
+
+def _criar_nf_com_fallback_bairro(dados_nf, documento, usuario, usar_bairro_nf):
+    try:
+        with transaction.atomic():
+            return NotaFiscal.objects.create(**dados_nf), usar_bairro_nf
+    except (ProgrammingError, OperationalError) as exc:
+        if not (usar_bairro_nf and 'bairro' in dados_nf and _erro_coluna_bairro_nf(exc)):
+            raise
+
+        logger.warning(
+            'IMPORTAR_XML_RETRY_SEM_BAIRRO chave=%s numero=%s usuario_id=%s erro=%s',
+            documento.chave_nfe,
+            documento.numero,
+            getattr(usuario, 'id', None),
+            str(exc),
+        )
+        invalidar_cache_colunas_nota_fiscal()
+        dados_nf_sem_bairro = dict(dados_nf)
+        dados_nf_sem_bairro.pop('bairro', None)
+        with transaction.atomic():
+            return NotaFiscal.objects.create(**dados_nf_sem_bairro), False
+
+
+def _salvar_nf_com_fallback_bairro(nf, campos_atualizar, usar_bairro_nf):
+    campos_salvar = [*campos_atualizar, 'updated_at']
+    try:
+        with transaction.atomic():
+            nf.save(update_fields=campos_salvar)
+        return usar_bairro_nf
+    except (ProgrammingError, OperationalError) as exc:
+        if not (usar_bairro_nf and 'bairro' in campos_atualizar and _erro_coluna_bairro_nf(exc)):
+            raise
+
+        logger.warning(
+            'IMPORTAR_XML_SAVE_RETRY_SEM_BAIRRO nf_id=%s numero=%s erro=%s',
+            nf.id,
+            nf.numero,
+            str(exc),
+        )
+        invalidar_cache_colunas_nota_fiscal()
+        nf.__dict__['bairro'] = ''
+        campos_sem_bairro = [campo for campo in campos_atualizar if campo != 'bairro']
+        if campos_sem_bairro:
+            with transaction.atomic():
+                nf.save(update_fields=[*campos_sem_bairro, 'updated_at'])
+        return False
 
 
 class ImportacaoXMLError(Exception):
@@ -210,7 +273,12 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
                     documento.numero,
                     sorted(dados_nf.keys()),
                 )
-                nf = NotaFiscal.objects.create(**dados_nf)
+                nf, usar_bairro_nf = _criar_nf_com_fallback_bairro(
+                    dados_nf,
+                    documento=documento,
+                    usuario=usuario,
+                    usar_bairro_nf=usar_bairro_nf,
+                )
                 logger.info('IMPORTAR_XML_NF_CRIADA nf_id=%s chave=%s', nf.id, nf.chave_nfe)
             except IntegrityError:
                 logger.warning(
@@ -296,7 +364,7 @@ def _tratar_nf_existente(nf, documento, usuario_log, balcao=False, usar_bairro_n
 
     if documento.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
         if campos_atualizar:
-            nf.save(update_fields=[*campos_atualizar, 'updated_at'])
+            usar_bairro_nf = _salvar_nf_com_fallback_bairro(nf, campos_atualizar, usar_bairro_nf)
         _bloquear_nf_cancelada(nf)
         Log.objects.create(
             usuario=usuario_log,
@@ -316,7 +384,7 @@ def _tratar_nf_existente(nf, documento, usuario_log, balcao=False, usar_bairro_n
 
     if documento.status_fiscal == NotaFiscal.StatusFiscal.DENEGADA:
         if campos_atualizar:
-            nf.save(update_fields=[*campos_atualizar, 'updated_at'])
+            usar_bairro_nf = _salvar_nf_com_fallback_bairro(nf, campos_atualizar, usar_bairro_nf)
         _bloquear_nf_denegada(nf)
         Log.objects.create(
             usuario=usuario_log,
@@ -339,7 +407,9 @@ def _tratar_nf_existente(nf, documento, usuario_log, balcao=False, usar_bairro_n
         nf.balcao = True
         campos_atualizar.append('balcao')
     if campos_atualizar:
-        nf.save(update_fields=[*campos_atualizar, 'updated_at'])
+        usar_bairro_nf = _salvar_nf_com_fallback_bairro(nf, campos_atualizar, usar_bairro_nf)
+    if not usar_bairro_nf:
+        nf.__dict__['bairro'] = ''
     Log.objects.create(
         usuario=usuario_log,
         acao='IMPORTACAO XML DUPLICADA',

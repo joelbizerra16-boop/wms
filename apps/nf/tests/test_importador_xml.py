@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.utils import ProgrammingError
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -257,6 +258,59 @@ class ImportadorXMLAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['sucesso'])
         nf = NotaFiscal.objects.get(numero='778')
+        self.assertEqual(nf.rota.nome, 'AJUSTAR')
+        bairro_disponivel_mock.assert_called()
+
+    @patch('apps.nf.services.importador_xml.nota_fiscal_bairro_disponivel', return_value=True)
+    def test_importacao_retrocede_sem_bairro_quando_coluna_fisica_esta_ausente(self, bairro_disponivel_mock):
+        self._cadastrar_produtos(('PRD779', 'Produto fallback', '789779', Produto.Categoria.NAO_ENCONTRADO))
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000779" versao="4.00">
+      <ide>
+        <nNF>779</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Retry</xNome>
+        <IE>99887767</IE>
+        <enderDest>
+          <xBairro>Bairro Retry</xBairro>
+          <CEP>99999998</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>PRD779</cProd>
+          <cEAN>789779</cEAN>
+          <xProd>Produto fallback</xProd>
+          <qCom>1.00</qCom>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>
+"""
+
+        create_original = NotaFiscal.objects.create
+
+        def create_side_effect(**kwargs):
+            if 'bairro' in kwargs:
+                raise ProgrammingError('column "bairro" of relation "nf_notafiscal" does not exist')
+            return create_original(**kwargs)
+
+        with patch('apps.nf.services.importador_xml.NotaFiscal.objects.create', side_effect=create_side_effect):
+            response = self._upload(xml, filename='retry_sem_bairro.xml')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['sucesso'])
+        nf = NotaFiscal.objects.get(numero='779')
         self.assertEqual(nf.rota.nome, 'AJUSTAR')
         bairro_disponivel_mock.assert_called()
 

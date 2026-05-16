@@ -19,6 +19,10 @@ def _nota_fiscal_colunas(alias):
 		}
 
 
+def invalidar_cache_colunas_nota_fiscal():
+	_nota_fiscal_colunas.cache_clear()
+
+
 def nota_fiscal_bairro_disponivel(alias='default'):
 	try:
 		return 'bairro' in _nota_fiscal_colunas(alias)
