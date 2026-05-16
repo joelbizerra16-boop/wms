@@ -358,6 +358,7 @@ def montar_preview_importacao_minuta(arquivo, usuario):
         workbook = load_workbook(arquivo, read_only=True, data_only=True)
     except Exception as exc:
         raise MinutaImportacaoError(f'Falha ao ler a planilha: {exc}') from exc
+    logger.info('DEBUG MINUTA: planilha_carregada arquivo=%s', getattr(arquivo, 'name', ''))
 
     worksheet = workbook[workbook.sheetnames[0]]
     rows = list(worksheet.iter_rows(values_only=True))
@@ -559,9 +560,14 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
         raise MinutaImportacaoError('Nenhuma prévia de importação da minuta foi encontrada para confirmação.')
     diagnostico_tabelas = _diagnostico_tabelas_minuta()
     if not diagnostico_tabelas['resultado_validacao']:
-        mensagem_estrutura = _mensagem_erro_estrutura_minuta(diagnostico_tabelas)
-        logger.error(mensagem_estrutura)
-        raise MinutaImportacaoError(mensagem_estrutura)
+        logger.warning(
+            'DEBUG MINUTA: validacao_estrutura_nao_bloqueante schema=%s alias=%s tabelas_encontradas=%s tabelas_faltantes=%s erro=%s',
+            diagnostico_tabelas.get('schema_detectado'),
+            diagnostico_tabelas.get('alias'),
+            diagnostico_tabelas.get('tabelas_encontradas'),
+            diagnostico_tabelas.get('tabelas_faltantes'),
+            diagnostico_tabelas.get('erro'),
+        )
     if validar_restricoes:
         _validar_preview_minuta_confirmavel(preview)
 
@@ -650,8 +656,6 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
 
 
 def _obter_lote_minuta_ativo():
-    if not _diagnostico_tabelas_minuta()['resultado_validacao']:
-        return None
     try:
         return (
             MinutaRomaneio.objects.order_by('-created_at', '-id')
@@ -659,12 +663,11 @@ def _obter_lote_minuta_ativo():
             .first()
         )
     except (ProgrammingError, OperationalError):
+        logger.exception('ERRO REAL MINUTA: falha ao obter lote ativo da minuta.')
         return None
 
 
 def consultar_minuta_itens_queryset(romaneio='', status='', busca=''):
-    if not _diagnostico_tabelas_minuta()['resultado_validacao']:
-        return MinutaRomaneioItem.objects.none()
     try:
         queryset = MinutaRomaneioItem.objects.select_related('romaneio', 'nf', 'nf__rota', 'romaneio__usuario_importacao').all()
         lote_ativo = _obter_lote_minuta_ativo()
@@ -689,6 +692,7 @@ def consultar_minuta_itens_queryset(romaneio='', status='', busca=''):
 
         return queryset.order_by('-romaneio__data_saida', 'romaneio__codigo_romaneio', 'numero_nota')
     except (ProgrammingError, OperationalError):
+        logger.exception('ERRO REAL MINUTA: falha ao consultar itens da minuta.')
         return MinutaRomaneioItem.objects.none()
 
 

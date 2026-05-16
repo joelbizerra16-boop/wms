@@ -974,13 +974,14 @@ def minuta(request):
             try:
                 resultado = confirmar_importacao_minuta(preview, request.user)
             except MinutaImportacaoError as exc:
+                logger.error('ERRO REAL MINUTA: confirmacao_negocio user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
                 messages.error(request, str(exc))
                 return redirect('web-minuta')
             except Exception as exc:
                 traceback.print_exc()
-                logger.exception('Erro inesperado ao confirmar importacao da minuta: user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
-                messages.error(request, f'Erro ao gerar minuta: {str(exc)}')
-                return redirect('web-minuta')
+                logger.exception('ERRO REAL MINUTA: confirmacao_inesperada user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
+                messages.error(request, f'ERRO REAL: {str(exc)}')
+                raise
             request.session.pop(MINUTA_PREVIEW_SESSION_KEY, None)
             messages.success(
                 request,
@@ -996,19 +997,21 @@ def minuta(request):
             try:
                 preview = montar_preview_importacao_minuta(arquivo, request.user)
             except MinutaImportacaoError as exc:
+                logger.error('ERRO REAL MINUTA: preview_negocio user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
                 messages.error(request, str(exc))
                 return redirect('web-minuta')
 
             try:
                 resultado = confirmar_importacao_minuta(preview, request.user, validar_restricoes=False)
             except MinutaImportacaoError as exc:
+                logger.error('ERRO REAL MINUTA: upload_negocio user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
                 messages.error(request, str(exc))
                 return redirect('web-minuta')
             except Exception as exc:
                 traceback.print_exc()
-                logger.exception('Erro inesperado ao gerar minuta no upload: user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
-                messages.error(request, f'Erro ao gerar minuta: {str(exc)}')
-                return redirect('web-minuta')
+                logger.exception('ERRO REAL MINUTA: upload_inesperado user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
+                messages.error(request, f'ERRO REAL: {str(exc)}')
+                raise
             request.session.pop(MINUTA_PREVIEW_SESSION_KEY, None)
 
             if preview['resumo'].get('bloqueadas'):
@@ -1078,6 +1081,7 @@ def minuta(request):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def minuta_pdf(request):
+    logger.info('DEBUG MINUTA: gerando_pdf_inicio user_id=%s', getattr(request.user, 'id', None))
     filtros = {
         'romaneio': (request.GET.get('romaneio') or '').strip(),
         'status': (request.GET.get('status') or '').strip(),
@@ -1095,12 +1099,20 @@ def minuta_pdf(request):
     try:
         arquivos = []
         if gerar_carregamento:
+            logger.info('DEBUG MINUTA: gerando_pdf tipo=carregamento romaneio=%s itens=%s', nome_romaneio, len(itens))
             arquivos.append((f'minuta_carregamento_{nome_romaneio}.pdf', _build_minuta_romaneio_pdf(itens), 'application/pdf'))
         if gerar_entrega:
+            logger.info('DEBUG MINUTA: gerando_pdf tipo=entrega romaneio=%s itens=%s', nome_romaneio, len(itens))
             arquivos.append((f'minuta_entrega_{nome_romaneio}.pdf', _build_minuta_entrega_pdf(itens), 'application/pdf'))
     except MinutaImportacaoError as exc:
+        logger.error('ERRO REAL MINUTA: pdf_negocio user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
         messages.error(request, str(exc))
         return redirect('web-minuta')
+    except Exception as exc:
+        traceback.print_exc()
+        logger.exception('ERRO REAL MINUTA: pdf_inesperado user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
+        messages.error(request, f'ERRO REAL: {str(exc)}')
+        raise
 
     if len(arquivos) == 1:
         nome_arquivo, conteudo, content_type = arquivos[0]
@@ -1108,11 +1120,13 @@ def minuta_pdf(request):
         response['Content-Disposition'] = f'inline; filename="{nome_arquivo}"'
         return response
 
+    logger.info('DEBUG MINUTA: gerando_zip romaneio=%s arquivos=%s', nome_romaneio, len(arquivos))
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zip_file:
         for nome_arquivo, conteudo, _content_type in arquivos:
             zip_file.writestr(nome_arquivo, conteudo)
 
+    logger.info('DEBUG MINUTA: finalizando_importacao_pdf_zip romaneio=%s', nome_romaneio)
     response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
     response['Content-Disposition'] = f'attachment; filename="minutas_{nome_romaneio}.zip"'
     return response
