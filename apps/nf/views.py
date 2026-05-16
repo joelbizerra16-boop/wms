@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import status, viewsets
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
@@ -6,6 +8,9 @@ from rest_framework.views import APIView
 from apps.nf.models import NotaFiscal, NotaFiscalItem
 from apps.nf.serializers import NotaFiscalItemSerializer, NotaFiscalSerializer, XMLImportacaoSerializer
 from apps.nf.services.importador_xml import ImportacaoXMLError, importar_xml_nfe
+
+
+logger = logging.getLogger(__name__)
 
 
 class NotaFiscalViewSet(viewsets.ModelViewSet):
@@ -36,6 +41,12 @@ class ImportarXMLAPIView(APIView):
     def post(self, request):
         serializer = XMLImportacaoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        logger.info(
+            'API_IMPORTAR_XML_START user_id=%s arquivo=%s balcao=%s',
+            getattr(request.user, 'id', None),
+            getattr(serializer.validated_data['file'], 'name', ''),
+            request.data.get('balcao') in {'1', 'on', 'true', 'True'},
+        )
 
         try:
             resultado = importar_xml_nfe(
@@ -45,6 +56,7 @@ class ImportarXMLAPIView(APIView):
                 tarefas_lote_cache={},
             )
         except ImportacaoXMLError as exc:
+            logger.warning('API_IMPORTAR_XML_NEGOCIO_FALHA user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
             return Response(
                 {
                     'sucesso': False,
@@ -53,5 +65,8 @@ class ImportarXMLAPIView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except Exception:
+            logger.exception('API_IMPORTAR_XML_FALHA user_id=%s', getattr(request.user, 'id', None))
+            raise
 
         return Response(resultado, status=status.HTTP_200_OK)

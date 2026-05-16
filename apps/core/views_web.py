@@ -934,6 +934,7 @@ def confirmar_scan_entradas_web(request):
         return redirect('web-ativacao-scan-nf')
 
     ids = _scan_ids_session(request)
+    logger.info('CONFIRMAR_SCAN_START user_id=%s total_ids=%s ids=%s', getattr(request.user, 'id', None), len(ids), ids[:20])
     if not ids:
         messages.warning(request, 'Nenhuma NF escaneada para confirmar.')
         return redirect('web-ativacao-scan-nf')
@@ -963,6 +964,13 @@ def confirmar_scan_entradas_web(request):
         if entrada.status != EntradaNF.Status.AGUARDANDO:
             continue
         try:
+            logger.info(
+                'CONFIRMAR_SCAN_PROCESSANDO entrada_id=%s chave=%s tipo=%s status=%s',
+                entrada.id,
+                entrada.chave_nf,
+                entrada.tipo,
+                entrada.status,
+            )
             with open_entrada_xml(entrada, user=request.user) as arquivo_xml:
                 resultado = importar_xml_nfe(
                     arquivo_xml,
@@ -982,6 +990,11 @@ def confirmar_scan_entradas_web(request):
                 liberadas += 1
             entrada.save(update_fields=['status', 'updated_at'])
         except ImportacaoXMLError:
+            logger.warning(
+                'CONFIRMAR_SCAN_IMPORTACAO_NEGOCIO entrada_id=%s chave=%s',
+                entrada.id,
+                entrada.chave_nf,
+            )
             entrada.status = EntradaNF.Status.PROCESSADO
             entrada.save(update_fields=['status', 'updated_at'])
             erros += 1
@@ -989,6 +1002,13 @@ def confirmar_scan_entradas_web(request):
             logger.error('Falha ao abrir XML da entrada %s durante confirmacao em lote: %s', entrada.id, str(exc))
             erros += 1
         except Exception:
+            logger.exception(
+                'CONFIRMAR_SCAN_FALHA entrada_id=%s chave=%s tipo=%s user_id=%s',
+                entrada.id,
+                entrada.chave_nf,
+                entrada.tipo,
+                getattr(request.user, 'id', None),
+            )
             erros += 1
 
     _set_scan_ids_session(request, [])
@@ -1009,12 +1029,21 @@ def liberar_entrada_nf_web(request, entrada_id):
         return redirect('web-fila-entradas-nf')
 
     entrada = get_object_or_404(EntradaNF, id=entrada_id)
+    logger.info(
+        'LIBERAR_ENTRADA_START entrada_id=%s chave=%s status=%s tipo=%s user_id=%s',
+        entrada.id,
+        entrada.chave_nf,
+        entrada.status,
+        entrada.tipo,
+        getattr(request.user, 'id', None),
+    )
     if entrada.status == EntradaNF.Status.LIBERADO:
         messages.info(request, 'Entrada já liberada anteriormente.')
         return redirect('web-fila-entradas-nf')
 
     try:
         with open_entrada_xml(entrada, user=request.user) as arquivo_xml:
+            logger.info('LIBERAR_ENTRADA_ANTES_IMPORTAR entrada_id=%s chave=%s', entrada.id, entrada.chave_nf)
             resultado = importar_xml_nfe(
                 arquivo_xml,
                 usuario=request.user,
@@ -1028,6 +1057,7 @@ def liberar_entrada_nf_web(request, entrada_id):
             f"Entrada {entrada.chave_nf} liberada com sucesso ({resultado.get('mensagem', 'processada')}).",
         )
     except XMLStorageUnavailableError as exc:
+        logger.warning('LIBERAR_ENTRADA_XML_INDISPONIVEL entrada_id=%s chave=%s erro=%s', entrada.id, entrada.chave_nf, str(exc))
         nf_existente = NotaFiscal.objects.filter(chave_nfe=entrada.chave_nf).first()
         if nf_existente is not None:
             entrada.status = EntradaNF.Status.LIBERADO
@@ -1050,14 +1080,25 @@ def liberar_entrada_nf_web(request, entrada_id):
         else:
             messages.error(request, f'XML indisponível para a entrada {entrada.chave_nf}: {str(exc)}')
     except ImportacaoXMLError as exc:
+        logger.warning('LIBERAR_ENTRADA_IMPORTACAO_NEGOCIO entrada_id=%s chave=%s erro=%s', entrada.id, entrada.chave_nf, str(exc))
         messages.error(request, f'Falha ao liberar entrada {entrada.chave_nf}: {str(exc)}')
     except IntegrityError:
+        logger.warning('LIBERAR_ENTRADA_INTEGRITY entrada_id=%s chave=%s', entrada.id, entrada.chave_nf)
         entrada.status = EntradaNF.Status.PROCESSADO
         entrada.save(update_fields=['status', 'updated_at'])
         messages.warning(
             request,
             f'Entrada {entrada.chave_nf} já estava processada como NF no sistema.',
         )
+    except Exception:
+        logger.exception(
+            'LIBERAR_ENTRADA_FALHA entrada_id=%s chave=%s tipo=%s user_id=%s',
+            entrada.id,
+            entrada.chave_nf,
+            entrada.tipo,
+            getattr(request.user, 'id', None),
+        )
+        raise
 
     return redirect('web-fila-entradas-nf')
 

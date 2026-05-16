@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+import logging
 import re
 import xml.etree.ElementTree as ET
 
@@ -20,6 +21,9 @@ from apps.nf.services.status_service import sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
 from apps.rotas.services.roteirizacao_service import definir_rota
 from apps.tarefas.models import Tarefa, TarefaItem
+
+
+logger = logging.getLogger(__name__)
 
 
 class ImportacaoXMLError(Exception):
@@ -109,106 +113,177 @@ def extrair_resumo_nfe_xml(xml_file):
 
 
 def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=None):
+    logger.info(
+        'IMPORTAR_XML_START arquivo=%s usuario_id=%s balcao=%s',
+        getattr(xml_file, 'name', ''),
+        getattr(usuario, 'id', None),
+        bool(balcao),
+    )
     xml_file.seek(0)
     try:
         tree = ET.parse(xml_file)
     except ET.ParseError as exc:
+        logger.warning(
+            'IMPORTAR_XML_PARSE_ERROR arquivo=%s usuario_id=%s erro=%s',
+            getattr(xml_file, 'name', ''),
+            getattr(usuario, 'id', None),
+            str(exc),
+        )
         raise ImportacaoXMLError('XML invalido.') from exc
 
     documento = _extrair_documento(tree.getroot())
     log_user = _obter_usuario_log(usuario)
 
     usar_bairro_nf = nota_fiscal_bairro_disponivel()
+    logger.info(
+        'IMPORTAR_XML_DOCUMENTO chave=%s numero=%s status_fiscal=%s usar_bairro=%s',
+        documento.chave_nfe,
+        documento.numero,
+        documento.status_fiscal,
+        usar_bairro_nf,
+    )
 
-    with transaction.atomic():
-        nf_existente = (
-            NotaFiscal.objects.select_related('rota', 'cliente')
-            .defer('bairro')
-            .prefetch_related('conferencias__itens', 'tarefas__itens')
-            .filter(chave_nfe=documento.chave_nfe)
-            .first()
-        )
-
-        if nf_existente:
-            resultado_existente = _tratar_nf_existente(
-                nf_existente,
-                documento,
-                log_user,
-                balcao=balcao,
-                usar_bairro_nf=usar_bairro_nf,
-            )
-            _executar_validacao_final_automatica()
-            return resultado_existente
-
-        if documento.status_fiscal != NotaFiscal.StatusFiscal.AUTORIZADA:
-            raise ImportacaoXMLError(
-                f'NF {documento.numero} não importada: status inválido ({documento.status_fiscal}).'
+    try:
+        with transaction.atomic():
+            nf_existente = (
+                NotaFiscal.objects.select_related('rota', 'cliente')
+                .defer('bairro')
+                .prefetch_related('conferencias__itens', 'tarefas__itens')
+                .filter(chave_nfe=documento.chave_nfe)
+                .first()
             )
 
-        if documento.tipo_documento == 'evento' and not documento.itens:
-            raise ImportacaoXMLError('XML de evento sem NF correspondente nao pode ser importado.')
-
-        cliente = _obter_ou_criar_cliente(documento)
-        rota = definir_rota(documento.cep, documento.bairro)
-        try:
-            dados_nf = {
-                'chave_nfe': documento.chave_nfe,
-                'numero': documento.numero,
-                'cliente': cliente,
-                'rota': rota,
-                'status': NotaFiscal.Status.PENDENTE,
-                'data_emissao': documento.data_emissao or timezone.now(),
-                'status_fiscal': documento.status_fiscal,
-                'bloqueada': documento.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA,
-                'ativa': documento.status_fiscal == NotaFiscal.StatusFiscal.AUTORIZADA,
-                'balcao': bool(balcao),
-            }
-            if usar_bairro_nf:
-                dados_nf['bairro'] = (documento.bairro or '').strip()
-
-            nf = NotaFiscal.objects.create(**dados_nf)
-        except IntegrityError as exc:
-            nf_existente = NotaFiscal.objects.defer('bairro').filter(chave_nfe=documento.chave_nfe).first()
             if nf_existente:
-                return _tratar_nf_existente(
+                logger.info(
+                    'IMPORTAR_XML_NF_EXISTENTE chave=%s nf_id=%s numero=%s',
+                    documento.chave_nfe,
+                    nf_existente.id,
+                    nf_existente.numero,
+                )
+                resultado_existente = _tratar_nf_existente(
                     nf_existente,
                     documento,
                     log_user,
                     balcao=balcao,
                     usar_bairro_nf=usar_bairro_nf,
                 )
-            raise
+                _executar_validacao_final_automatica()
+                return resultado_existente
 
-        produtos_por_codigo, produtos_novos = _resolver_produtos_importacao(documento.itens)
-        _criar_itens_nf_em_lote(nf, documento.itens, produtos_por_codigo)
+            if documento.status_fiscal != NotaFiscal.StatusFiscal.AUTORIZADA:
+                raise ImportacaoXMLError(
+                    f'NF {documento.numero} não importada: status inválido ({documento.status_fiscal}).'
+                )
 
-        gerar_tarefas_separacao(nf, tarefas_lote_cache=tarefas_lote_cache)
-        sincronizar_status_operacional_nf(nf)
-        _validar_sanidade_nf(nf)
-        _executar_validacao_final_automatica()
+            if documento.tipo_documento == 'evento' and not documento.itens:
+                raise ImportacaoXMLError('XML de evento sem NF correspondente nao pode ser importado.')
 
-        _registrar_produtos_criados_via_xml(nf, produtos_novos, log_user)
+            cliente = _obter_ou_criar_cliente(documento)
+            rota = definir_rota(documento.cep, documento.bairro)
+            logger.info(
+                'IMPORTAR_XML_RESOLVIDO_CLIENTE_ROTA chave=%s cliente_id=%s rota_id=%s rota_nome=%s bairro_xml=%s',
+                documento.chave_nfe,
+                getattr(cliente, 'id', None),
+                getattr(rota, 'id', None),
+                getattr(rota, 'nome', ''),
+                (documento.bairro or '').strip(),
+            )
+            try:
+                dados_nf = {
+                    'chave_nfe': documento.chave_nfe,
+                    'numero': documento.numero,
+                    'cliente': cliente,
+                    'rota': rota,
+                    'status': NotaFiscal.Status.PENDENTE,
+                    'data_emissao': documento.data_emissao or timezone.now(),
+                    'status_fiscal': documento.status_fiscal,
+                    'bloqueada': documento.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA,
+                    'ativa': documento.status_fiscal == NotaFiscal.StatusFiscal.AUTORIZADA,
+                    'balcao': bool(balcao),
+                }
+                if usar_bairro_nf:
+                    dados_nf['bairro'] = (documento.bairro or '').strip()
 
-        Log.objects.create(
-            usuario=log_user,
-            acao='IMPORTACAO XML',
-            detalhe=(
-                f'NF {nf.numero} importada com {nf.itens.count()} item(ns). '
-                f'Produtos criados automaticamente: {len(produtos_novos)}.'
-            ),
+                logger.info(
+                    'IMPORTAR_XML_ANTES_CREATE_NF chave=%s numero=%s campos=%s',
+                    documento.chave_nfe,
+                    documento.numero,
+                    sorted(dados_nf.keys()),
+                )
+                nf = NotaFiscal.objects.create(**dados_nf)
+                logger.info('IMPORTAR_XML_NF_CRIADA nf_id=%s chave=%s', nf.id, nf.chave_nfe)
+            except IntegrityError:
+                logger.warning(
+                    'IMPORTAR_XML_INTEGRITY_RETRY chave=%s numero=%s',
+                    documento.chave_nfe,
+                    documento.numero,
+                )
+                nf_existente = NotaFiscal.objects.defer('bairro').filter(chave_nfe=documento.chave_nfe).first()
+                if nf_existente:
+                    return _tratar_nf_existente(
+                        nf_existente,
+                        documento,
+                        log_user,
+                        balcao=balcao,
+                        usar_bairro_nf=usar_bairro_nf,
+                    )
+                raise
+
+            produtos_por_codigo, produtos_novos = _resolver_produtos_importacao(documento.itens)
+            logger.info(
+                'IMPORTAR_XML_PRODUTOS_RESOLVIDOS nf_id=%s itens=%s produtos_novos=%s',
+                nf.id,
+                len(documento.itens),
+                len(produtos_novos),
+            )
+            _criar_itens_nf_em_lote(nf, documento.itens, produtos_por_codigo)
+
+            logger.info('IMPORTAR_XML_ANTES_GERAR_TAREFAS nf_id=%s', nf.id)
+            gerar_tarefas_separacao(nf, tarefas_lote_cache=tarefas_lote_cache)
+            logger.info('IMPORTAR_XML_ANTES_SINCRONIZAR_STATUS nf_id=%s', nf.id)
+            sincronizar_status_operacional_nf(nf)
+            _validar_sanidade_nf(nf)
+            _executar_validacao_final_automatica()
+
+            _registrar_produtos_criados_via_xml(nf, produtos_novos, log_user)
+
+            Log.objects.create(
+                usuario=log_user,
+                acao='IMPORTACAO XML',
+                detalhe=(
+                    f'NF {nf.numero} importada com {nf.itens.count()} item(ns). '
+                    f'Produtos criados automaticamente: {len(produtos_novos)}.'
+                ),
+            )
+
+            return {
+                'sucesso': True,
+                'erros': [],
+                'quantidade_itens_importados': nf.itens.count(),
+                'produtos_novos': len(produtos_novos),
+                'itens_sem_cadastro': 0,
+                'status': 'sucesso',
+                'mensagem': 'NF importada com sucesso',
+                'nota_fiscal_id': nf.id,
+                'chave_nfe': nf.chave_nfe,
+            }
+    except ImportacaoXMLError:
+        logger.warning(
+            'IMPORTAR_XML_NEGOCIO_FALHA chave=%s numero=%s usuario_id=%s',
+            documento.chave_nfe,
+            documento.numero,
+            getattr(usuario, 'id', None),
         )
-
-        return {
-            'sucesso': True,
-            'erros': [],
-            'quantidade_itens_importados': nf.itens.count(),
-            'produtos_novos': len(produtos_novos),
-            'itens_sem_cadastro': 0,
-            'status': 'sucesso',
-            'mensagem': 'NF importada com sucesso',
-            'nota_fiscal_id': nf.id,
-            'chave_nfe': nf.chave_nfe,
-        }
+        raise
+    except Exception:
+        logger.exception(
+            'IMPORTAR_XML_FALHA chave=%s numero=%s usuario_id=%s balcao=%s',
+            documento.chave_nfe,
+            documento.numero,
+            getattr(usuario, 'id', None),
+            bool(balcao),
+        )
+        raise
 
 
 def _tratar_nf_existente(nf, documento, usuario_log, balcao=False, usar_bairro_nf=True):

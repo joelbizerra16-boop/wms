@@ -1,6 +1,7 @@
 import time
 import traceback
 from decimal import Decimal
+import logging
 
 from django.db import OperationalError, connection, transaction
 from django.db.models import F, IntegerField, Max, Q, Sum
@@ -18,6 +19,9 @@ from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa, TarefaItem
 from apps.usuarios.models import Setor
 from apps.usuarios.session_utils import usuario_esta_logado
+
+
+logger = logging.getLogger(__name__)
 
 
 class SeparacaoError(Exception):
@@ -295,8 +299,7 @@ def listar_itens_tarefa_para_exibicao_seguro(tarefa):
     try:
         return listar_itens_tarefa_para_exibicao(tarefa)
     except Exception as exc:
-        print(f'ERRO ITENS SEPARACAO: {exc}')
-        traceback.print_exc()
+        logger.exception('ERRO_ITENS_SEPARACAO tarefa_id=%s erro=%s', getattr(tarefa, 'id', None), str(exc))
 
     itens_rel = getattr(tarefa, 'itens', None)
     itens = itens_rel.select_related('produto', 'nf', 'grupo_agregado', 'tarefa__rota').all() if itens_rel else []
@@ -332,6 +335,7 @@ def listar_itens_tarefa_para_exibicao_seguro(tarefa):
 
 def iniciar_tarefa(tarefa_id, usuario):
     try:
+        logger.info('SEPARACAO_INICIAR_START tarefa_id=%s user_id=%s', tarefa_id, getattr(usuario, 'id', None))
         if usuario is None or not usuario.setores.exists():
             raise SeparacaoError(USUARIO_SEM_SETOR_ERRO)
 
@@ -367,11 +371,12 @@ def iniciar_tarefa(tarefa_id, usuario):
         tarefa = _executar_com_retry_sqlite_lock(_executar)
         return _dados_tarefa(tarefa)
     except Exception as exc:
-        print(f'ERRO SEPARACAO: {exc}')
+        logger.exception('SEPARACAO_INICIAR_FALHA tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(usuario, 'id', None), str(exc))
         raise
 
 
 def bipar_tarefa(tarefa_id, codigo, usuario):
+    logger.info('SEPARACAO_BIPAR_START tarefa_id=%s user_id=%s codigo=%s', tarefa_id, getattr(usuario, 'id', None), codigo)
     tarefa = (
         Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
         .defer('nf__bairro')
@@ -488,6 +493,13 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
 
 
 def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
+    logger.info(
+        'SEPARACAO_FINALIZAR_START tarefa_id=%s user_id=%s status=%s motivo=%s',
+        tarefa_id,
+        getattr(usuario, 'id', None),
+        status,
+        bool((motivo or '').strip()),
+    )
     tarefa = (
         Tarefa.objects.select_related('nf', 'usuario', 'usuario_em_execucao')
         .defer('nf__bairro')
