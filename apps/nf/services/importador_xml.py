@@ -123,6 +123,7 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
     with transaction.atomic():
         nf_existente = (
             NotaFiscal.objects.select_related('rota', 'cliente')
+            .defer('bairro')
             .prefetch_related('conferencias__itens', 'tarefas__itens')
             .filter(chave_nfe=documento.chave_nfe)
             .first()
@@ -167,7 +168,7 @@ def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=No
 
             nf = NotaFiscal.objects.create(**dados_nf)
         except IntegrityError as exc:
-            nf_existente = NotaFiscal.objects.filter(chave_nfe=documento.chave_nfe).first()
+            nf_existente = NotaFiscal.objects.defer('bairro').filter(chave_nfe=documento.chave_nfe).first()
             if nf_existente:
                 return _tratar_nf_existente(
                     nf_existente,
