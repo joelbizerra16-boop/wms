@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from functools import lru_cache
+import logging
 import re
 import unicodedata
 import uuid
@@ -16,17 +16,29 @@ from apps.nf.services.importador_xml import ImportacaoXMLError, analisar_xml_nfe
 from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, open_entrada_xml
 
 
+logger = logging.getLogger(__name__)
+
+
 class MinutaImportacaoError(Exception):
     pass
 
 
-@lru_cache(maxsize=1)
 def _tabelas_minuta_disponiveis():
+    tabelas_esperadas = {'core_minutaromaneio', 'core_minutaromaneioitem'}
     try:
         tabelas = set(connection.introspection.table_names())
     except (OperationalError, ProgrammingError):
+        logger.exception('DEBUG MINUTA: falha ao consultar table_names() da conexao atual.')
         return False
-    return {'core_minutaromaneio', 'core_minutaromaneioitem'}.issubset(tabelas)
+    tabelas_detectadas = sorted(tabelas.intersection(tabelas_esperadas))
+    resultado = tabelas_esperadas.issubset(tabelas)
+    logger.info(
+        'DEBUG MINUTA: schema_detectado=%s tabelas_encontradas=%s validacao=%s',
+        connection.vendor,
+        tabelas_detectadas,
+        resultado,
+    )
+    return resultado
 
 
 def _texto_limpo(valor):
