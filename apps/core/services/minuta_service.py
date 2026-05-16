@@ -23,22 +23,49 @@ class MinutaImportacaoError(Exception):
     pass
 
 
-def _tabelas_minuta_disponiveis():
+def _diagnostico_tabelas_minuta():
     tabelas_esperadas = {'core_minutaromaneio', 'core_minutaromaneioitem'}
+    diagnostico = {
+        'schema_detectado': connection.vendor,
+        'alias': connection.alias,
+        'tabelas_encontradas': [],
+        'tabelas_faltantes': [],
+        'erro': '',
+        'resultado_validacao': False,
+    }
     try:
         tabelas = set(connection.introspection.table_names())
-    except (OperationalError, ProgrammingError):
+    except (OperationalError, ProgrammingError) as exc:
+        diagnostico['erro'] = str(exc)
         logger.exception('DEBUG MINUTA: falha ao consultar table_names() da conexao atual.')
-        return False
-    tabelas_detectadas = sorted(tabelas.intersection(tabelas_esperadas))
-    resultado = tabelas_esperadas.issubset(tabelas)
+        return diagnostico
+
+    diagnostico['tabelas_encontradas'] = sorted(tabelas.intersection(tabelas_esperadas))
+    diagnostico['tabelas_faltantes'] = sorted(tabelas_esperadas - tabelas)
+    diagnostico['resultado_validacao'] = not diagnostico['tabelas_faltantes']
     logger.info(
-        'DEBUG MINUTA: schema_detectado=%s tabelas_encontradas=%s validacao=%s',
-        connection.vendor,
-        tabelas_detectadas,
-        resultado,
+        'DEBUG MINUTA: schema_detectado=%s alias=%s tabelas_encontradas=%s tabelas_faltantes=%s validacao=%s',
+        diagnostico['schema_detectado'],
+        diagnostico['alias'],
+        diagnostico['tabelas_encontradas'],
+        diagnostico['tabelas_faltantes'],
+        diagnostico['resultado_validacao'],
     )
-    return resultado
+    return diagnostico
+
+
+def _mensagem_erro_estrutura_minuta(diagnostico):
+    if diagnostico.get('erro'):
+        return (
+            'ERRO REAL MINUTA: falha ao validar estrutura no banco. '
+            f"schema={diagnostico.get('schema_detectado')} alias={diagnostico.get('alias')} erro={diagnostico.get('erro')}"
+        )
+    return (
+        'ERRO REAL MINUTA: validação da estrutura retornou falso. '
+        f"schema={diagnostico.get('schema_detectado')} alias={diagnostico.get('alias')} "
+        f"tabelas_encontradas={diagnostico.get('tabelas_encontradas')} "
+        f"tabelas_faltantes={diagnostico.get('tabelas_faltantes')}"
+    )
 
 
 def _texto_limpo(valor):
@@ -322,6 +349,11 @@ def _validar_preview_minuta_confirmavel(preview):
 
 
 def montar_preview_importacao_minuta(arquivo, usuario):
+    logger.info(
+        'DEBUG MINUTA INICIO: arquivo_recebido=%s user_id=%s',
+        getattr(arquivo, 'name', ''),
+        getattr(usuario, 'id', None),
+    )
     try:
         workbook = load_workbook(arquivo, read_only=True, data_only=True)
     except Exception as exc:
@@ -329,6 +361,7 @@ def montar_preview_importacao_minuta(arquivo, usuario):
 
     worksheet = workbook[workbook.sheetnames[0]]
     rows = list(worksheet.iter_rows(values_only=True))
+    logger.info('DEBUG MINUTA: linhas_excel=%s abas=%s', len(rows), list(workbook.sheetnames))
     if not rows:
         raise MinutaImportacaoError('A planilha de romaneio está vazia.')
 
@@ -373,6 +406,7 @@ def montar_preview_importacao_minuta(arquivo, usuario):
 
     if not linhas_planilha:
         raise MinutaImportacaoError('Nenhuma linha válida foi encontrada na planilha de romaneio.')
+    logger.info('DEBUG MINUTA: romaneios_encontrados=%s linhas_validas=%s', len({linha['codigo_romaneio'] for linha in linhas_planilha}), len(linhas_planilha))
 
     numeros_notas = {linha['numero_nota'] for linha in linhas_planilha}
     nfs = list(
@@ -383,6 +417,7 @@ def montar_preview_importacao_minuta(arquivo, usuario):
     nf_por_numero = {}
     for nf in nfs:
         nf_por_numero.setdefault(nf.numero, nf)
+    logger.info('DEBUG MINUTA: nfs_encontradas=%s', len(nf_por_numero))
 
     entradas = list(
         EntradaNF.objects.filter(numero_nf__in=numeros_notas)
@@ -399,8 +434,10 @@ def montar_preview_importacao_minuta(arquivo, usuario):
         },
         usuario,
     )
+    logger.info('DEBUG MINUTA: xmls_encontrados=%s', len(xml_por_numero))
 
-    if _tabelas_minuta_disponiveis():
+    diagnostico_tabelas = _diagnostico_tabelas_minuta()
+    if diagnostico_tabelas['resultado_validacao']:
         itens_existentes = list(
             MinutaRomaneioItem.objects.select_related('romaneio__usuario_importacao')
             .filter(numero_nota__in=numeros_notas)
@@ -408,7 +445,9 @@ def montar_preview_importacao_minuta(arquivo, usuario):
         )
     else:
         itens_existentes = []
-        erros.append('Estrutura da minuta ainda não está sincronizada no banco. O preview será exibido sem validar duplicidades históricas.')
+        mensagem_estrutura = _mensagem_erro_estrutura_minuta(diagnostico_tabelas)
+        logger.error(mensagem_estrutura)
+        erros.append(f'{mensagem_estrutura}. O preview será exibido sem validar duplicidades históricas.')
     itens_por_nota = defaultdict(list)
     for item in itens_existentes:
         itens_por_nota[item.numero_nota].append(item)
@@ -515,10 +554,14 @@ def montar_preview_importacao_minuta(arquivo, usuario):
 
 def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
     linhas = preview.get('linhas', [])
+    logger.info('DEBUG MINUTA: confirmacao_inicio linhas=%s user_id=%s', len(linhas), getattr(usuario, 'id', None))
     if not linhas:
         raise MinutaImportacaoError('Nenhuma prévia de importação da minuta foi encontrada para confirmação.')
-    if not _tabelas_minuta_disponiveis():
-        raise MinutaImportacaoError('Estrutura da minuta ainda não está sincronizada no banco. Execute as migrations antes de confirmar a importação.')
+    diagnostico_tabelas = _diagnostico_tabelas_minuta()
+    if not diagnostico_tabelas['resultado_validacao']:
+        mensagem_estrutura = _mensagem_erro_estrutura_minuta(diagnostico_tabelas)
+        logger.error(mensagem_estrutura)
+        raise MinutaImportacaoError(mensagem_estrutura)
     if validar_restricoes:
         _validar_preview_minuta_confirmavel(preview)
 
@@ -530,12 +573,14 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
     romaneios_processados = 0
     itens_processados = 0
     duplicados = 0
+    logger.info('DEBUG MINUTA: criando_minuta romaneios=%s', len(linhas_por_romaneio))
     with transaction.atomic():
         codigos_romaneio = list(linhas_por_romaneio.keys())
         lote_importacao = uuid.uuid4()
         MinutaRomaneio.objects.filter(codigo_romaneio__in=codigos_romaneio).delete()
 
         for codigo_romaneio, linhas_romaneio in linhas_por_romaneio.items():
+            logger.info('DEBUG MINUTA: criando_romaneio codigo=%s itens=%s', codigo_romaneio, len(linhas_romaneio))
             romaneio = MinutaRomaneio.objects.create(
                 codigo_romaneio=codigo_romaneio,
                 importacao_lote=lote_importacao,
@@ -592,7 +637,10 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
                 itens_processados += 1
 
             if itens_novos:
+                logger.info('DEBUG MINUTA: criando_itens romaneio=%s quantidade=%s', codigo_romaneio, len(itens_novos))
                 MinutaRomaneioItem.objects.bulk_create(itens_novos)
+
+    logger.info('DEBUG MINUTA: finalizando_importacao romaneios=%s itens=%s duplicados=%s', romaneios_processados, itens_processados, duplicados)
 
     return {
         'romaneios': romaneios_processados,
@@ -602,7 +650,7 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
 
 
 def _obter_lote_minuta_ativo():
-    if not _tabelas_minuta_disponiveis():
+    if not _diagnostico_tabelas_minuta()['resultado_validacao']:
         return None
     try:
         return (
@@ -615,7 +663,7 @@ def _obter_lote_minuta_ativo():
 
 
 def consultar_minuta_itens_queryset(romaneio='', status='', busca=''):
-    if not _tabelas_minuta_disponiveis():
+    if not _diagnostico_tabelas_minuta()['resultado_validacao']:
         return MinutaRomaneioItem.objects.none()
     try:
         queryset = MinutaRomaneioItem.objects.select_related('romaneio', 'nf', 'nf__rota', 'romaneio__usuario_importacao').all()
