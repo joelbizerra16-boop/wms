@@ -24,3 +24,9 @@ if DEV_USE_SQLITE:
 			},
 		}
 	}
+
+ENABLE_DEBUG_TOOLBAR = config('ENABLE_DEBUG_TOOLBAR', default=False, cast=bool)
+if ENABLE_DEBUG_TOOLBAR:
+	INSTALLED_APPS += ['debug_toolbar']
+	MIDDLEWARE.insert(0, 'debug_toolbar.middleware.DebugToolbarMiddleware')
+	INTERNAL_IPS = ['127.0.0.1', 'localhost']

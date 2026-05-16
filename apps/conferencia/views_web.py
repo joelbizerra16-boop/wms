@@ -40,7 +40,10 @@ def _pagination_query(request):
     return f'&{query}' if query else ''
 
 
-def _paginar_lista(request, itens, por_pagina=50):
+def _paginar_lista(request, itens, por_pagina=None):
+    if por_pagina is None:
+        from django.conf import settings
+        por_pagina = int(getattr(settings, 'OPERATIONAL_PAGE_SIZE', 50))
     paginador = Paginator(itens, por_pagina)
     page_obj = paginador.get_page(request.GET.get('page'))
     return {
@@ -246,11 +249,6 @@ def conferir_nf(request, nf_id):
         nf, conferencia, conferencia_ativa, conferencia_em_uso = _obter_conferencia_contexto(nf_id, request.user)
     except PermissionDenied as exc:
         return HttpResponseForbidden(str(exc))
-
-    print(f'TAREFA ID: {nf_id}')
-    print(f'USUARIO: {request.user}')
-    print(f'SETORES USUARIO: {list(request.user.setores.values_list("nome", flat=True))}')
-    print(f'SETOR TAREFA: {sorted(_setores_nf(nf))}')
 
     conferencia_ja_finalizada = _conferencia_finalizada(conferencia)
     validacao_fluxo = avaliar_liberacao_conferencia(nf)

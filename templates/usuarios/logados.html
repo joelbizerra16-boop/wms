@@ -27,49 +27,30 @@
                     <th>Ações</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for s in sessoes %}
-                <tr>
-                    <td>{{ s.usuario.nome|default:s.usuario.username }}</td>
-                    <td>{{ s.usuario.username }}</td>
-                    <td>{{ s.usuario.get_perfil_display }}</td>
-                    <td>
-                        {% if s.online %}
-                        <span class="status-badge status-badge--success">ONLINE</span>
-                        {% else %}
-                        <span class="status-badge status-badge--danger">OFFLINE</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ s.ultimo_atividade|default:s.ultimo_acesso|date:"d/m/Y H:i:s" }}</td>
-                    <td>{{ s.total_logins_dia }}</td>
-                    <td>T: {{ s.tarefas_execucao }} | C: {{ s.conferencias_execucao }}</td>
-                    <td>
-                        {% if user.is_superuser or user.is_staff %}
-                        <form method="post" action="{% url 'forcar_logout_usuario' s.usuario.id %}" style="margin:0;">
-                            {% csrf_token %}
-                            <button type="submit" class="button-link" style="background:#c0392b;color:#fff;">⛔ Deslogar e liberar</button>
-                        </form>
-                        {% else %}
-                        <span class="muted">Sem permissão</span>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="8" class="empty-state">Nenhum usuário monitorado ainda.</td>
-                </tr>
-                {% endfor %}
+            <tbody id="usuarios-logados-tbody">
+                {% include 'partials/usuarios_logados_tbody.html' %}
             </tbody>
         </table>
     </div>
 </div>
 <script>
 (function () {
+    const tbody = document.getElementById('usuarios-logados-tbody');
+    const refreshIntervalMs = 15000;
+
+    async function refreshUsuariosLogados() {
+        if (!tbody || document.hidden) return;
+        const response = await fetch(`${window.location.pathname}?partial=table`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        if (!response.ok) return;
+        const html = await response.text();
+        tbody.innerHTML = html;
+    }
+
     setInterval(function () {
-        if (!document.hidden) {
-            window.location.reload();
-        }
-    }, 10000);
+        refreshUsuariosLogados().catch(function () {});
+    }, refreshIntervalMs);
 })();
 </script>
 {% endblock %}

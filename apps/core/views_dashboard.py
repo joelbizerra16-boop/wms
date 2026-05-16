@@ -26,6 +26,7 @@ from apps.usuarios.models import Setor, Usuario
 
 logger = logging.getLogger(__name__)
 CONFERENCIA_RESUMO_CACHE_TTL = 60
+DASHBOARD_SEPARACAO_CACHE_VERSION_KEY = 'dashboard:separacao:version'
 
 
 STATUS_TAREFA_DASHBOARD_SEPARACAO = {
@@ -61,7 +62,10 @@ def _pagination_query(request):
     return f'&{query}' if query else ''
 
 
-def _paginar_lista(request, itens, por_pagina=20):
+def _paginar_lista(request, itens, por_pagina=None):
+    if por_pagina is None:
+        from django.conf import settings
+        por_pagina = int(getattr(settings, 'OPERATIONAL_PAGE_SIZE', 50))
     paginador = Paginator(itens, por_pagina)
     page_obj = paginador.get_page(request.GET.get('page'))
     return {
@@ -201,26 +205,31 @@ def _setores_usuario_dashboard(usuario):
     return {_normalizar_setor_dashboard(valor) for valor in setores if _normalizar_setor_dashboard(valor)}
 
 
+def _dashboard_separacao_cache_version():
+    return int(cache.get(DASHBOARD_SEPARACAO_CACHE_VERSION_KEY, 1) or 1)
+
+
+def invalidate_dashboard_separacao_cache(*, motivo=''):
+    cache.set(DASHBOARD_SEPARACAO_CACHE_VERSION_KEY, _dashboard_separacao_cache_version() + 1, None)
+    if motivo:
+        logger.info('dashboard_separacao cache invalidado motivo=%s', motivo)
+
+
 def _tarefas_base_dashboard_separacao(usuario):
-    tarefas = list(
+    qs = (
         Tarefa.objects.select_related('nf', 'nf__cliente', 'rota')
         .defer('nf__bairro')
-        .prefetch_related('itens')
         .filter(ativo=True)
         .filter(status__in=STATUS_TAREFA_DASHBOARD_SEPARACAO)
         .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
         .order_by('-updated_at', '-id')
     )
     if usuario is None or getattr(usuario, 'is_superuser', False):
-        return tarefas
+        return list(qs)
     setores_usuario = _setores_usuario_dashboard(usuario)
     if not setores_usuario:
         return []
-    return [
-        tarefa
-        for tarefa in tarefas
-        if _normalizar_setor_dashboard(tarefa.setor) in setores_usuario
-    ]
+    return list(qs.filter(setor__in=setores_usuario))
 
 
 def _status_separacao_item(item):
@@ -349,17 +358,34 @@ def calcular_indicadores_volume_separacao(itens_filtrados):
 
 def collect_itens_filtrados_dashboard_separacao(usuario, date_from, date_to, busca):
     """Mesma base de dados e filtros da tabela do dashboard de separação."""
+    from django.conf import settings
+
+    cache_ttl = int(getattr(settings, 'DASHBOARD_CACHE_TTL', 15))
+    cache_key = ':'.join(
+        [
+            'dashboard',
+            'separacao',
+            'itens',
+            str(_dashboard_separacao_cache_version()),
+            str(getattr(usuario, 'id', 'anon')),
+            date_from.isoformat() if date_from else '',
+            date_to.isoformat() if date_to else '',
+            (busca or '').strip().lower(),
+        ]
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     tarefa_ids_visiveis = [tarefa.id for tarefa in _tarefas_base_dashboard_separacao(usuario)]
-    total_geral = len(tarefa_ids_visiveis)
-    print('TOTAL GERAL:', total_geral)
     logger.info(
         'dashboard_separacao total_geral_tarefas=%s user=%s filtros=%s',
-        total_geral,
+        len(tarefa_ids_visiveis),
         getattr(usuario, 'username', None),
         {'data_inicial': date_from.isoformat() if date_from else '', 'data_final': date_to.isoformat() if date_to else '', 'busca': busca},
     )
     if not tarefa_ids_visiveis:
-        print('APÓS FILTRO:', 0)
+        cache.set(cache_key, [], cache_ttl)
         return []
     itens = list(
         TarefaItem.objects.select_related('tarefa', 'tarefa__nf', 'tarefa__nf__cliente', 'tarefa__rota', 'produto', 'nf', 'nf__cliente')
@@ -371,8 +397,8 @@ def collect_itens_filtrados_dashboard_separacao(usuario, date_from, date_to, bus
         .order_by('-tarefa__updated_at', 'tarefa_id', 'produto__cod_prod')
     )
     itens_filtrados = _filtrar_itens_separacao(itens, date_from, date_to, busca)
-    print('APÓS FILTRO:', len(itens_filtrados))
     logger.info('dashboard_separacao itens_apos_filtro=%s', len(itens_filtrados))
+    cache.set(cache_key, itens_filtrados, cache_ttl)
     return itens_filtrados
 
 

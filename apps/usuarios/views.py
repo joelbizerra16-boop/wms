@@ -107,6 +107,8 @@ def usuarios_logados(request):
     sessoes = sorted(sessoes, key=lambda s: (not s.online, s.usuario.username.lower()))
     context = {'sessoes': sessoes, 'usuario': request.user}
     context.update(build_access_context(request.user))
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' and request.GET.get('partial') == 'table':
+        return render(request, 'partials/usuarios_logados_tbody.html', context)
     return render(request, 'usuarios/logados.html', context)
 
 

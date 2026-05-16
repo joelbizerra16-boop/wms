@@ -28,6 +28,7 @@ from apps.nf.services.status_service import sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
 from apps.rotas.services.roteirizacao_service import definir_rota
 from apps.tarefas.models import Tarefa, TarefaItem
+from apps.usuarios.models import Setor
 
 
 logger = logging.getLogger(__name__)
@@ -643,17 +644,17 @@ def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
 
     for item_nf in nf.itens.select_related('produto').all():
         produto = item_nf.produto
-        categoria = _normalizar_categoria_produto(produto)
-        if categoria == Produto.Categoria.FILTROS:
+        setor = _resolver_setor_operacional_produto(produto)
+        if setor == Setor.Codigo.FILTROS:
             itens_filtros.append((produto, item_nf.quantidade))
             continue
-        agrupados_por_setor.setdefault(categoria, []).append((produto, item_nf.quantidade))
+        agrupados_por_setor.setdefault(setor, []).append((produto, item_nf.quantidade))
 
     if itens_filtros:
         tarefa_filtro, criada = Tarefa.objects.get_or_create(
             nf=nf,
             tipo=Tarefa.Tipo.FILTRO,
-            setor=Produto.Categoria.FILTROS,
+            setor=Setor.Codigo.FILTROS,
             rota=rota,
             defaults={'status': Tarefa.Status.ABERTO},
         )
@@ -708,6 +709,24 @@ def _normalizar_categoria_produto(produto, persistir=True):
         produto.categoria = categoria_normalizada
         produto.save(update_fields=['categoria', 'updated_at'])
     return categoria_normalizada
+
+
+def _resolver_setor_operacional_produto(produto):
+    setor = _normalizar_setor_operacional(getattr(produto, 'setor', None))
+    if setor:
+        return setor
+    return _normalizar_setor_operacional(_normalizar_categoria_produto(produto)) or Setor.Codigo.NAO_ENCONTRADO
+
+
+def _normalizar_setor_operacional(valor):
+    setor = (valor or '').strip().upper()
+    if setor == 'FILTRO':
+        return Setor.Codigo.FILTROS
+    if setor == 'NAO ENCONTRADO':
+        return Setor.Codigo.NAO_ENCONTRADO
+    if setor in {choice for choice, _label in Setor.Codigo.choices}:
+        return setor
+    return None
 
 
 def _obter_usuario_log(usuario):

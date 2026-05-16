@@ -200,6 +200,93 @@ class ConferenciaAPITests(TestCase):
         self.assertEqual([item.produto.cod_prod for item in itens_agregado], ['PRD001'])
         self.assertEqual(response_agregado.data['progresso']['esperado'], 2.0)
 
+    def test_conferencia_respeita_setor_do_produto_quando_categoria_diverge(self):
+        self.produto_1.setor = Setor.Codigo.AGREGADO
+        self.produto_1.categoria = Produto.Categoria.FILTROS
+        self.produto_1.save(update_fields=['setor', 'categoria', 'updated_at'])
+        self.produto_2.setor = Setor.Codigo.FILTROS
+        self.produto_2.categoria = Produto.Categoria.AGREGADO
+        self.produto_2.save(update_fields=['setor', 'categoria', 'updated_at'])
+
+        response_filtros = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
+
+        self.assertEqual(response_filtros.status_code, 200)
+        conferencia_filtros = Conferencia.objects.get(id=response_filtros.data['id'])
+        itens_filtros = list(conferencia_filtros.itens.select_related('produto').order_by('produto__cod_prod'))
+        self.assertEqual([item.produto.cod_prod for item in itens_filtros], ['PRD002'])
+
+        self.client.force_authenticate(self.outro_usuario)
+        response_agregado = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
+
+        self.assertEqual(response_agregado.status_code, 200)
+        conferencia_agregado = Conferencia.objects.get(id=response_agregado.data['id'])
+        itens_agregado = list(conferencia_agregado.itens.select_related('produto').order_by('produto__cod_prod'))
+        self.assertEqual([item.produto.cod_prod for item in itens_agregado], ['PRD001'])
+
+    def test_fila_conferencia_atualiza_imediatamente_apos_finalizar_filtros(self):
+        cliente = Cliente.objects.create(nome='Cliente Cache', inscricao_estadual='99887766')
+        rota = Rota.objects.create(nome='Rota Cache', cep_inicial='02000000', cep_final='02999999')
+        produto = Produto.objects.create(
+            cod_prod='FLT999',
+            descricao='Filtro Cache',
+            cod_ean='7899999',
+            categoria=Produto.Categoria.FILTROS,
+        )
+        nf = NotaFiscal.objects.create(
+            chave_nfe='35111111111111111111550010000000011000000999',
+            numero='9999',
+            cliente=cliente,
+            rota=rota,
+            status=NotaFiscal.Status.NORMAL,
+            data_emissao='2026-04-24T10:00:00-03:00',
+            status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+            bloqueada=False,
+            ativa=True,
+        )
+        NotaFiscalItem.objects.create(nf=nf, produto=produto, quantidade='1.00')
+        separador = Usuario.objects.create_user(
+            username='separador_cache',
+            nome='Separador Cache',
+            perfil=Usuario.Perfil.SEPARADOR,
+            setores=[Setor.Codigo.FILTROS],
+            password='123456',
+            is_active=True,
+        )
+        tarefa = Tarefa.objects.create(
+            nf=nf,
+            tipo=Tarefa.Tipo.FILTRO,
+            setor=Setor.Codigo.FILTROS,
+            rota=rota,
+            status=Tarefa.Status.ABERTO,
+        )
+        TarefaItem.objects.create(
+            tarefa=tarefa,
+            nf=nf,
+            produto=produto,
+            quantidade_total='1.00',
+            quantidade_separada='0.00',
+        )
+
+        resposta_vazia = self.client.get('/api/conferencia/nfs/')
+        self.assertEqual(resposta_vazia.status_code, 200)
+        self.assertFalse(any(item['id'] == nf.id for item in resposta_vazia.data))
+
+        self.client.force_authenticate(separador)
+        self.client.post('/api/separacao/iniciar/', {'tarefa_id': tarefa.id}, format='json')
+        self.client.post('/api/separacao/bipar/', {'tarefa_id': tarefa.id, 'codigo': produto.cod_prod}, format='json')
+        response_finalizar = self.client.post(
+            '/api/separacao/finalizar/',
+            {'tarefa_id': tarefa.id, 'status': Tarefa.Status.CONCLUIDO},
+            format='json',
+        )
+        self.assertEqual(response_finalizar.status_code, 200)
+
+        self.client.force_authenticate(self.usuario)
+        resposta_atualizada = self.client.get('/api/conferencia/nfs/')
+
+        self.assertEqual(resposta_atualizada.status_code, 200)
+        self.assertTrue(any(item['id'] == nf.id for item in resposta_atualizada.data))
+
     def test_conferente_sem_setor_nao_visualiza_nf_e_nao_inicia(self):
         self.client.force_authenticate(self.usuario_sem_setor)
         response_lista = self.client.get('/api/conferencia/nfs/')

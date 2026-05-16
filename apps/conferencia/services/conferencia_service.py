@@ -1,5 +1,8 @@
 from decimal import Decimal
+import logging
+import time
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import F, Prefetch, Q
@@ -19,6 +22,8 @@ from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa, TarefaItem
 from apps.usuarios.models import Setor
 from apps.usuarios.session_utils import usuario_esta_logado
+
+logger = logging.getLogger(__name__)
 
 
 class ConferenciaError(Exception):
@@ -50,6 +55,7 @@ STATUS_CONFERENCIA_FINALIZADA = {
 
 STATUS_CONFERENCIA_RESERVA_ITENS = STATUS_CONFERENCIA_EM_FLUXO | STATUS_CONFERENCIA_FINALIZADA
 CONFERENCIA_LIST_CACHE_TTL = 30
+CACHE_VERSION_KEY_NFS_DISPONIVEIS = 'conferencia:nfs:version'
 
 
 def _normalizar_setor_operacional(valor):
@@ -59,6 +65,13 @@ def _normalizar_setor_operacional(valor):
     if setor == 'NAO ENCONTRADO':
         return Setor.Codigo.NAO_ENCONTRADO
     return setor
+
+
+def _setor_operacional_produto(produto):
+    setor = _normalizar_setor_operacional(getattr(produto, 'setor', None))
+    if setor:
+        return setor
+    return _normalizar_setor_operacional(getattr(produto, 'categoria', None)) or Setor.Codigo.NAO_ENCONTRADO
 
 
 def _usuario_pode_ver_todos_setores(usuario):
@@ -92,8 +105,32 @@ def _nf_pertence_a_setores_usuario(nf, usuario):
 
 def _cache_key_nfs_disponiveis(usuario):
 	if usuario is None:
-		return 'conferencia:nfs:anon'
-	return f'conferencia:nfs:{usuario.id}'
+		return f'conferencia:nfs:v{_cache_version_nfs_disponiveis()}:anon'
+	return f'conferencia:nfs:v{_cache_version_nfs_disponiveis()}:{usuario.id}'
+
+
+def _cache_version_nfs_disponiveis():
+    return int(cache.get(CACHE_VERSION_KEY_NFS_DISPONIVEIS, 1) or 1)
+
+
+def invalidate_nfs_disponiveis_cache(*, motivo='', nf_id=None, setor=None):
+    nova_versao = _cache_version_nfs_disponiveis() + 1
+    cache.set(CACHE_VERSION_KEY_NFS_DISPONIVEIS, nova_versao, None)
+    if motivo or nf_id or setor:
+        logger.info(
+            'INVALIDANDO_FILA_CONFERENCIA motivo=%s nf_id=%s setor=%s versao=%s',
+            motivo or '',
+            nf_id,
+            setor or '',
+            nova_versao,
+        )
+
+
+def _invalidate_conferencia_operacional_cache(*, motivo='', nf_id=None, setor=None):
+    invalidate_nfs_disponiveis_cache(motivo=motivo, nf_id=nf_id, setor=setor)
+    from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
+
+    invalidate_monitoramento_conferencia_cache(motivo=motivo, nf_id=nf_id, setor=setor)
 
 
 def _validar_setor_nf(nf, usuario):
@@ -132,7 +169,7 @@ def _conferencias_nf_relacionadas(nf):
 
 
 def _setor_item_nf(item_nf):
-    return _normalizar_setor_operacional(getattr(item_nf.produto, 'categoria', None))
+    return _setor_operacional_produto(getattr(item_nf, 'produto', None))
 
 
 def _itens_nf_por_usuario(nf, usuario):
@@ -469,6 +506,14 @@ def iniciar_conferencia(nf_id, usuario):
     itens_usuario = _itens_nf_por_usuario(nf, usuario)
     if not itens_usuario:
         raise ConferenciaError(TAREFA_SETOR_ERRO)
+    setores_itens_usuario = {_setor_item_nf(item_nf) for item_nf in itens_usuario if _setor_item_nf(item_nf)}
+    if setores_itens_usuario == {Setor.Codigo.FILTROS}:
+        logger.info(
+            'CRIANDO CONFERENCIA FILTROS nf_id=%s user_id=%s itens=%s',
+            nf.id,
+            getattr(usuario, 'id', None),
+            len(itens_usuario),
+        )
 
     conferencias_relacionadas = _conferencias_relacionadas_ao_usuario(
         nf,
@@ -506,114 +551,142 @@ def iniciar_conferencia(nf_id, usuario):
             tarefa=nf.tarefas.first(),
             timestamp=timezone.now(),
         )
+    _invalidate_conferencia_operacional_cache(
+        motivo='inicio_conferencia',
+        nf_id=nf.id,
+        setor=','.join(sorted(setores_itens_usuario)),
+    )
     return _dados_conferencia(conferencia)
 
 
 def bipar_conferencia(conferencia_id, codigo, usuario):
-    conferencia = _obter_conferencia_em_andamento(conferencia_id, usuario)
+    inicio = time.perf_counter()
+    try:
+        conferencia = _obter_conferencia_em_andamento(conferencia_id, usuario)
 
-    with transaction.atomic():
-        conferencia = (
-            Conferencia.objects.select_for_update()
-            .select_related('nf', 'conferente')
-            .get(id=conferencia.id)
-        )
-        itens_pendentes = list(
-            ConferenciaItem.objects.select_for_update()
-            .filter(
-                conferencia=conferencia,
-                status=ConferenciaItem.Status.AGUARDANDO,
-                qtd_conferida__lt=F('qtd_esperada'),
+        with transaction.atomic():
+            conferencia = (
+                Conferencia.objects.select_for_update()
+                .select_related('nf', 'conferente')
+                .get(id=conferencia.id)
             )
-            .select_related('produto')
-            .order_by('id')
-        )
-        if not itens_pendentes:
-            raise ConferenciaError('Não existem itens pendentes para bipagem.')
-        item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
-        try:
-            validacao = validar_produto(
-                codigo_lido=codigo,
-                item_id=item_esperado.id,
+            itens_pendentes = list(
+                ConferenciaItem.objects.select_for_update()
+                .filter(
+                    conferencia=conferencia,
+                    status=ConferenciaItem.Status.AGUARDANDO,
+                    qtd_conferida__lt=F('qtd_esperada'),
+                )
+                .select_related('produto')
+                .order_by('id')
+            )
+            if not itens_pendentes:
+                raise ConferenciaError('Não existem itens pendentes para bipagem.')
+            item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
+            try:
+                validacao = validar_produto(
+                    codigo_lido=codigo,
+                    item_id=item_esperado.id,
+                    usuario=usuario,
+                    item_model=ConferenciaItem,
+                    tipo_validacao='CONFERENCIA',
+                )
+            except ProdutoValidacaoError as exc:
+                raise ConferenciaError(str(exc)) from exc
+
+            item = validacao.item
+            if item.status == ConferenciaItem.Status.DIVERGENCIA:
+                raise ConferenciaError('Item em divergencia nao pode ser bipado sem tratativa.')
+            if item.qtd_conferida >= item.qtd_esperada:
+                raise ConferenciaError('Quantidade conferida excede o esperado.')
+
+            item.qtd_conferida += Decimal('1')
+            item.bipado_por = usuario
+            item.data_bipagem = timezone.now()
+            if item.qtd_conferida == item.qtd_esperada:
+                item.status = ConferenciaItem.Status.OK
+                item.motivo_divergencia = None
+                item.observacao_divergencia = ''
+            item.save(
+                update_fields=[
+                    'qtd_conferida',
+                    'status',
+                    'motivo_divergencia',
+                    'observacao_divergencia',
+                    'bipado_por',
+                    'data_bipagem',
+                    'updated_at',
+                ]
+            )
+
+            atualizar_status_nf(conferencia.nf)
+
+            Log.objects.create(
                 usuario=usuario,
-                item_model=ConferenciaItem,
-                tipo_validacao='CONFERENCIA',
+                acao='BIPAGEM CONFERENCIA',
+                detalhe=f'NF {conferencia.nf.numero} - produto {item.produto.cod_prod} bipado.',
             )
-        except ProdutoValidacaoError as exc:
-            raise ConferenciaError(str(exc)) from exc
-
-        item = validacao.item
-        if item.status == ConferenciaItem.Status.DIVERGENCIA:
-            raise ConferenciaError('Item em divergencia nao pode ser bipado sem tratativa.')
-        if item.qtd_conferida >= item.qtd_esperada:
-            raise ConferenciaError('Quantidade conferida excede o esperado.')
-
-        item.qtd_conferida += Decimal('1')
-        item.bipado_por = usuario
-        item.data_bipagem = timezone.now()
-        if item.qtd_conferida == item.qtd_esperada:
-            item.status = ConferenciaItem.Status.OK
-            item.motivo_divergencia = None
-            item.observacao_divergencia = ''
-        item.save(
-            update_fields=[
-                'qtd_conferida',
-                'status',
-                'motivo_divergencia',
-                'observacao_divergencia',
-                'bipado_por',
-                'data_bipagem',
-                'updated_at',
-            ]
+            UserActivityLog.objects.create(
+                usuario=usuario,
+                tipo=UserActivityLog.Tipo.BIPAGEM,
+                tarefa=conferencia.nf.tarefas.first(),
+                timestamp=timezone.now(),
+            )
+        _invalidate_conferencia_operacional_cache(
+            motivo='bipagem_conferencia',
+            nf_id=conferencia.nf_id,
+            setor=','.join(sorted({_setor_operacional_produto(item.produto) for item in conferencia.itens.all()})),
         )
 
-        atualizar_status_nf(conferencia.nf)
+        itens_restantes = []
+        for item_pendente in itens_pendentes:
+            if item_pendente.id == item.id:
+                if item.qtd_conferida < item.qtd_esperada and item.status == ConferenciaItem.Status.AGUARDANDO:
+                    itens_restantes.append(item)
+                continue
+            itens_restantes.append(item_pendente)
+        proximo_item = itens_restantes[0] if itens_restantes else None
+        todos_itens_completos = not itens_restantes
+        finalizado = todos_itens_completos
 
-        Log.objects.create(
-            usuario=usuario,
-            acao='BIPAGEM CONFERENCIA',
-            detalhe=f'NF {conferencia.nf.numero} - produto {item.produto.cod_prod} bipado.',
+        conferencia_resultado = None
+        if finalizado:
+            conferencia_resultado = finalizar_conferencia(conferencia.id, usuario)
+            conferencia.refresh_from_db(fields=['status', 'updated_at'])
+        else:
+            conferencia_resultado = _dados_conferencia(conferencia)
+
+        item_atual = _dados_item(item)
+        return {
+            'status': 'ok',
+            'item_atual': item_atual,
+            'item_id': item_atual['item_id'],
+            'produto': item_atual['produto'],
+            'ean': item_atual['ean'],
+            'esperado': item_atual['esperado'],
+            'conferido': item_atual['conferido'],
+            'percentual': item_atual['percentual'],
+            'progresso': item_atual['progresso'],
+            'proximo_item': _dados_item_operacional(proximo_item) if proximo_item else None,
+            'finalizado': finalizado,
+            'conferencia': conferencia_resultado,
+        }
+    finally:
+        elapsed_ms = (time.perf_counter() - inicio) * 1000
+        slow_threshold = float(getattr(settings, 'BIPAGEM_SLOW_LOG_MS', 150))
+        logger.info(
+            'CONFERENCIA_BIPAGEM_MS conferencia_id=%s user_id=%s tempo_ms=%.2f',
+            conferencia_id,
+            getattr(usuario, 'id', None),
+            elapsed_ms,
         )
-        UserActivityLog.objects.create(
-            usuario=usuario,
-            tipo=UserActivityLog.Tipo.BIPAGEM,
-            tarefa=conferencia.nf.tarefas.first(),
-            timestamp=timezone.now(),
-        )
-
-    itens_restantes = []
-    for item_pendente in itens_pendentes:
-        if item_pendente.id == item.id:
-            if item.qtd_conferida < item.qtd_esperada and item.status == ConferenciaItem.Status.AGUARDANDO:
-                itens_restantes.append(item)
-            continue
-        itens_restantes.append(item_pendente)
-    proximo_item = itens_restantes[0] if itens_restantes else None
-    todos_itens_completos = not itens_restantes
-    finalizado = todos_itens_completos
-
-    conferencia_resultado = None
-    if finalizado:
-        conferencia_resultado = finalizar_conferencia(conferencia.id, usuario)
-        conferencia.refresh_from_db(fields=['status', 'updated_at'])
-    else:
-        conferencia_resultado = _dados_conferencia(conferencia)
-
-    item_atual = _dados_item(item)
-    return {
-        'status': 'ok',
-        'item_atual': item_atual,
-        'item_id': item_atual['item_id'],
-        'produto': item_atual['produto'],
-        'ean': item_atual['ean'],
-        'esperado': item_atual['esperado'],
-        'conferido': item_atual['conferido'],
-        'percentual': item_atual['percentual'],
-        'progresso': item_atual['progresso'],
-        'proximo_item': _dados_item_operacional(proximo_item) if proximo_item else None,
-        'finalizado': finalizado,
-        'conferencia': conferencia_resultado,
-    }
+        if elapsed_ms >= slow_threshold:
+            logger.warning(
+                'CONFERENCIA_BIPAGEM_LENTA conferencia_id=%s user_id=%s tempo_ms=%.2f',
+                conferencia_id,
+                getattr(usuario, 'id', None),
+                elapsed_ms,
+            )
 
 
 @transaction.atomic
@@ -639,6 +712,11 @@ def registrar_divergencia(item_id, motivo, observacao, usuario):
         usuario=usuario,
         acao='DIVERGENCIA CONFERENCIA',
         detalhe=f'NF {conferencia.nf.numero} - produto {item.produto.cod_prod} com motivo {motivo}.',
+    )
+    _invalidate_conferencia_operacional_cache(
+        motivo='divergencia_conferencia',
+        nf_id=conferencia.nf_id,
+        setor=_setor_operacional_produto(item.produto),
     )
     return _dados_item(item)
 
@@ -679,6 +757,11 @@ def finalizar_conferencia(conferencia_id, usuario):
             tarefa=conferencia.nf.tarefas.first(),
             timestamp=timezone.now(),
         )
+    _invalidate_conferencia_operacional_cache(
+        motivo='finalizacao_conferencia',
+        nf_id=conferencia.nf_id,
+        setor=','.join(sorted({_setor_operacional_produto(item.produto) for item in itens})),
+    )
     return _dados_conferencia(conferencia)
 
 
@@ -710,7 +793,7 @@ def _gerar_retorno_para_separacao(conferencia):
         quantidade_retorno = item.qtd_esperada - item.qtd_conferida
         if quantidade_retorno <= 0:
             quantidade_retorno = item.qtd_esperada or Decimal('1')
-        if item.produto.categoria == Produto.Categoria.FILTROS:
+        if _setor_operacional_produto(item.produto) == Setor.Codigo.FILTROS:
             filtros.append((item.produto, quantidade_retorno))
         else:
             normais.append((item.produto, quantidade_retorno))
@@ -719,7 +802,7 @@ def _gerar_retorno_para_separacao(conferencia):
         tarefa_filtro = Tarefa.objects.create(
             nf=conferencia.nf,
             tipo=Tarefa.Tipo.FILTRO,
-            setor=Produto.Categoria.FILTROS,
+            setor=Setor.Codigo.FILTROS,
             rota=conferencia.nf.rota,
             status=Tarefa.Status.ABERTO,
         )
@@ -729,7 +812,7 @@ def _gerar_retorno_para_separacao(conferencia):
     if normais:
         agrupados_por_setor = {}
         for produto, quantidade in normais:
-            agrupados_por_setor.setdefault(produto.categoria, []).append((produto, quantidade))
+            agrupados_por_setor.setdefault(_setor_operacional_produto(produto), []).append((produto, quantidade))
 
         for setor, itens in agrupados_por_setor.items():
             tarefa = Tarefa.objects.filter(
@@ -758,10 +841,10 @@ def _gerar_retorno_para_separacao(conferencia):
 
 def _tarefas_relacionadas_nf(nf):
     setores_nf = {
-        item.produto.categoria
+        _setor_operacional_produto(item.produto)
         for item in _itens_nf_relacionados(nf)
         if item.produto_id is not None
-        if item.produto.categoria != Produto.Categoria.FILTROS
+        if _setor_operacional_produto(item.produto) != Setor.Codigo.FILTROS
     }
     tarefas = [tarefa for tarefa in _tarefas_nf_relacionadas(nf) if tarefa.tipo == Tarefa.Tipo.FILTRO]
     if not setores_nf:
@@ -788,7 +871,7 @@ def _dados_conferencia(conferencia):
         'nf_numero': conferencia.nf.numero,
         'conferente': conferencia.conferente.nome,
         'status': conferencia.status,
-        'setores': sorted({_normalizar_setor_operacional(item.produto.categoria) for item in conferencia.itens.all()}),
+        'setores': sorted({_setor_operacional_produto(item.produto) for item in conferencia.itens.all()}),
         'progresso': _progresso_conferencia(conferencia),
     }
 

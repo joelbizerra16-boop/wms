@@ -89,8 +89,22 @@
             alert(data.error || data.erro || 'Falha ao excluir.');
             return;
         }
-        alert(data.message || 'Registro excluído com sucesso.');
-        window.location.reload();
+        const mensagem = data.message || 'Registro excluído com sucesso.';
+        if (typeof window.wmsManualRefresh === 'function') {
+            await window.wmsManualRefresh();
+        } else {
+            const trigger = document.querySelector(`[data-exclusao-url="${endpoint}"]`);
+            const row = trigger && trigger.closest('tr');
+            if (row) {
+                row.remove();
+            }
+        }
+        closeModal();
+        if (typeof window.showToast === 'function') {
+            window.showToast(mensagem, 'ok');
+        } else {
+            alert(mensagem);
+        }
     }
 
     document.querySelectorAll('.js-open-exclusao-modal').forEach((trigger) => {

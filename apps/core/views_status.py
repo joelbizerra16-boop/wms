@@ -129,7 +129,25 @@ def _quantidade_separada_nf_item(nf, item_nf):
 
 
 def _dashboard_resumo_payload(request):
+    from django.conf import settings
+    from django.core.cache import cache
+
     date_from, date_to, busca = _resolver_periodo_e_busca(request)
+    cache_ttl = int(getattr(settings, 'DASHBOARD_CACHE_TTL', 15))
+    cache_key = ':'.join(
+        [
+            'dashboard',
+            'resumo',
+            str(getattr(request.user, 'id', 'anon')),
+            date_from.isoformat() if date_from else '',
+            date_to.isoformat() if date_to else '',
+            (busca or '').strip().lower(),
+        ]
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     itens_filtrados = collect_itens_filtrados_dashboard_separacao(request.user, date_from, date_to, busca)
     indicadores_sep = calcular_indicadores_volume_separacao(itens_filtrados)
     total = indicadores_sep['total']
@@ -161,7 +179,7 @@ def _dashboard_resumo_payload(request):
     total_nfs = len(nfs_filtradas)
     pendentes = max(total_nfs - conferidas, 0)
 
-    return {
+    payload = {
         'total': float(total),
         'separado': float(separado),
         'percentual': float(indicadores_sep['percentual']),
@@ -174,6 +192,8 @@ def _dashboard_resumo_payload(request):
         'pendentes': pendentes,
         'em_conferencia': em_conferencia,
     }
+    cache.set(cache_key, payload, cache_ttl)
+    return payload
 
 
 class StatusNFAPIView(APIView):

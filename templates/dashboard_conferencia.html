@@ -11,7 +11,7 @@
         <p>Conferência das NFs com visão conjunta de progresso da separação e validação final.</p>
     </div>
     <div class="actions-row">
-        <button type="button" class="btn btn-light" onclick="window.location.reload()">Atualizar</button>
+        <button type="button" class="btn btn-light" onclick="refreshDashboardConferencia(this)">Atualizar</button>
     </div>
 </div>
 
@@ -145,4 +145,79 @@
 {% if acesso.can_manage %}
 {% include 'partials/exclusao_modal.html' %}
 {% endif %}
+<script>
+(function () {
+    let atualizacaoEmAndamento = false;
+
+    function buildParams() {
+        return new URLSearchParams(window.location.search);
+    }
+
+    function updateMetric(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value;
+        }
+    }
+
+    async function refreshDashboardConferencia(btn) {
+        if (atualizacaoEmAndamento) {
+            return;
+        }
+        atualizacaoEmAndamento = true;
+        if (btn) {
+            btn.disabled = true;
+        }
+        try {
+            const paramsResumo = buildParams();
+            const paramsTabela = buildParams();
+            paramsTabela.set('partial', 'table');
+
+            const [responseResumo, responseTabela] = await Promise.all([
+                fetch(`/api/dashboard/resumo/?${paramsResumo.toString()}`, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                }),
+                fetch(`${window.location.pathname}?${paramsTabela.toString()}`, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                }),
+            ]);
+
+            if (responseResumo.ok) {
+                const resumo = await responseResumo.json();
+                updateMetric('conf-total-nfs', resumo.total_nfs);
+                updateMetric('conf-conferidas', resumo.conferidas);
+                updateMetric('conf-percentual', resumo.total_nfs ? Math.round((resumo.conferidas / resumo.total_nfs) * 10000) / 100 : 0);
+                updateMetric('conf-divergencias', resumo.divergencias);
+                updateMetric('conf-pendentes', resumo.pendentes);
+                updateMetric('sep-total', resumo.total);
+                updateMetric('sep-separado', resumo.separado);
+                updateMetric('sep-execucao', resumo.em_execucao);
+                updateMetric('sep-aguardando', resumo.aguardando);
+            }
+
+            if (responseTabela.ok) {
+                const html = await responseTabela.text();
+                const target = document.getElementById('dashboard-conferencia-tabela');
+                if (target) {
+                    target.innerHTML = html;
+                }
+            }
+        } finally {
+            atualizacaoEmAndamento = false;
+            if (btn) {
+                btn.disabled = false;
+            }
+        }
+    }
+
+    window.refreshDashboardConferencia = refreshDashboardConferencia;
+    window.wmsManualRefresh = refreshDashboardConferencia;
+
+    setInterval(function () {
+        if (!document.hidden) {
+            refreshDashboardConferencia().catch(function () {});
+        }
+    }, 20000);
+})();
+</script>
 {% endblock %}

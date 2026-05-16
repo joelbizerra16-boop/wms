@@ -213,7 +213,7 @@
     if (window.lucide && typeof window.lucide.createIcons === 'function') {
         window.lucide.createIcons();
     }
-    function refreshPage(btn) {
+    async function refreshPage(btn) {
         if (btn) {
             btn.classList.add('is-loading');
             btn.disabled = true;
@@ -222,7 +222,22 @@
                 window.lucide.createIcons();
             }
         }
-        setTimeout(function () { window.location.reload(); }, 500);
+        try {
+            if (typeof window.wmsManualRefresh === 'function') {
+                await window.wmsManualRefresh();
+                return;
+            }
+            window.location.reload();
+        } finally {
+            if (btn) {
+                btn.classList.remove('is-loading');
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="refresh-cw"></i>';
+                if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                    window.lucide.createIcons();
+                }
+            }
+        }
     }
     </script>
 </body>

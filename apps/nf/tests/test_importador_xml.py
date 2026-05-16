@@ -108,6 +108,71 @@ class ImportadorXMLAPITests(TestCase):
         )
         self.assertEqual(TarefaItem.objects.filter(nf__numero='123').count(), 2)
 
+    def test_importacao_usa_setor_do_produto_quando_categoria_diverge(self):
+        Produto.objects.create(
+            cod_prod='PRD101',
+            descricao='Produto Setor Lub',
+            cod_ean='789101',
+            setor=Setor.Codigo.LUBRIFICANTE,
+            categoria=Produto.Categoria.FILTROS,
+            ativo=True,
+            cadastrado_manual=True,
+            incompleto=False,
+        )
+        Produto.objects.create(
+            cod_prod='PRD202',
+            descricao='Produto Setor Agregado',
+            cod_ean='789202',
+            setor=Setor.Codigo.AGREGADO,
+            categoria=Produto.Categoria.FILTROS,
+            ativo=True,
+            cadastrado_manual=True,
+            incompleto=False,
+        )
+        Produto.objects.create(
+            cod_prod='PRD303',
+            descricao='Produto Setor Filtro',
+            cod_ean='789303',
+            setor=Setor.Codigo.FILTROS,
+            categoria=Produto.Categoria.LUBRIFICANTE,
+            ativo=True,
+            cadastrado_manual=True,
+            incompleto=False,
+        )
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000101" versao="4.00">
+      <ide>
+        <nNF>101</nNF>
+        <dhEmi>2026-04-23T10:00:00-03:00</dhEmi>
+      </ide>
+      <dest>
+        <xNome>Cliente Teste Divergente</xNome>
+        <IE>123456789</IE>
+        <enderDest>
+          <xBairro>Centro</xBairro>
+          <CEP>01001000</CEP>
+        </enderDest>
+      </dest>
+      <det nItem="1"><prod><cProd>PRD101</cProd><cEAN>789101</cEAN><xProd>Produto Setor Lub</xProd><qCom>1.00</qCom></prod></det>
+      <det nItem="2"><prod><cProd>PRD202</cProd><cEAN>789202</cEAN><xProd>Produto Setor Agregado</xProd><qCom>1.00</qCom></prod></det>
+      <det nItem="3"><prod><cProd>PRD303</cProd><cEAN>789303</cEAN><xProd>Produto Setor Filtro</xProd><qCom>1.00</qCom></prod></det>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat></infProt></protNFe>
+</nfeProc>
+"""
+
+        response = self._upload(xml, filename='setor_divergente.xml')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['sucesso'])
+        self.assertSetEqual(
+            set(Tarefa.objects.filter(ativo=True).values_list('setor', flat=True)),
+            {Setor.Codigo.LUBRIFICANTE, Setor.Codigo.AGREGADO, Setor.Codigo.FILTROS},
+        )
+
     def test_reimportacao_cancelada_atualiza_nf_e_cancela_fluxos(self):
         self._cadastrar_produtos(('PRD001', 'Produto A', '789123', Produto.Categoria.LUBRIFICANTE))
         xml_autorizada = """<?xml version="1.0" encoding="UTF-8"?>

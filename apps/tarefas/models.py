@@ -62,6 +62,7 @@ class Tarefa(BaseModel):
 			models.Index(fields=['rota', 'status'], name='tarefa_rota_status_idx'),
 			models.Index(fields=['usuario', 'status'], name='tarefa_usuario_status_idx'),
 			models.Index(fields=['usuario_em_execucao', 'status'], name='tarefa_execucao_status_idx'),
+			models.Index(fields=['ativo', 'setor', 'status'], name='tarefa_ativo_setor_status_idx'),
 		]
 
 	def __str__(self):
@@ -126,6 +127,7 @@ class TarefaItem(BaseModel):
 			models.Index(fields=['tarefa', 'produto', 'nf'], name='tarefa_item_tarefa_prod_nf_idx'),
 			models.Index(fields=['nf', 'possui_restricao'], name='tarefa_item_nf_restricao_idx'),
 			models.Index(fields=['produto'], name='tarefa_item_produto_idx'),
+			models.Index(fields=['tarefa', 'quantidade_separada'], name='tarefa_item_tarefa_sep_idx'),
 		]
 
 	def __str__(self):

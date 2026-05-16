@@ -5,6 +5,7 @@ from datetime import datetime
 from io import BytesIO
 
 import pandas as pd
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
@@ -71,8 +72,10 @@ from apps.usuarios.access import build_access_context, require_profiles
 from apps.usuarios.models import Setor, Usuario
 from apps.usuarios.forms import UsuarioForm
 
+from apps.core.async_jobs import enqueue_background_job
+from apps.core.scan_store import clear_scan_entrada_ids, get_scan_entrada_ids, set_scan_entrada_ids
+
 logger = logging.getLogger(__name__)
-SCAN_SESSION_KEY = 'scan_entradas_nf_ids'
 MAX_XML_FILES_POR_ENVIO = 700
 MAX_XML_FILES_POR_LOTE = 50
 
@@ -205,7 +208,9 @@ def _pagination_query(request):
     return f'&{query}' if query else ''
 
 
-def _paginar_lista(request, itens, por_pagina=20):
+def _paginar_lista(request, itens, por_pagina=None):
+    if por_pagina is None:
+        por_pagina = int(getattr(settings, 'OPERATIONAL_PAGE_SIZE', 50))
     paginador = Paginator(itens, por_pagina)
     page_obj = paginador.get_page(request.GET.get('page'))
     return {
@@ -225,15 +230,11 @@ def _resultado_erro_importacao(mensagem, chave_nfe='-', arquivo=None):
 
 
 def _scan_ids_session(request):
-    ids = request.session.get(SCAN_SESSION_KEY, [])
-    if not isinstance(ids, list):
-        ids = []
-    return [int(i) for i in ids if str(i).isdigit()]
+    return get_scan_entrada_ids(request.user.id)
 
 
 def _set_scan_ids_session(request, ids):
-    request.session[SCAN_SESSION_KEY] = ids
-    request.session.modified = True
+    set_scan_entrada_ids(request.user.id, ids)
 
 
 def _usuario_pode_gerir_separacao(user):
@@ -563,7 +564,6 @@ def importar_xml_web(request):
         balcao = request.POST.get('balcao') in {'1', 'on', 'true', 'True'}
         tipo_entrada = EntradaNF.Tipo.BALCAO if balcao else EntradaNF.Tipo.NORMAL
         xml_files = request.FILES.getlist('xml_files')
-        print(len(xml_files))
         logger.info('Importacao XML recebeu %s arquivo(s).', len(xml_files))
         resultados = {
             'sucesso': 0,
@@ -929,23 +929,19 @@ def remover_scan_nf_api(request):
     return JsonResponse({'ok': True, 'mensagem': 'NF removida da lista de scan.'})
 
 
-@require_profiles(Usuario.Perfil.GESTOR)
-def confirmar_scan_entradas_web(request):
-    if request.method != 'POST':
-        return redirect('web-ativacao-scan-nf')
+def _processar_confirmacao_scan_lote(user_id, ids):
+    from apps.usuarios.models import Usuario
 
-    ids = _scan_ids_session(request)
-    logger.info('CONFIRMAR_SCAN_START user_id=%s total_ids=%s ids=%s', getattr(request.user, 'id', None), len(ids), ids[:20])
-    if not ids:
-        messages.warning(request, 'Nenhuma NF escaneada para confirmar.')
-        return redirect('web-ativacao-scan-nf')
+    usuario = Usuario.objects.filter(id=user_id).first()
+    if usuario is None:
+        return {'liberadas': 0, 'bloqueadas': 0, 'duplicadas': 0, 'erros': 0}
 
     entradas = list(EntradaNF.objects.filter(id__in=ids))
     entradas_ordenadas = []
     for entrada in entradas:
         data_emissao = None
         try:
-            with open_entrada_xml(entrada, user=request.user) as arquivo_xml:
+            with open_entrada_xml(entrada, user=usuario) as arquivo_xml:
                 documento = analisar_xml_nfe(arquivo_xml)
                 data_emissao = documento.data_emissao
         except Exception:
@@ -972,10 +968,10 @@ def confirmar_scan_entradas_web(request):
                 entrada.tipo,
                 entrada.status,
             )
-            with open_entrada_xml(entrada, user=request.user) as arquivo_xml:
+            with open_entrada_xml(entrada, user=usuario) as arquivo_xml:
                 resultado = importar_xml_nfe(
                     arquivo_xml,
-                    usuario=request.user,
+                    usuario=usuario,
                     balcao=entrada.tipo == EntradaNF.Tipo.BALCAO,
                     tarefas_lote_cache={},
                 )
@@ -1008,19 +1004,58 @@ def confirmar_scan_entradas_web(request):
                 entrada.id,
                 entrada.chave_nf,
                 entrada.tipo,
-                getattr(request.user, 'id', None),
+                user_id,
             )
             erros += 1
 
-    _set_scan_ids_session(request, [])
-    if liberadas:
-        messages.success(request, f'{liberadas} NF(s) liberada(s) para separação.')
-    if bloqueadas:
-        messages.warning(request, f'{bloqueadas} NF(s) bloqueada(s) por cancelamento/denegação.')
-    if duplicadas:
-        messages.info(request, f'{duplicadas} NF(s) já existentes ignorada(s) como duplicadas.')
-    if erros:
-        messages.error(request, f'{erros} NF(s) com falha no processamento.')
+    clear_scan_entrada_ids(user_id)
+    return {
+        'liberadas': liberadas,
+        'bloqueadas': bloqueadas,
+        'duplicadas': duplicadas,
+        'erros': erros,
+    }
+
+
+def _aplicar_mensagens_confirmacao_scan(request, resultado):
+    if resultado.get('liberadas'):
+        messages.success(request, f"{resultado['liberadas']} NF(s) liberada(s) para separação.")
+    if resultado.get('bloqueadas'):
+        messages.warning(request, f"{resultado['bloqueadas']} NF(s) bloqueada(s) por cancelamento/denegação.")
+    if resultado.get('duplicadas'):
+        messages.info(request, f"{resultado['duplicadas']} NF(s) já existentes ignorada(s) como duplicadas.")
+    if resultado.get('erros'):
+        messages.error(request, f"{resultado['erros']} NF(s) com falha no processamento.")
+
+
+@require_profiles(Usuario.Perfil.GESTOR)
+def confirmar_scan_entradas_web(request):
+    if request.method != 'POST':
+        return redirect('web-ativacao-scan-nf')
+
+    ids = _scan_ids_session(request)
+    logger.info('CONFIRMAR_SCAN_START user_id=%s total_ids=%s ids=%s', getattr(request.user, 'id', None), len(ids), ids[:20])
+    if not ids:
+        messages.warning(request, 'Nenhuma NF escaneada para confirmar.')
+        return redirect('web-ativacao-scan-nf')
+
+    min_async = int(getattr(settings, 'SCAN_CONFIRM_ASYNC_MIN_ITEMS', 5))
+    if len(ids) >= min_async:
+        ids_copia = list(ids)
+        clear_scan_entrada_ids(request.user.id)
+
+        def _job():
+            return _processar_confirmacao_scan_lote(request.user.id, ids_copia)
+
+        job_id = enqueue_background_job(_job, label='confirmar_scan', user_id=request.user.id)
+        messages.info(
+            request,
+            f'Processando {len(ids_copia)} NF(s) em segundo plano. Acompanhe a fila de entradas. Ref: {job_id[:8]}.',
+        )
+        return redirect('web-ativacao-scan-nf')
+
+    resultado = _processar_confirmacao_scan_lote(request.user.id, ids)
+    _aplicar_mensagens_confirmacao_scan(request, resultado)
     return redirect('web-ativacao-scan-nf')
 
 

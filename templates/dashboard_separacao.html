@@ -11,7 +11,7 @@
         <p>Visão operacional dos itens separados, em execução e pendentes por tarefa.</p>
     </div>
     <div class="actions-row">
-        <button type="button" class="btn btn-light" onclick="window.location.reload()">Atualizar</button>
+        <button type="button" class="btn btn-light" onclick="refreshDashboardSeparacao(this)">Atualizar</button>
     </div>
 </div>
 
@@ -127,4 +127,74 @@
 {% if acesso.can_manage %}
 {% include 'partials/exclusao_modal.html' %}
 {% endif %}
+<script>
+(function () {
+    let atualizacaoEmAndamento = false;
+
+    function buildParams() {
+        return new URLSearchParams(window.location.search);
+    }
+
+    function updateMetric(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value;
+        }
+    }
+
+    async function refreshDashboardSeparacao(btn) {
+        if (atualizacaoEmAndamento) {
+            return;
+        }
+        atualizacaoEmAndamento = true;
+        if (btn) {
+            btn.disabled = true;
+        }
+        try {
+            const paramsResumo = buildParams();
+            const paramsTabela = buildParams();
+            paramsTabela.set('partial', 'table');
+
+            const [responseResumo, responseTabela] = await Promise.all([
+                fetch(`/api/dashboard/resumo/?${paramsResumo.toString()}`, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                }),
+                fetch(`${window.location.pathname}?${paramsTabela.toString()}`, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                }),
+            ]);
+
+            if (responseResumo.ok) {
+                const resumo = await responseResumo.json();
+                updateMetric('dashboard-total', resumo.total);
+                updateMetric('dashboard-separado', resumo.separado);
+                updateMetric('dashboard-percentual', resumo.percentual);
+                updateMetric('dashboard-pendente', resumo.pendente);
+            }
+
+            if (responseTabela.ok) {
+                const html = await responseTabela.text();
+                const target = document.getElementById('dashboard-separacao-tabela');
+                if (target) {
+                    target.innerHTML = html;
+                }
+            }
+        } finally {
+            atualizacaoEmAndamento = false;
+            if (btn) {
+                btn.disabled = false;
+            }
+        }
+    }
+
+    window.refreshDashboardSeparacao = refreshDashboardSeparacao;
+    window.wmsManualRefresh = refreshDashboardSeparacao;
+
+    setInterval(function () {
+        if (!document.hidden) {
+            refreshDashboardSeparacao().catch(function () {});
+        }
+    }, 20000);
+})();
+</script>
 {% endblock %}

@@ -102,5 +102,25 @@ LOGGING = {
 			'level': 'ERROR',
 			'propagate': False,
 		},
+			'apps.core': {
+				'handlers': ['console'],
+				'level': LOG_LEVEL,
+				'propagate': False,
+			},
+			'apps.tarefas': {
+				'handlers': ['console'],
+				'level': LOG_LEVEL,
+				'propagate': False,
+			},
+			'apps.conferencia': {
+				'handlers': ['console'],
+				'level': LOG_LEVEL,
+				'propagate': False,
+			},
+			'apps.nf': {
+				'handlers': ['console'],
+				'level': LOG_LEVEL,
+				'propagate': False,
+			},
 	},
 }

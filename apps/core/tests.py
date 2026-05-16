@@ -1240,7 +1240,8 @@ class MinutaImportacaoTests(TestCase):
 		self.assertContains(response, 'Atualizar')
 		self.assertNotContains(response, 'dashboardRefreshIntervalMs', html=False)
 		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
-		self.assertNotContains(response, 'fetch(`/api/dashboard/resumo/', html=False)
+		self.assertContains(response, 'refreshDashboardSeparacao', html=False)
+		self.assertContains(response, '/api/dashboard/resumo/', html=False)
 
 	@override_settings(
 		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
@@ -1277,7 +1278,8 @@ class MinutaImportacaoTests(TestCase):
 		self.assertContains(response, 'Atualizar')
 		self.assertNotContains(response, 'dashboardRefreshIntervalMs', html=False)
 		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
-		self.assertNotContains(response, 'fetch(`/api/dashboard/resumo/', html=False)
+		self.assertContains(response, 'refreshDashboardConferencia', html=False)
+		self.assertContains(response, '/api/dashboard/resumo/', html=False)
 
 	def test_conferencia_lista_usa_atualizacao_manual(self):
 		response = self.client.get('/conferencia/')
@@ -1285,7 +1287,8 @@ class MinutaImportacaoTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'Atualizar')
 		self.assertNotContains(response, 'setTimeout(cicloAtualizacao', html=False)
-		self.assertNotContains(response, 'fetch(window.location.href', html=False)
+		self.assertContains(response, 'fetch(window.location.href', html=False)
+		self.assertContains(response, 'window.wmsManualRefresh', html=False)
 
 	def test_separacao_lista_ajax_retorna_somente_tabela(self):
 		response = self.client.get('/separacao/', HTTP_X_REQUESTED_WITH='XMLHttpRequest')

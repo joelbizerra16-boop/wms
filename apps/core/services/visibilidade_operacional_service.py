@@ -15,6 +15,24 @@ from apps.usuarios.models import Setor
 
 logger = logging.getLogger(__name__)
 CONFERENCIA_MONITORAMENTO_CACHE_TTL = 60
+CACHE_VERSION_KEY_MONITORAMENTO_CONFERENCIA = 'dashboard:conferencia:version'
+
+
+def _cache_version_monitoramento_conferencia():
+    return int(cache.get(CACHE_VERSION_KEY_MONITORAMENTO_CONFERENCIA, 1) or 1)
+
+
+def invalidate_monitoramento_conferencia_cache(*, motivo='', nf_id=None, setor=None):
+    nova_versao = _cache_version_monitoramento_conferencia() + 1
+    cache.set(CACHE_VERSION_KEY_MONITORAMENTO_CONFERENCIA, nova_versao, None)
+    if motivo or nf_id or setor:
+        logger.info(
+            'INVALIDANDO_DASHBOARD_CONFERENCIA motivo=%s nf_id=%s setor=%s versao=%s',
+            motivo or '',
+            nf_id,
+            setor or '',
+            nova_versao,
+        )
 
 
 def _nome_cliente_nf(nf):
@@ -62,6 +80,14 @@ def _setores_nf(nf):
     for item in nf.itens.select_related('produto').all():
         if item.produto_id is None:
             setores.add(Setor.Codigo.NAO_ENCONTRADO)
+            continue
+        setor = (item.produto.setor or '').strip().upper()
+        if setor == 'FILTRO':
+            setor = Setor.Codigo.FILTROS
+        elif setor == 'NAO ENCONTRADO':
+            setor = Setor.Codigo.NAO_ENCONTRADO
+        if setor:
+            setores.add(setor)
             continue
         categoria = item.produto.categoria
         if categoria == Produto.Categoria.FILTROS:
@@ -132,6 +158,7 @@ def get_nfs_monitoramento_conferencia(usuario, data_inicio=None, data_fim=None, 
         [
             'dashboard',
             'conferencia',
+            f'v{_cache_version_monitoramento_conferencia()}',
             str(getattr(usuario, 'id', 'anon')),
             data_inicio.isoformat() if data_inicio else '',
             data_fim.isoformat() if data_fim else '',

@@ -7,7 +7,7 @@
 <div class="box">
     <div class="actions-row" style="justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <h1 style="margin: 0;">Conferência</h1>
-        <button type="button" class="btn btn-light" onclick="window.location.reload()">Atualizar</button>
+        <button type="button" class="btn btn-light" onclick="refreshPage(this)">Atualizar</button>
     </div>
     <div id="conteudo-dinamico">
         {% include 'partials/conferencia_lista_tabela.html' %}
@@ -16,4 +16,33 @@
 {% if acesso.can_manage %}
 {% include 'partials/exclusao_modal.html' %}
 {% endif %}
+<script>
+(function () {
+    let requisicaoEmAndamento = false;
+
+    async function refreshListaConferencia() {
+        if (requisicaoEmAndamento) {
+            return;
+        }
+        requisicaoEmAndamento = true;
+        try {
+            const response = await fetch(window.location.href, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!response.ok) {
+                return;
+            }
+            const html = await response.text();
+            const target = document.querySelector('#conteudo-dinamico');
+            if (target) {
+                target.innerHTML = html;
+            }
+        } finally {
+            requisicaoEmAndamento = false;
+        }
+    }
+
+    window.wmsManualRefresh = refreshListaConferencia;
+})();
+</script>
 {% endblock %}

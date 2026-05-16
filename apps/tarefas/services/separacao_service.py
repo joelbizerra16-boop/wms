@@ -3,6 +3,7 @@ import traceback
 from decimal import Decimal
 import logging
 
+from django.conf import settings
 from django.db import OperationalError, connection, transaction
 from django.db.models import F, IntegerField, Max, Q, Sum
 from django.db.models.functions import Cast
@@ -110,7 +111,7 @@ def _setores_usuario(usuario):
 
 
 def listar_tarefas_disponiveis(usuario=None):
-    tarefas = list(
+    queryset = (
         Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
         .defer('nf__bairro')
         .prefetch_related('itens__produto', 'itens__nf')
@@ -119,6 +120,8 @@ def listar_tarefas_disponiveis(usuario=None):
         .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal='CANCELADA'))
         .order_by('-id')
     )
+    queryset = _filtrar_tarefas_por_setor(queryset, usuario)
+    tarefas = list(queryset)
     for tarefa in tarefas:
         sincronizar_conclusao_automatica_tarefa(tarefa, usuario)
         if tarefa.status == Tarefa.Status.CONCLUIDO:
@@ -140,7 +143,6 @@ def listar_tarefas_disponiveis(usuario=None):
             tarefa.save(update_fields=['status', 'usuario', 'data_inicio', 'updated_at'])
 
     tarefas = [tarefa for tarefa in tarefas if tarefa.status in STATUS_TAREFA_DISPONIVEL]
-    tarefas = _filtrar_tarefas_por_setor(tarefas, usuario)
     tarefas_ordenadas = sorted(
         tarefas,
         key=lambda tarefa: (
@@ -376,120 +378,139 @@ def iniciar_tarefa(tarefa_id, usuario):
 
 
 def bipar_tarefa(tarefa_id, codigo, usuario):
+    inicio = time.perf_counter()
     logger.info('SEPARACAO_BIPAR_START tarefa_id=%s user_id=%s codigo=%s', tarefa_id, getattr(usuario, 'id', None), codigo)
-    tarefa = (
-        Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
-        .defer('nf__bairro')
-        .get(id=tarefa_id)
-    )
-    _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
-    _validar_setor_tarefa(tarefa, usuario)
-    _validar_execucao_tarefa(tarefa, usuario)
-    if tarefa.status == Tarefa.Status.CONCLUIDO:
-        raise SeparacaoError('Tarefa já concluída.')
+    try:
+        tarefa = (
+            Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
+            .defer('nf__bairro')
+            .get(id=tarefa_id)
+        )
+        _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
+        _validar_setor_tarefa(tarefa, usuario)
+        _validar_execucao_tarefa(tarefa, usuario)
+        if tarefa.status == Tarefa.Status.CONCLUIDO:
+            raise SeparacaoError('Tarefa já concluída.')
 
-    def _executar():
-        with transaction.atomic():
-            tarefa_local = (
-                _tarefa_lock_queryset()
-                .get(id=tarefa_id)
-            )
-            _validar_nf_cancelada(tarefa_local, usuario, 'SEPARACAO BLOQUEADA')
-            _validar_setor_tarefa(tarefa_local, usuario)
-            _validar_execucao_tarefa(tarefa_local, usuario)
-            if tarefa_local.status == Tarefa.Status.CONCLUIDO:
-                raise SeparacaoError('Tarefa já concluída.')
-
-            # Em ambiente multiusuario, trava e recalcula sempre a partir do banco.
-            itens_pendentes_ids = list(
-                TarefaItem.objects
-                .filter(tarefa=tarefa_local, quantidade_separada__lt=F('quantidade_total'))
-                .order_by('nf__data_emissao', 'nf__numero', 'created_at')
-                .values_list('id', flat=True)
-            )
-            itens_pendentes_map = {
-                item.id: item
-                for item in _itens_pendentes_lock_queryset().filter(id__in=itens_pendentes_ids)
-            }
-            itens_pendentes = [
-                itens_pendentes_map[item_id]
-                for item_id in itens_pendentes_ids
-                if item_id in itens_pendentes_map
-            ]
-            if not itens_pendentes:
-                raise SeparacaoError('Tarefa sem itens pendentes para bipagem')
-
-            item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
-            try:
-                validacao = validar_produto(
-                    codigo_lido=codigo,
-                    item_id=item_esperado.id,
-                    usuario=usuario,
-                    item_model=TarefaItem,
-                    tipo_validacao='SEPARACAO',
+        def _executar():
+            with transaction.atomic():
+                tarefa_local = (
+                    _tarefa_lock_queryset()
+                    .get(id=tarefa_id)
                 )
-            except ProdutoValidacaoError as exc:
-                raise SeparacaoError(str(exc)) from exc
+                _validar_nf_cancelada(tarefa_local, usuario, 'SEPARACAO BLOQUEADA')
+                _validar_setor_tarefa(tarefa_local, usuario)
+                _validar_execucao_tarefa(tarefa_local, usuario)
+                if tarefa_local.status == Tarefa.Status.CONCLUIDO:
+                    raise SeparacaoError('Tarefa já concluída.')
 
-            _validar_produto_no_setor(item=validacao.item, produto=validacao.item.produto, usuario=usuario, codigo_lido=codigo)
-            item_local = validacao.item
+                # Em ambiente multiusuario, trava e recalcula sempre a partir do banco.
+                itens_pendentes_ids = list(
+                    TarefaItem.objects
+                    .filter(tarefa=tarefa_local, quantidade_separada__lt=F('quantidade_total'))
+                    .order_by('nf__data_emissao', 'nf__numero', 'created_at')
+                    .values_list('id', flat=True)
+                )
+                itens_pendentes_map = {
+                    item.id: item
+                    for item in _itens_pendentes_lock_queryset().filter(id__in=itens_pendentes_ids)
+                }
+                itens_pendentes = [
+                    itens_pendentes_map[item_id]
+                    for item_id in itens_pendentes_ids
+                    if item_id in itens_pendentes_map
+                ]
+                if not itens_pendentes:
+                    raise SeparacaoError('Tarefa sem itens pendentes para bipagem')
 
-            if item_local.quantidade_separada >= item_local.quantidade_total:
-                raise SeparacaoError('Quantidade excedida')
+                item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
+                try:
+                    validacao = validar_produto(
+                        codigo_lido=codigo,
+                        item_id=item_esperado.id,
+                        usuario=usuario,
+                        item_model=TarefaItem,
+                        tipo_validacao='SEPARACAO',
+                    )
+                except ProdutoValidacaoError as exc:
+                    raise SeparacaoError(str(exc)) from exc
 
-            item_local.quantidade_separada += Decimal('1')
-            item_local.bipado_por = usuario
-            item_local.data_bipagem = timezone.now()
-            if item_local.quantidade_separada >= item_local.quantidade_total:
-                item_local.possui_restricao = False
-            item_local.save(update_fields=['quantidade_separada', 'possui_restricao', 'bipado_por', 'data_bipagem', 'updated_at'])
-            Log.objects.create(
-                usuario=usuario,
-                acao='BIPAGEM SEPARACAO',
-                detalhe=f'Tarefa {tarefa_local.id} - produto {item_local.produto.cod_prod} bipado.',
-            )
-            UserActivityLog.objects.create(
-                usuario=usuario,
-                tipo=UserActivityLog.Tipo.BIPAGEM,
-                tarefa=tarefa_local,
-                timestamp=timezone.now(),
-            )
-            if sincronizar_conclusao_automatica_tarefa(tarefa_local, usuario):
+                _validar_produto_no_setor(item=validacao.item, produto=validacao.item.produto, usuario=usuario, codigo_lido=codigo)
+                item_local = validacao.item
+
+                if item_local.quantidade_separada >= item_local.quantidade_total:
+                    raise SeparacaoError('Quantidade excedida')
+
+                item_local.quantidade_separada += Decimal('1')
+                item_local.bipado_por = usuario
+                item_local.data_bipagem = timezone.now()
+                if item_local.quantidade_separada >= item_local.quantidade_total:
+                    item_local.possui_restricao = False
+                item_local.save(update_fields=['quantidade_separada', 'possui_restricao', 'bipado_por', 'data_bipagem', 'updated_at'])
                 Log.objects.create(
                     usuario=usuario,
-                    acao='FINALIZACAO AUTOMATICA SEPARACAO',
-                    detalhe=f'Tarefa {tarefa_local.id} finalizada automaticamente apos concluir a bipagem.',
+                    acao='BIPAGEM SEPARACAO',
+                    detalhe=f'Tarefa {tarefa_local.id} - produto {item_local.produto.cod_prod} bipado.',
                 )
-                tarefa_local.refresh_from_db(fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
-            sincronizar_status_operacional_nfs(_nfs_afetadas_tarefa(tarefa_local))
-            itens_restantes = []
-            for item_pendente in itens_pendentes:
-                if item_pendente.id == item_local.id:
-                    if item_local.quantidade_separada < item_local.quantidade_total:
-                        itens_restantes.append(item_local)
-                    continue
-                itens_restantes.append(item_pendente)
-            return tarefa_local, item_local, itens_restantes
+                UserActivityLog.objects.create(
+                    usuario=usuario,
+                    tipo=UserActivityLog.Tipo.BIPAGEM,
+                    tarefa=tarefa_local,
+                    timestamp=timezone.now(),
+                )
+                if sincronizar_conclusao_automatica_tarefa(tarefa_local, usuario):
+                    Log.objects.create(
+                        usuario=usuario,
+                        acao='FINALIZACAO AUTOMATICA SEPARACAO',
+                        detalhe=f'Tarefa {tarefa_local.id} finalizada automaticamente apos concluir a bipagem.',
+                    )
+                    tarefa_local.refresh_from_db(fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
+                sincronizar_status_operacional_nfs(_nfs_afetadas_tarefa(tarefa_local))
+                itens_restantes = []
+                for item_pendente in itens_pendentes:
+                    if item_pendente.id == item_local.id:
+                        if item_local.quantidade_separada < item_local.quantidade_total:
+                            itens_restantes.append(item_local)
+                        continue
+                    itens_restantes.append(item_pendente)
+                return tarefa_local, item_local, itens_restantes
 
-    tarefa, item, itens_restantes = _executar_com_retry_sqlite_lock(_executar)
-    proximo_item = itens_restantes[0] if itens_restantes else None
-    finalizado = proximo_item is None or tarefa.status in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}
-    return {
-        'status': 'ok',
-        'tarefa_id': tarefa.id,
-        'produto': item.produto.cod_prod,
-        'nf_numero': item.nf.numero if item.nf_id else tarefa.nf.numero if tarefa.nf_id else None,
-        'ean': item.produto.cod_ean,
-        'segmento': item.produto.categoria,
-        'esperado': float(item.quantidade_total),
-        'separado': float(item.quantidade_separada),
-        'status_tarefa': tarefa.status,
-        'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
-        'cor': 'verde',
-        'som': 'beep-curto',
-        'proximo_item': _dados_item_operacional_tarefa(proximo_item),
-        'finalizado': finalizado,
-    }
+        tarefa, item, itens_restantes = _executar_com_retry_sqlite_lock(_executar)
+        proximo_item = itens_restantes[0] if itens_restantes else None
+        finalizado = proximo_item is None or tarefa.status in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}
+        _invalidate_dashboards_operacionais(motivo='bipagem_separacao')
+        return {
+            'status': 'ok',
+            'tarefa_id': tarefa.id,
+            'produto': item.produto.cod_prod,
+            'nf_numero': item.nf.numero if item.nf_id else tarefa.nf.numero if tarefa.nf_id else None,
+            'ean': item.produto.cod_ean,
+            'segmento': item.produto.categoria,
+            'esperado': float(item.quantidade_total),
+            'separado': float(item.quantidade_separada),
+            'status_tarefa': tarefa.status,
+            'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
+            'cor': 'verde',
+            'som': 'beep-curto',
+            'proximo_item': _dados_item_operacional_tarefa(proximo_item),
+            'finalizado': finalizado,
+        }
+    finally:
+        elapsed_ms = (time.perf_counter() - inicio) * 1000
+        slow_threshold = float(getattr(settings, 'BIPAGEM_SLOW_LOG_MS', 150))
+        logger.info(
+            'SEPARACAO_BIPAGEM_MS tarefa_id=%s user_id=%s tempo_ms=%.2f',
+            tarefa_id,
+            getattr(usuario, 'id', None),
+            elapsed_ms,
+        )
+        if elapsed_ms >= slow_threshold:
+            logger.warning(
+                'SEPARACAO_BIPAGEM_LENTA tarefa_id=%s user_id=%s tempo_ms=%.2f',
+                tarefa_id,
+                getattr(usuario, 'id', None),
+                elapsed_ms,
+            )
 
 
 def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
@@ -524,6 +545,16 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
         raise SeparacaoError('Tarefa precisa estar liberada para concluir com restricao')
     if status == Tarefa.Status.FECHADO_COM_RESTRICAO and not (motivo or '').strip():
         raise SeparacaoError('Motivo da restricao e obrigatorio')
+    setor_normalizado = _normalizar_setor_operacional(tarefa.setor)
+    tarefa_filtros = setor_normalizado == Setor.Codigo.FILTROS
+    if tarefa_filtros:
+        logger.info(
+            'FINALIZANDO FILTROS tarefa_id=%s nf_id=%s user_id=%s status_solicitado=%s',
+            tarefa.id,
+            tarefa.nf_id,
+            getattr(usuario, 'id', None),
+            status,
+        )
     def _executar():
         with transaction.atomic():
             tarefa_local = (
@@ -537,6 +568,13 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
             _validar_execucao_tarefa(tarefa_local, usuario)
 
             tarefa_local.status = status_final
+            if tarefa_filtros:
+                logger.info(
+                    'STATUS FINAL tarefa_id=%s nf_id=%s status=%s',
+                    tarefa_local.id,
+                    tarefa_local.nf_id,
+                    status_final,
+                )
             if status_final in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO, Tarefa.Status.FECHADO_COM_RESTRICAO}:
                 tarefa_local.usuario = None
                 tarefa_local.usuario_em_execucao = None
@@ -560,6 +598,26 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
                 timestamp=timezone.now(),
             )
             sincronizar_status_operacional_nfs(_nfs_afetadas_tarefa(tarefa_local))
+            if tarefa_filtros and tarefa_local.nf_id and status_final in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}:
+                logger.info(
+                    'ENVIANDO PARA CONFERENCIA tarefa_id=%s nf_id=%s status=%s',
+                    tarefa_local.id,
+                    tarefa_local.nf_id,
+                    status_final,
+                )
+                from apps.conferencia.services.conferencia_service import invalidate_nfs_disponiveis_cache
+                from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
+
+                invalidate_nfs_disponiveis_cache(
+                    motivo='finalizacao_separacao_filtros',
+                    nf_id=tarefa_local.nf_id,
+                    setor=Setor.Codigo.FILTROS,
+                )
+                invalidate_monitoramento_conferencia_cache(
+                    motivo='finalizacao_separacao_filtros',
+                    nf_id=tarefa_local.nf_id,
+                    setor=Setor.Codigo.FILTROS,
+                )
             return tarefa_local
 
     tarefa = _executar_com_retry_sqlite_lock(_executar)
@@ -579,12 +637,21 @@ def _filtrar_tarefas_por_setor(queryset, usuario):
         return queryset
     setores_usuario = _setores_usuario(usuario)
     if not setores_usuario:
-        return []
-    return [
-        tarefa
-        for tarefa in queryset
-        if _normalizar_setor_operacional(tarefa.setor) in setores_usuario
-    ]
+        return queryset.none()
+    return queryset.filter(setor__in=setores_usuario)
+
+
+def _invalidate_dashboards_operacionais(*, motivo=''):
+    try:
+        from apps.core.views_dashboard import invalidate_dashboard_separacao_cache
+        from apps.conferencia.services.conferencia_service import invalidate_nfs_disponiveis_cache
+        from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
+
+        invalidate_dashboard_separacao_cache(motivo=motivo)
+        invalidate_nfs_disponiveis_cache(motivo=motivo)
+        invalidate_monitoramento_conferencia_cache(motivo=motivo)
+    except Exception as exc:
+        logger.warning('Falha ao invalidar cache operacional: %s', exc)
 
 
 def _validar_setor_tarefa(tarefa, usuario):

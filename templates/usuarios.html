@@ -302,8 +302,16 @@
             closeModal();
             return;
         }
-        sessionStorage.setItem('usuarios-toast', data.mensagem || 'Usuário atualizado com sucesso.');
-        window.location.reload();
+        showToast(data.mensagem || 'Usuário atualizado com sucesso.', 'ok');
+        const row = document.querySelector(`tr[data-user-id="${userId}"]`);
+        const badge = row && row.querySelector('.js-status-badge');
+        if (badge) {
+            const ativo = Boolean(data.is_active);
+            badge.textContent = ativo ? 'ATIVO' : 'INATIVO';
+            badge.classList.toggle('status-badge--success', ativo);
+            badge.classList.toggle('status-badge--danger', !ativo);
+        }
+        closeModal();
     }
 
     toggleFormBtn && toggleFormBtn.addEventListener('click', function () {

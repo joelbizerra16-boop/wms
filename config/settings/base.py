@@ -56,6 +56,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'apps.usuarios.middleware.UsuarioSessaoMiddleware',
+    'apps.core.middleware.RequestTimingMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'apps.core.middleware.CatchAllExceptionsMiddleware',
@@ -92,8 +93,29 @@ DATABASES = {
         'OPTIONS': {
             'client_encoding': 'UTF8',
         },
+        'CONN_MAX_AGE': config('DB_CONN_MAX_AGE', default=300, cast=int),
+        'CONN_HEALTH_CHECKS': config('DB_CONN_HEALTH_CHECKS', default=True, cast=bool),
     }
 }
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'wms-default-cache',
+        'TIMEOUT': config('CACHE_DEFAULT_TIMEOUT', default=20, cast=int),
+        'OPTIONS': {
+            'MAX_ENTRIES': config('CACHE_MAX_ENTRIES', default=10000, cast=int),
+        },
+    }
+}
+SESSION_ENGINE = 'django.contrib.sessions.backends.cached_db'
+SESSION_CACHE_ALIAS = 'default'
+REQUEST_SLOW_LOG_MS = config('REQUEST_SLOW_LOG_MS', default=300, cast=int)
+REQUEST_CRITICAL_LOG_MS = config('REQUEST_CRITICAL_LOG_MS', default=800, cast=int)
+BIPAGEM_SLOW_LOG_MS = config('BIPAGEM_SLOW_LOG_MS', default=150, cast=int)
+DASHBOARD_CACHE_TTL = config('DASHBOARD_CACHE_TTL', default=15, cast=int)
+OPERATIONAL_PAGE_SIZE = config('OPERATIONAL_PAGE_SIZE', default=50, cast=int)
+SCAN_CONFIRM_ASYNC_MIN_ITEMS = config('SCAN_CONFIRM_ASYNC_MIN_ITEMS', default=5, cast=int)
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
