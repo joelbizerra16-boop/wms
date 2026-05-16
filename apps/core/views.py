@@ -1043,12 +1043,22 @@ def minuta(request):
             )
             return redirect('web-minuta')
 
+    from apps.core.operacional_periodo import filtros_template_periodo, resolver_periodo_operacional_request
+
+    date_from, date_to, busca_periodo = resolver_periodo_operacional_request(request)
     filtros = {
         'romaneio': (request.GET.get('romaneio') or '').strip(),
         'status': (request.GET.get('status') or '').strip(),
-        'busca': (request.GET.get('busca') or '').strip(),
+        'busca': (request.GET.get('busca') or '').strip() or busca_periodo,
+        **filtros_template_periodo(date_from, date_to, busca_periodo),
     }
-    linhas, resumo = listar_minuta_itens(**filtros)
+    linhas, resumo = listar_minuta_itens(
+        romaneio=filtros['romaneio'],
+        status=filtros['status'],
+        busca=filtros['busca'],
+        data_inicio=date_from,
+        data_fim=date_to,
+    )
     preview = request.session.get(MINUTA_PREVIEW_SESSION_KEY)
     context = {
         'usuario': request.user,
@@ -1084,10 +1094,18 @@ def minuta(request):
 @require_profiles(Usuario.Perfil.GESTOR)
 def minuta_pdf(request):
     logger.info('DEBUG MINUTA: gerando_pdf_inicio user_id=%s', getattr(request.user, 'id', None))
+    from apps.core.operacional_periodo import periodo_operacional_padrao
+
+    date_from, date_to = periodo_operacional_padrao()
+    if request.GET.get('data_inicial') or request.GET.get('data_final'):
+        from apps.core.operacional_periodo import resolver_periodo_operacional_request
+        date_from, date_to, _ = resolver_periodo_operacional_request(request)
     filtros = {
         'romaneio': (request.GET.get('romaneio') or '').strip(),
         'status': (request.GET.get('status') or '').strip(),
         'busca': (request.GET.get('busca') or '').strip(),
+        'data_inicio': date_from,
+        'data_fim': date_to,
     }
     gerar_carregamento = (request.GET.get('carregamento') or '1').strip() not in {'0', 'false', 'False'}
     gerar_entrega = (request.GET.get('entrega') or '').strip() in {'1', 'true', 'True'}
@@ -1095,7 +1113,13 @@ def minuta_pdf(request):
         messages.error(request, 'Selecione pelo menos um tipo de minuta para gerar o PDF.')
         return redirect('web-minuta')
 
-    queryset = consultar_minuta_itens_queryset(**filtros)
+    queryset = consultar_minuta_itens_queryset(
+        romaneio=filtros['romaneio'],
+        status=filtros['status'],
+        busca=filtros['busca'],
+        data_inicio=date_from,
+        data_fim=date_to,
+    )
     itens = list(queryset)
     inconsistencias = get_minuta_inconsistencias([
         {

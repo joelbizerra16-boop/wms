@@ -17,6 +17,11 @@ from apps.core.services.visibilidade_operacional_service import (
     get_tarefas_para_separacao,
 )
 from apps.core.nf_utils import resolve_nf_numero
+from apps.core.operacional_periodo import (
+    filtros_template_periodo,
+    parse_date_param,
+    resolver_periodo_operacional_request,
+)
 from apps.logs.models import LiberacaoDivergencia
 from apps.nf.models import NotaFiscal, NotaFiscalItem
 from apps.nf.services.consistencia_service import separacao_concluida_nf
@@ -171,23 +176,6 @@ def _parse_date(value):
         return None
 
 
-def _resolver_periodo_e_busca(request, *, default_today=False):
-    date_from_raw = (request.GET.get('date_from') or request.GET.get('data_inicial') or '').strip()
-    date_to_raw = (request.GET.get('date_to') or request.GET.get('data_final') or '').strip()
-    logger.debug('dashboard_separacao data_inicial=%s', request.GET.get('data_inicial') or request.GET.get('date_from'))
-    logger.debug('dashboard_separacao data_final=%s', request.GET.get('data_final') or request.GET.get('date_to'))
-    date_from = _parse_date(date_from_raw)
-    date_to = _parse_date(date_to_raw)
-    if default_today and date_from is None and date_to is None:
-        hoje = timezone.localdate()
-        date_from = hoje
-        date_to = hoje
-    if date_from and date_to and date_to < date_from:
-        date_to = date_from
-    busca = (request.GET.get('busca') or request.GET.get('q') or '').strip().lower()
-    return date_from, date_to, busca
-
-
 def _normalizar_setor_dashboard(valor):
     setor = (valor or '').strip().upper()
     if setor == 'FILTRO':
@@ -216,7 +204,7 @@ def invalidate_dashboard_separacao_cache(*, motivo=''):
         logger.info('dashboard_separacao cache invalidado motivo=%s', motivo)
 
 
-def _tarefas_base_dashboard_separacao(usuario):
+def _tarefas_base_dashboard_separacao(usuario, date_from=None, date_to=None):
     qs = (
         Tarefa.objects.select_related('nf', 'nf__cliente', 'rota')
         .defer('nf__bairro')
@@ -225,6 +213,10 @@ def _tarefas_base_dashboard_separacao(usuario):
         .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal=NotaFiscal.StatusFiscal.CANCELADA))
         .order_by('-updated_at', '-id')
     )
+    if date_from is not None:
+        qs = qs.filter(updated_at__date__gte=date_from)
+    if date_to is not None:
+        qs = qs.filter(updated_at__date__lte=date_to)
     if usuario is None or getattr(usuario, 'is_superuser', False):
         return list(qs)
     setores_usuario = _setores_usuario_dashboard(usuario)
@@ -378,7 +370,7 @@ def collect_itens_filtrados_dashboard_separacao(usuario, date_from, date_to, bus
     if cached is not None:
         return cached
 
-    tarefa_ids_visiveis = [tarefa.id for tarefa in _tarefas_base_dashboard_separacao(usuario)]
+    tarefa_ids_visiveis = [tarefa.id for tarefa in _tarefas_base_dashboard_separacao(usuario, date_from, date_to)]
     logger.info(
         'dashboard_separacao total_geral_tarefas=%s user=%s filtros=%s',
         len(tarefa_ids_visiveis),
@@ -592,7 +584,7 @@ def _nf_liberacao(liberacao):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def dashboard_separacao(request):
-    date_from, date_to, busca = _resolver_periodo_e_busca(request, default_today=True)
+    date_from, date_to, busca = resolver_periodo_operacional_request(request)
     itens_filtrados = collect_itens_filtrados_dashboard_separacao(request.user, date_from, date_to, busca)
     indicadores = calcular_indicadores_volume_separacao(itens_filtrados)
     logger.info(
@@ -639,11 +631,7 @@ def dashboard_separacao(request):
     contexto = {
         'indicadores': indicadores,
         'linhas': paginacao['page_obj'],
-        'filtros': {
-            'date_from': date_from.isoformat() if date_from else '',
-            'date_to': date_to.isoformat() if date_to else '',
-            'busca': request.GET.get('busca', request.GET.get('q', '')),
-        },
+        'filtros': filtros_template_periodo(date_from, date_to, busca),
         'detalhe_nf': _build_detalhe_nf_context(request, request.GET.get('nf_detalhe')),
         **paginacao,
     }
@@ -657,7 +645,7 @@ def dashboard_conferencia(request):
     from django.conf import settings as django_settings
 
     inicio = time.perf_counter()
-    date_from, date_to, busca = _resolver_periodo_e_busca(request, default_today=True)
+    date_from, date_to, busca = resolver_periodo_operacional_request(request)
     nfs_disponiveis = get_nfs_monitoramento_conferencia(
         request.user,
         data_inicio=date_from,
@@ -757,11 +745,7 @@ def dashboard_conferencia(request):
         },
         'resumo_separacao': resumo_separacao,
         'linhas': paginacao['page_obj'],
-        'filtros': {
-            'date_from': date_from.isoformat() if date_from else '',
-            'date_to': date_to.isoformat() if date_to else '',
-            'busca': request.GET.get('busca', request.GET.get('q', '')),
-        },
+        'filtros': filtros_template_periodo(date_from, date_to, busca),
         'detalhe_nf': _build_detalhe_nf_context(request, nf_detalhe_param) if nf_detalhe_param else None,
         **paginacao,
     }
@@ -917,12 +901,15 @@ def relatorio_liberacoes(request):
         .all()
     )
 
-    data_filtro = _parse_date(request.GET.get('data'))
+    date_from, date_to, _busca_periodo = resolver_periodo_operacional_request(request)
+    data_filtro = parse_date_param(request.GET.get('data'))
     usuario_filtro = (request.GET.get('usuario') or '').strip().lower()
     nf_filtro = (request.GET.get('busca') or request.GET.get('nf') or '').strip().lower()
 
     if data_filtro:
         liberacoes = liberacoes.filter(created_at__date=data_filtro)
+    else:
+        liberacoes = liberacoes.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
     if usuario_filtro:
         liberacoes = liberacoes.filter(Q(usuario__username__icontains=usuario_filtro) | Q(usuario__nome__icontains=usuario_filtro))
     if nf_filtro:
@@ -955,6 +942,7 @@ def relatorio_liberacoes(request):
         {
             'linhas': paginacao['page_obj'],
             'filtros': {
+                **filtros_template_periodo(date_from, date_to, nf_filtro),
                 'data': request.GET.get('data', ''),
                 'usuario': request.GET.get('usuario', ''),
                 'busca': request.GET.get('busca', request.GET.get('nf', '')),

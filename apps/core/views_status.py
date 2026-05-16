@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.core.services.visibilidade_operacional_service import get_nfs_monitoramento_conferencia
+from apps.core.operacional_periodo import resolver_periodo_operacional_request
 from apps.core.views_dashboard import calcular_indicadores_volume_separacao, collect_itens_filtrados_dashboard_separacao
 from apps.nf.models import NotaFiscal
 from apps.nf.services.consistencia_service import separacao_concluida_nf
@@ -46,20 +47,6 @@ def _parse_date(value):
         return date.fromisoformat(value)
     except ValueError:
         return None
-
-
-def _resolver_periodo_e_busca(request):
-    hoje = timezone.localdate()
-    date_from_raw = (request.GET.get('date_from') or request.GET.get('data_inicial') or '').strip()
-    date_to_raw = (request.GET.get('date_to') or request.GET.get('data_final') or '').strip()
-    logger.debug('dashboard_resumo data_inicial=%s', request.GET.get('data_inicial') or request.GET.get('date_from'))
-    logger.debug('dashboard_resumo data_final=%s', request.GET.get('data_final') or request.GET.get('date_to'))
-    date_from = _parse_date(date_from_raw) or hoje
-    date_to = _parse_date(date_to_raw) or hoje
-    if date_to < date_from:
-        date_to = date_from
-    busca = (request.GET.get('busca') or request.GET.get('q') or '').strip().lower()
-    return date_from, date_to, busca
 
 
 def _last_conference(nf):
@@ -132,7 +119,7 @@ def _dashboard_resumo_payload(request):
     from django.conf import settings
     from django.core.cache import cache
 
-    date_from, date_to, busca = _resolver_periodo_e_busca(request)
+    date_from, date_to, busca = resolver_periodo_operacional_request(request)
     cache_ttl = int(getattr(settings, 'DASHBOARD_CACHE_TTL', 15))
     cache_key = ':'.join(
         [

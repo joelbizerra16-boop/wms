@@ -19,7 +19,7 @@ from apps.tarefas.services.separacao_service import listar_tarefas_disponiveis
 from apps.usuarios.models import Setor
 
 logger = logging.getLogger(__name__)
-CONFERENCIA_MONITORAMENTO_CACHE_TTL = 15
+CONFERENCIA_MONITORAMENTO_CACHE_TTL = int(getattr(settings, 'DASHBOARD_CACHE_TTL', 10))
 CACHE_VERSION_KEY_MONITORAMENTO_CONFERENCIA = 'dashboard:conferencia:version'
 STATUS_CONFERENCIA_HISTORICO = {
     Conferencia.Status.OK,

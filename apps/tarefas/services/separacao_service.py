@@ -110,7 +110,7 @@ def _setores_usuario(usuario):
     return {_normalizar_setor_operacional(valor) for valor in setores if _normalizar_setor_operacional(valor)}
 
 
-def listar_tarefas_disponiveis(usuario=None):
+def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None):
     queryset = (
         Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
         .defer('nf__bairro')
@@ -120,6 +120,14 @@ def listar_tarefas_disponiveis(usuario=None):
         .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal='CANCELADA'))
         .order_by('-id')
     )
+    if data_inicio is not None:
+        queryset = queryset.filter(
+            Q(created_at__date__gte=data_inicio) | Q(updated_at__date__gte=data_inicio)
+        )
+    if data_fim is not None:
+        queryset = queryset.filter(
+            Q(created_at__date__lte=data_fim) | Q(updated_at__date__lte=data_fim)
+        )
     queryset = _filtrar_tarefas_por_setor(queryset, usuario)
     tarefas = list(queryset)
     for tarefa in tarefas:

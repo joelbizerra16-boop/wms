@@ -73,6 +73,11 @@ from apps.usuarios.models import Setor, Usuario
 from apps.usuarios.forms import UsuarioForm
 
 from apps.core.async_jobs import enqueue_background_job
+from apps.core.operacional_periodo import (
+    filtrar_queryset_created_at,
+    filtros_template_periodo,
+    resolver_periodo_operacional_request,
+)
 from apps.core.scan_store import clear_scan_entrada_ids, get_scan_entrada_ids, set_scan_entrada_ids
 
 logger = logging.getLogger(__name__)
@@ -741,7 +746,15 @@ def importar_xml_web(request):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def fila_entradas_nf_web(request):
-    entradas = EntradaNF.objects.order_by('-data_importacao', '-id')
+    date_from, date_to, busca = resolver_periodo_operacional_request(request)
+    entradas = filtrar_queryset_created_at(
+        EntradaNF.objects.order_by('-data_importacao', '-id'),
+        date_from,
+        date_to,
+        campo='data_importacao',
+    )
+    if busca:
+        entradas = entradas.filter(Q(numero_nf__icontains=busca) | Q(chave_nf__icontains=busca))
     pode_limpar = bool(getattr(request.user, 'is_superuser', False))
     paginacao = _paginar_lista(request, entradas)
     return _render(
@@ -750,6 +763,7 @@ def fila_entradas_nf_web(request):
         {
             'entradas': paginacao['page_obj'],
             'pode_limpar_dados': pode_limpar,
+            'filtros': filtros_template_periodo(date_from, date_to, busca),
             **paginacao,
         },
     )
@@ -1143,13 +1157,27 @@ def liberar_entrada_nf_web(request, entrada_id):
 @require_profiles(Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
 def separacao_lista_web(request):
     if _usuario_sem_setor_operacional(request.user):
-        contexto = {'tarefas': [], 'is_paginated': False, 'pagination_query': ''}
+        date_from, date_to, busca = resolver_periodo_operacional_request(request)
+        contexto = {
+            'tarefas': [],
+            'is_paginated': False,
+            'pagination_query': '',
+            'filtros': filtros_template_periodo(date_from, date_to, busca),
+        }
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return _render(request, 'partials/separacao_lista_tabela.html', contexto)
         messages.error(request, 'Usuário sem setor vinculado. Contate o administrador.')
         return _render(request, 'separacao_lista.html', contexto)
-    paginacao = _paginar_lista(request, listar_tarefas_disponiveis(request.user))
-    contexto = {'tarefas': paginacao['page_obj'], **paginacao}
+    date_from, date_to, busca = resolver_periodo_operacional_request(request)
+    paginacao = _paginar_lista(
+        request,
+        listar_tarefas_disponiveis(request.user, data_inicio=date_from, data_fim=date_to),
+    )
+    contexto = {
+        'tarefas': paginacao['page_obj'],
+        'filtros': filtros_template_periodo(date_from, date_to, busca),
+        **paginacao,
+    }
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return _render(request, 'partials/separacao_lista_tabela.html', contexto)
     return _render(request, 'separacao_lista.html', contexto)

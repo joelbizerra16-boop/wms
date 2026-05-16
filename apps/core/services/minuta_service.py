@@ -713,7 +713,7 @@ def _obter_lote_minuta_ativo():
         return None
 
 
-def consultar_minuta_itens_queryset(romaneio='', status='', busca=''):
+def consultar_minuta_itens_queryset(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
     try:
         queryset = MinutaRomaneioItem.objects.select_related('romaneio', 'nf', 'nf__rota', 'romaneio__usuario_importacao').all()
         lote_ativo = _obter_lote_minuta_ativo()
@@ -721,6 +721,10 @@ def consultar_minuta_itens_queryset(romaneio='', status='', busca=''):
             queryset = queryset.filter(romaneio__importacao_lote=lote_ativo)
         else:
             queryset = queryset.none()
+        if data_inicio is not None:
+            queryset = queryset.filter(romaneio__created_at__date__gte=data_inicio)
+        if data_fim is not None:
+            queryset = queryset.filter(romaneio__created_at__date__lte=data_fim)
         if romaneio:
             queryset = queryset.filter(romaneio__codigo_romaneio__icontains=romaneio)
         if status:
@@ -742,8 +746,14 @@ def consultar_minuta_itens_queryset(romaneio='', status='', busca=''):
         return MinutaRomaneioItem.objects.none()
 
 
-def listar_minuta_itens(romaneio='', status='', busca=''):
-    queryset = consultar_minuta_itens_queryset(romaneio=romaneio, status=status, busca=busca)
+def listar_minuta_itens(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
+    queryset = consultar_minuta_itens_queryset(
+        romaneio=romaneio,
+        status=status,
+        busca=busca,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+    )
     linhas = [
         {
             'romaneio': item.romaneio.codigo_romaneio,

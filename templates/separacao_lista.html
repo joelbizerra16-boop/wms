@@ -6,6 +6,7 @@
 {% block content %}
 <div class="box">
     <h1>Separação</h1>
+    {% if filtros %}{% include 'partials/filtro_periodo_operacional.html' %}{% endif %}
     <div id="conteudo-dinamico">
         {% include 'partials/separacao_lista_tabela.html' %}
     </div>

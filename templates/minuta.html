@@ -79,8 +79,8 @@
                     </div>
                     <div class="minuta-check-row__actions minuta-check-row__actions--pdf">
                         <a
-                            href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}"
-                            data-base-href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}"
+                            href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}&data_inicial={{ filtros.date_from|urlencode }}&data_final={{ filtros.date_to|urlencode }}"
+                            data-base-href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}&data_inicial={{ filtros.date_from|urlencode }}&data_final={{ filtros.date_to|urlencode }}"
                             data-confirmar-alertas="0"
                             data-inconsistencias='{"nfs_nao_localizadas": {{ minuta_inconsistencias.nfs_nao_localizadas|default:0 }}, "xml_erros": {{ minuta_inconsistencias.xml_erros|default:0 }}, "duplicidades": {{ minuta_inconsistencias.duplicidades|default:0 }}, "inconsistencias": {{ minuta_inconsistencias.inconsistencias|default:0 }}, "canceladas": {{ minuta_inconsistencias.canceladas|default:0 }}, "status_vazios": {{ minuta_inconsistencias.status_vazios|default:0 }}, "total_problemas": {{ minuta_inconsistencias.total_problemas|default:0 }}}'
                             class="btn btn-light minuta-pdf-button{% if not resumo.itens %} is-disabled{% endif %}"
@@ -98,6 +98,14 @@
         </form>
 
         <form method="get" class="minuta-toolbar__filters">
+            <div class="minuta-field">
+                <label for="minuta-data-inicial">De</label>
+                <input id="minuta-data-inicial" type="date" name="data_inicial" value="{{ filtros.date_from }}">
+            </div>
+            <div class="minuta-field">
+                <label for="minuta-data-final">Até</label>
+                <input id="minuta-data-final" type="date" name="data_final" value="{{ filtros.date_to }}">
+            </div>
             <div class="minuta-field">
                 <label for="minuta-romaneio">Romaneio</label>
                 <input id="minuta-romaneio" type="text" name="romaneio" value="{{ filtros.romaneio }}" placeholder="Buscar romaneio">

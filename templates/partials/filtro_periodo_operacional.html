@@ -1,0 +1,21 @@
+﻿<form method="get" class="filter-form operacional-periodo-form" style="margin-bottom: 12px;">
+    <div class="operacional-periodo-form__row" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+        <div>
+            <label for="op-data-inicial">De</label>
+            <input id="op-data-inicial" type="date" name="data_inicial" value="{{ filtros.date_from }}">
+        </div>
+        <div>
+            <label for="op-data-final">Até</label>
+            <input id="op-data-final" type="date" name="data_final" value="{{ filtros.date_to }}">
+        </div>
+        <div style="flex:1;min-width:160px;">
+            <label for="op-busca">Busca</label>
+            <input id="op-busca" type="text" name="busca" value="{{ filtros.busca }}" placeholder="NF, cliente, rota...">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-primary">Filtrar</button>
+            <a href="{{ request.path }}" class="btn btn-light">Hoje + ontem</a>
+        </div>
+    </div>
+    <p class="muted" style="margin:6px 0 0;font-size:0.85rem;">Por padrão exibe somente hoje e ontem. Use as datas acima para consultar histórico.</p>
+</form>

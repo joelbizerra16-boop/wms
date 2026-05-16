@@ -338,6 +338,54 @@ class MinutaImportacaoTests(TestCase):
 			ativa=True,
 		)
 		NotaFiscalItem.objects.create(nf=self.nf, produto=self.produto, quantidade='2.00')
+		self.produto_ok = self.produto
+		self.produto_pendente = Produto.objects.create(
+			cod_prod='123039',
+			descricao='15W40',
+			cod_ean='789123039',
+			categoria=Produto.Categoria.FILTROS,
+		)
+		NotaFiscalItem.objects.create(nf=self.nf, produto=self.produto_pendente, quantidade='5.00')
+		self.tarefa = Tarefa.objects.create(
+			nf=None,
+			tipo=Tarefa.Tipo.ROTA,
+			setor=Setor.Codigo.FILTROS,
+			rota=self.rota,
+			status=Tarefa.Status.ABERTO,
+		)
+		TarefaItem.objects.create(
+			tarefa=self.tarefa,
+			nf=self.nf,
+			produto=self.produto_ok,
+			quantidade_total='10.00',
+			quantidade_separada='10.00',
+		)
+		TarefaItem.objects.create(
+			tarefa=self.tarefa,
+			nf=self.nf,
+			produto=self.produto_pendente,
+			quantidade_total='5.00',
+			quantidade_separada='3.00',
+		)
+		self.conferencia = Conferencia.objects.create(
+			nf=self.nf,
+			conferente=self.usuario,
+			status=Conferencia.Status.EM_CONFERENCIA,
+		)
+		ConferenciaItem.objects.create(
+			conferencia=self.conferencia,
+			produto=self.produto_ok,
+			qtd_esperada='10.00',
+			qtd_conferida='10.00',
+			status=ConferenciaItem.Status.OK,
+		)
+		ConferenciaItem.objects.create(
+			conferencia=self.conferencia,
+			produto=self.produto_pendente,
+			qtd_esperada='5.00',
+			qtd_conferida='3.00',
+			status=ConferenciaItem.Status.AGUARDANDO,
+		)
 
 	@override_settings(
 		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
@@ -1327,9 +1375,9 @@ class MinutaImportacaoTests(TestCase):
 
 		response_no_dia_correto = self.client.get(f'/dashboard/separacao/?data_inicial={data_com_dados.isoformat()}&data_final={data_com_dados.isoformat()}')
 		self.assertEqual(response_no_dia_correto.status_code, 200)
-		self.assertContains(response_no_dia_correto, '1410289')
+		self.assertContains(response_no_dia_correto, self.nf.numero)
 
-	def test_dashboard_separacao_sem_filtro_usa_data_de_hoje(self):
+	def test_dashboard_separacao_sem_filtro_usa_janela_hoje_e_ontem(self):
 		data_antiga = timezone.now() - timedelta(days=3)
 		Tarefa.objects.filter(id=self.tarefa.id).update(created_at=data_antiga, updated_at=data_antiga)
 		NotaFiscal.objects.filter(id=self.nf.id).update(data_emissao=data_antiga)
@@ -1337,9 +1385,10 @@ class MinutaImportacaoTests(TestCase):
 		response = self.client.get('/dashboard/separacao/')
 
 		self.assertEqual(response.status_code, 200)
-		hoje = timezone.localdate().isoformat()
-		self.assertEqual(response.context['filtros']['date_from'], hoje)
-		self.assertEqual(response.context['filtros']['date_to'], hoje)
+		hoje = timezone.localdate()
+		ontem = (hoje - timedelta(days=1)).isoformat()
+		self.assertEqual(response.context['filtros']['date_from'], ontem)
+		self.assertEqual(response.context['filtros']['date_to'], hoje.isoformat())
 		self.assertContains(response, 'Nenhum item de separação encontrado.')
 		self.assertEqual(response.context['indicadores']['total'], 0)
 
@@ -1355,7 +1404,7 @@ class MinutaImportacaoTests(TestCase):
 		self.assertContains(response_no_dia_correto, 'name="data_inicial"', html=False)
 		self.assertContains(response_no_dia_correto, 'name="data_final"', html=False)
 
-	def test_dashboard_conferencia_sem_filtro_usa_data_de_hoje(self):
+	def test_dashboard_conferencia_sem_filtro_usa_janela_hoje_e_ontem(self):
 		data_antiga = timezone.now() - timedelta(days=3)
 		NotaFiscal.objects.filter(id=self.nf.id).update(created_at=data_antiga, data_emissao=data_antiga, updated_at=data_antiga)
 		Conferencia.objects.filter(id=self.conferencia.id).update(created_at=data_antiga, updated_at=data_antiga)
@@ -1363,9 +1412,10 @@ class MinutaImportacaoTests(TestCase):
 		response = self.client.get('/dashboard/conferencia/')
 
 		self.assertEqual(response.status_code, 200)
-		hoje = timezone.localdate().isoformat()
-		self.assertEqual(response.context['filtros']['date_from'], hoje)
-		self.assertEqual(response.context['filtros']['date_to'], hoje)
+		hoje = timezone.localdate()
+		ontem = (hoje - timedelta(days=1)).isoformat()
+		self.assertEqual(response.context['filtros']['date_from'], ontem)
+		self.assertEqual(response.context['filtros']['date_to'], hoje.isoformat())
 		self.assertContains(response, 'Nenhuma NF encontrada.')
 
 	def test_dashboard_conferencia_marca_nf_como_concluida_quando_itens_estao_totalmente_conferidos(self):

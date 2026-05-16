@@ -8,14 +8,22 @@
     <div>
         <span class="section-label">Auditoria gerencial</span>
         <h1>Relatório de Liberações</h1>
-        <p>Histórico completo das liberações de divergência com usuário, motivo e transição de status.</p>
+        <p>Liberações de divergência (padrão: hoje e ontem). Use as datas para ampliar o histórico.</p>
     </div>
 </div>
 
 <div class="card">
-    <form method="get" class="filter-form" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+    <form method="get" class="filter-form" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
         <div>
-            <label for="data">Data</label>
+            <label for="data-inicial">De</label>
+            <input id="data-inicial" type="date" name="data_inicial" value="{{ filtros.date_from }}">
+        </div>
+        <div>
+            <label for="data-final">Até</label>
+            <input id="data-final" type="date" name="data_final" value="{{ filtros.date_to }}">
+        </div>
+        <div>
+            <label for="data">Dia exato</label>
             <input id="data" type="date" name="data" value="{{ filtros.data }}">
         </div>
         <div>

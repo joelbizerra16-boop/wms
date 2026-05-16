@@ -9,6 +9,7 @@
         <h1 style="margin: 0;">Conferência</h1>
         <button type="button" class="btn btn-light" onclick="refreshPage(this)">Atualizar</button>
     </div>
+    {% if filtros %}{% include 'partials/filtro_periodo_operacional.html' %}{% endif %}
     <div id="conteudo-dinamico">
         {% include 'partials/conferencia_lista_tabela.html' %}
     </div>
