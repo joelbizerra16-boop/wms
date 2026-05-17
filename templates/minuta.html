@@ -86,9 +86,7 @@
                             class="btn btn-light minuta-pdf-button{% if defer_load or not resumo.itens %} is-disabled{% endif %}"
                             data-minuta-pdf-trigger
                             aria-disabled="{% if defer_load or not resumo.itens %}true{% else %}false{% endif %}"
-                            target="_blank"
                             rel="noopener"
-                            download
                         >
                             GERAR PDF
                         </a>
@@ -706,15 +704,75 @@
             carregamentoLabel.classList.toggle('is-selected', carregamentoCheckbox.checked);
             entregaLabel.classList.toggle('is-selected', entregaCheckbox.checked);
             if (pdfButton) {
-                pdfButton.classList.toggle('is-disabled', !habilitado || pdfButton.getAttribute('aria-disabled') === 'true');
+                const semItens = pdfButton.getAttribute('aria-disabled') === 'true';
+                pdfButton.classList.toggle('is-disabled', !habilitado || semItens);
             }
             atualizarHrefPdf();
         };
 
+        const extrairNomeArquivo = function (contentDisposition, fallback) {
+            if (!contentDisposition) {
+                return fallback;
+            }
+            const match = /filename="([^"]+)"/i.exec(contentDisposition);
+            return match ? match[1] : fallback;
+        };
+
+        const baixarMinutaPdf = async function (url) {
+            pdfButton.classList.add('is-loading');
+            try {
+                const response = await fetch(url, {
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const contentType = (response.headers.get('Content-Type') || '').toLowerCase();
+                if (!response.ok) {
+                    const mensagem = await response.text();
+                    window.alert(mensagem || 'Não foi possível gerar a minuta.');
+                    return;
+                }
+                if (!contentType.includes('pdf') && !contentType.includes('zip')) {
+                    const mensagem = await response.text();
+                    window.alert(mensagem || 'Resposta inválida ao gerar minuta.');
+                    return;
+                }
+                const blob = await response.blob();
+                const fallback = contentType.includes('zip') ? 'minutas.zip' : 'minuta.pdf';
+                const nomeArquivo = extrairNomeArquivo(response.headers.get('Content-Disposition'), fallback);
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = nomeArquivo;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.setTimeout(function () {
+                    URL.revokeObjectURL(link.href);
+                }, 1000);
+            } catch (error) {
+                console.error('Falha ao baixar minuta PDF', error);
+                window.alert('Falha ao gerar a minuta. Tente novamente.');
+            } finally {
+                pdfButton.classList.remove('is-loading');
+            }
+        };
+
+        const iniciarDownloadPdf = function (confirmarAlertas) {
+            const baseHref = pdfButton.getAttribute('data-base-href') || pdfButton.getAttribute('href');
+            const url = new URL(baseHref, window.location.origin);
+            url.searchParams.set('carregamento', carregamentoCheckbox.checked ? '1' : '0');
+            url.searchParams.set('entrega', entregaCheckbox.checked ? '1' : '0');
+            if (confirmarAlertas) {
+                url.searchParams.set('confirmar_alertas', '1');
+            } else {
+                url.searchParams.delete('confirmar_alertas');
+            }
+            baixarMinutaPdf(url.pathname + url.search);
+        };
+
         if (pdfButton) {
             pdfButton.addEventListener('click', function (event) {
+                event.preventDefault();
                 if (pdfButton.classList.contains('is-disabled')) {
-                    event.preventDefault();
                     return;
                 }
 
@@ -722,15 +780,11 @@
                 const possuiAlertas = (inconsistencias.total_problemas || 0) > 0;
 
                 if (possuiAlertas && pdfModal) {
-                    event.preventDefault();
                     abrirModalPdf(pdfButton.getAttribute('href'));
                     return;
                 }
 
-                pdfButton.classList.add('is-loading');
-                window.setTimeout(function () {
-                    pdfButton.classList.remove('is-loading');
-                }, 1800);
+                iniciarDownloadPdf(false);
             });
         }
 
@@ -744,18 +798,8 @@
                 }
             });
             pdfModalConfirmar.addEventListener('click', function () {
-                if (!pendingPdfHref) {
-                    fecharModalPdf();
-                    return;
-                }
-                const url = new URL(pendingPdfHref, window.location.origin);
-                url.searchParams.set('confirmar_alertas', '1');
                 fecharModalPdf();
-                pdfButton.classList.add('is-loading');
-                window.open(url.pathname + url.search, '_blank', 'noopener');
-                window.setTimeout(function () {
-                    pdfButton.classList.remove('is-loading');
-                }, 1800);
+                iniciarDownloadPdf(true);
             });
         }
 

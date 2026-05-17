@@ -1112,10 +1112,16 @@ def minuta(request):
     return render(request, 'minuta.html', context)
 
 
+def _resposta_erro_minuta_pdf(mensagem, status=400):
+    return HttpResponse(mensagem, content_type='text/plain; charset=utf-8', status=status)
+
+
 @require_profiles(Usuario.Perfil.GESTOR)
 def minuta_pdf(request):
-    logger.info('DEBUG MINUTA: gerando_pdf_inicio user_id=%s', getattr(request.user, 'id', None))
     from apps.core.operacional_periodo import periodo_operacional_padrao
+    from apps.core.services.minuta_service import registrar_minuta_pdf_gerada
+
+    logger.info('MINUTA_PDF_INICIO user_id=%s', getattr(request.user, 'id', None))
 
     date_from, date_to = periodo_operacional_padrao()
     if request.GET.get('data_inicial') or request.GET.get('data_final'):
@@ -1130,9 +1136,21 @@ def minuta_pdf(request):
     }
     gerar_carregamento = (request.GET.get('carregamento') or '1').strip() not in {'0', 'false', 'False'}
     gerar_entrega = (request.GET.get('entrega') or '').strip() in {'1', 'true', 'True'}
+    confirmacao_alertas = (request.GET.get('confirmar_alertas') or '').strip() in {'1', 'true', 'True'}
+
+    logger.info(
+        'MINUTA_PDF_FILTROS carregamento=%s entrega=%s romaneio=%s status=%s busca=%s data_inicial=%s data_final=%s',
+        gerar_carregamento,
+        gerar_entrega,
+        filtros['romaneio'],
+        filtros['status'],
+        filtros['busca'],
+        date_from,
+        date_to,
+    )
+
     if not gerar_carregamento and not gerar_entrega:
-        messages.error(request, 'Selecione pelo menos um tipo de minuta para gerar o PDF.')
-        return redirect('web-minuta')
+        return _resposta_erro_minuta_pdf('Selecione pelo menos um tipo de minuta para gerar o PDF.')
 
     queryset = consultar_minuta_itens_queryset(
         romaneio=filtros['romaneio'],
@@ -1142,61 +1160,72 @@ def minuta_pdf(request):
         data_fim=date_to,
     )
     itens = list(queryset)
+    romaneio_ids = sorted({item.romaneio_id for item in itens if getattr(item, 'romaneio_id', None)})
+    logger.info('MINUTA_PDF_ITENS total=%s romaneios=%s', len(itens), romaneio_ids)
+
+    if not itens:
+        return _resposta_erro_minuta_pdf('Nenhum romaneio encontrado para gerar minuta.', status=404)
+
     inconsistencias = get_minuta_inconsistencias([
-        {
-            'status': item.status,
-            'duplicado': item.duplicado,
-        }
+        {'status': item.status, 'duplicado': item.duplicado}
         for item in itens
     ])
-    confirmacao_alertas = (request.GET.get('confirmar_alertas') or '').strip() in {'1', 'true', 'True'}
     if inconsistencias['possui_alertas'] and not confirmacao_alertas:
-        messages.warning(
-            request,
-            'Foram encontradas inconsistências operacionais que podem impactar a geração do PDF.',
+        return _resposta_erro_minuta_pdf(
+            'Foram encontradas inconsistências operacionais. Confirme os alertas na tela antes de gerar o PDF.',
+            status=409,
         )
-        return redirect('web-minuta')
+
     nome_romaneio = _nome_exportacao_minuta(itens, fallback=filtros['romaneio'] or 'lote-ativo')
     try:
         arquivos = []
         if gerar_carregamento:
-            logger.info('DEBUG MINUTA: gerando_pdf tipo=carregamento romaneio=%s itens=%s', nome_romaneio, len(itens))
+            logger.info('MINUTA_PDF_GERANDO tipo=carregamento romaneio=%s itens=%s', nome_romaneio, len(itens))
             arquivos.append((f'minuta_carregamento_{nome_romaneio}.pdf', _build_minuta_romaneio_pdf(itens), 'application/pdf'))
         if gerar_entrega:
-            logger.info('DEBUG MINUTA: gerando_pdf tipo=entrega romaneio=%s itens=%s', nome_romaneio, len(itens))
+            logger.info('MINUTA_PDF_GERANDO tipo=entrega romaneio=%s itens=%s', nome_romaneio, len(itens))
             arquivos.append((f'minuta_entrega_{nome_romaneio}.pdf', _build_minuta_entrega_pdf(itens), 'application/pdf'))
     except MinutaImportacaoError as exc:
-        logger.error('ERRO REAL MINUTA: pdf_negocio user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
-        messages.error(request, str(exc))
-        return redirect('web-minuta')
+        logger.error('MINUTA_PDF_NEGOCIO user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
+        return _resposta_erro_minuta_pdf(str(exc))
     except Exception as exc:
-        traceback.print_exc()
-        logger.exception('ERRO REAL MINUTA: pdf_inesperado user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
-        messages.error(request, f'ERRO REAL: {str(exc)}')
-        raise
+        logger.exception('MINUTA_PDF_INESPERADO user_id=%s erro=%s', getattr(request.user, 'id', None), str(exc))
+        return _resposta_erro_minuta_pdf(f'Erro ao gerar PDF: {exc}', status=500)
 
-    from apps.core.services.minuta_service import registrar_minuta_pdf_gerada
+    if not arquivos:
+        return _resposta_erro_minuta_pdf('Nenhum arquivo PDF foi gerado.', status=500)
 
-    registrar_minuta_pdf_gerada(
-        itens,
-        request.user,
-        carregamento=gerar_carregamento,
-        entrega=gerar_entrega,
-    )
+    try:
+        registrar_minuta_pdf_gerada(
+            itens,
+            request.user,
+            carregamento=gerar_carregamento,
+            entrega=gerar_entrega,
+        )
+    except Exception as exc:
+        logger.exception(
+            'MINUTA_PDF_PERSISTENCIA_FALHA user_id=%s erro=%s (PDF sera entregue mesmo assim)',
+            getattr(request.user, 'id', None),
+            str(exc),
+        )
 
     if len(arquivos) == 1:
         nome_arquivo, conteudo, content_type = arquivos[0]
+        if not conteudo.startswith(b'%PDF'):
+            logger.error('MINUTA_PDF_INVALIDO arquivo=%s bytes=%s', nome_arquivo, len(conteudo))
+            return _resposta_erro_minuta_pdf('Conteúdo gerado não é um PDF válido.', status=500)
         response = HttpResponse(conteudo, content_type=content_type)
-        response['Content-Disposition'] = f'inline; filename="{nome_arquivo}"'
+        response['Content-Disposition'] = f'attachment; filename="{nome_arquivo}"'
+        logger.info('MINUTA_PDF_OK arquivo=%s bytes=%s', nome_arquivo, len(conteudo))
         return response
 
-    logger.info('DEBUG MINUTA: gerando_zip romaneio=%s arquivos=%s', nome_romaneio, len(arquivos))
+    logger.info('MINUTA_PDF_GERANDO_ZIP romaneio=%s arquivos=%s', nome_romaneio, len(arquivos))
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zip_file:
         for nome_arquivo, conteudo, _content_type in arquivos:
             zip_file.writestr(nome_arquivo, conteudo)
-
-    logger.info('DEBUG MINUTA: finalizando_importacao_pdf_zip romaneio=%s', nome_romaneio)
-    response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
+    zip_bytes = zip_buffer.getvalue()
+    response = HttpResponse(zip_bytes, content_type='application/zip')
     response['Content-Disposition'] = f'attachment; filename="minutas_{nome_romaneio}.zip"'
+    logger.info('MINUTA_PDF_OK zip bytes=%s', len(zip_bytes))
     return response

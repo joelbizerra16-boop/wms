@@ -1079,10 +1079,11 @@ class MinutaImportacaoTests(TestCase):
 			razao_social='CLIENTE ANTIGO',
 		)
 
-		response = self.client.get('/minuta/pdf/', follow=True)
+		response = self.client.get('/minuta/pdf/')
 
-		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Foram encontradas inconsistências operacionais que podem impactar a geração do PDF.')
+		self.assertEqual(response.status_code, 409)
+		self.assertEqual(response['Content-Type'], 'text/plain; charset=utf-8')
+		self.assertIn('inconsistências operacionais', response.content.decode())
 
 		response_confirmado = self.client.get('/minuta/pdf/?confirmar_alertas=1')
 

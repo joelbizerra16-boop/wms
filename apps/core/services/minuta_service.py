@@ -103,8 +103,13 @@ def registrar_minuta_pdf_gerada(itens, usuario, *, carregamento=True, entrega=Fa
     romaneios_atualizados = []
 
     romaneio_ids = {item.romaneio_id for item in itens if getattr(item, 'romaneio_id', None)}
+    if not romaneio_ids:
+        return []
     with transaction.atomic():
-        for romaneio in MinutaRomaneio.objects.select_for_update().filter(id__in=romaneio_ids):
+        queryset_romaneios = MinutaRomaneio.objects.filter(id__in=romaneio_ids)
+        if connection.vendor == 'postgresql':
+            queryset_romaneios = queryset_romaneios.select_for_update()
+        for romaneio in queryset_romaneios:
             hash_base = f'{romaneio.id}:{agora.isoformat()}:{tipo_minuta}:{romaneio.codigo_romaneio}'
             romaneio.pdf_gerado_em = agora
             romaneio.pdf_gerado_por = usuario
