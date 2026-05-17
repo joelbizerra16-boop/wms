@@ -7,6 +7,9 @@ from django.contrib import messages
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
 from rest_framework import viewsets
 
 from apps.conferencia.models import Conferencia
@@ -61,8 +64,21 @@ def _pode_monitorar_usuarios(user):
     )
 
 
+def _encerrar_sessoes_django(usuario_id):
+    """Remove sessões Django do usuário sem varrer a tabela inteira em memória."""
+    user_key = str(usuario_id)
+    agora = timezone.now()
+    for sessao in Session.objects.filter(expire_date__gte=agora).only('session_key', 'session_data').iterator(chunk_size=100):
+        try:
+            if sessao.get_decoded().get('_auth_user_id') == user_key:
+                sessao.delete()
+        except Exception:
+            continue
+
+
 @login_required
 @user_passes_test(_pode_monitorar_usuarios)
+@ensure_csrf_cookie
 @never_cache
 def usuarios_logados(request):
     sessoes_db = list(
@@ -105,7 +121,7 @@ def usuarios_logados(request):
         sessao.conferencias_execucao = conferencias_em_execucao.get(usuario.id, 0)
         sessoes.append(sessao)
     sessoes = sorted(sessoes, key=lambda s: (not s.online, s.usuario.username.lower()))
-    context = {'sessoes': sessoes, 'usuario': request.user}
+    context = {'sessoes': sessoes, 'usuario': request.user, 'user': request.user}
     context.update(build_access_context(request.user))
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest' and request.GET.get('partial') == 'table':
         return render(request, 'partials/usuarios_logados_tbody.html', context)
@@ -114,15 +130,27 @@ def usuarios_logados(request):
 
 @login_required
 @user_passes_test(_pode_monitorar_usuarios)
+@require_POST
 def forcar_logout_usuario(request, usuario_id):
-    if request.method != 'POST':
-        return redirect('usuarios_logados')
+    ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not (request.user.is_superuser or request.user.is_staff):
-        messages.error(request, 'Apenas admin/gestor autorizado pode forçar logout.')
+        mensagem = 'Apenas admin/gestor autorizado pode forçar logout.'
+        if ajax:
+            return JsonResponse({'ok': False, 'erro': mensagem}, status=403)
+        messages.error(request, mensagem)
         return redirect('usuarios_logados')
     alvo = Usuario.objects.filter(id=usuario_id).first()
     if not alvo:
-        messages.error(request, 'Usuário não encontrado para logout forçado.')
+        mensagem = 'Usuário não encontrado para logout forçado.'
+        if ajax:
+            return JsonResponse({'ok': False, 'erro': mensagem}, status=404)
+        messages.error(request, mensagem)
+        return redirect('usuarios_logados')
+    if alvo.id == request.user.id:
+        mensagem = 'Use o menu Sair para encerrar a sua própria sessão.'
+        if ajax:
+            return JsonResponse({'ok': False, 'erro': mensagem}, status=400)
+        messages.error(request, mensagem)
         return redirect('usuarios_logados')
     with transaction.atomic():
         Tarefa.objects.filter(usuario_em_execucao=alvo, status=Tarefa.Status.EM_EXECUCAO).update(
@@ -140,10 +168,10 @@ def forcar_logout_usuario(request, usuario_id):
         Conferencia.objects.filter(conferente=alvo, status=Conferencia.Status.EM_CONFERENCIA).update(
             status=Conferencia.Status.AGUARDANDO,
         )
-        for sessao in Session.objects.filter(expire_date__gte=timezone.now()):
-            dados = sessao.get_decoded()
-            if dados.get('_auth_user_id') == str(alvo.id):
-                sessao.delete()
+        _encerrar_sessoes_django(alvo.id)
         UsuarioSessao.objects.filter(usuario=alvo).update(ativo=False)
-    messages.success(request, f'Usuário {alvo.username} deslogado e tarefas liberadas.')
+    mensagem = f'Usuário {alvo.username} deslogado e tarefas liberadas.'
+    if ajax:
+        return JsonResponse({'ok': True, 'mensagem': mensagem})
+    messages.success(request, mensagem)
     return redirect('usuarios_logados')

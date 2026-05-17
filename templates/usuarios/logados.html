@@ -12,6 +12,8 @@
     </div>
 </div>
 
+<div id="usuarios-logados-feedback" class="feedback" style="display:none;margin-bottom:12px;"></div>
+
 <div class="card table-card">
     <div class="table-wrap">
         <table>
@@ -33,23 +35,106 @@
         </table>
     </div>
 </div>
+
 <script>
 (function () {
     const tbody = document.getElementById('usuarios-logados-tbody');
+    const feedbackEl = document.getElementById('usuarios-logados-feedback');
     const refreshIntervalMs = 15000;
+    const meuUsuarioId = {{ user.id|default:0 }};
+
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return '';
+    }
+
+    function setFeedback(message, type) {
+        if (!feedbackEl) return;
+        feedbackEl.style.display = 'block';
+        feedbackEl.className = `feedback ${type === 'erro' ? 'error' : 'ok'}`;
+        feedbackEl.textContent = message;
+    }
+
+    function atualizarTokensCsrf(container) {
+        const novoToken = container.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (!novoToken) return;
+        document.querySelectorAll('input[name="csrfmiddlewaretoken"]').forEach(function (input) {
+            input.value = novoToken.value;
+        });
+    }
+
+    function vincularLogoutAjax() {
+        if (!tbody) return;
+        tbody.querySelectorAll('form[data-forcar-logout]').forEach(function (form) {
+            if (form.dataset.bound === '1') return;
+            form.dataset.bound = '1';
+            form.addEventListener('submit', async function (event) {
+                event.preventDefault();
+                const usuarioId = Number(form.dataset.usuarioId || 0);
+                if (usuarioId === meuUsuarioId) {
+                    setFeedback('Use o menu Sair para encerrar a sua própria sessão.', 'erro');
+                    return;
+                }
+                const button = form.querySelector('button[type="submit"]');
+                if (button) {
+                    button.disabled = true;
+                    button.textContent = 'Processando...';
+                }
+                try {
+                    const response = await fetch(form.action, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: {
+                            'X-CSRFToken': getCookie('csrftoken'),
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json',
+                        },
+                    });
+                    const data = await response.json().catch(function () { return {}; });
+                    if (!response.ok) {
+                        throw new Error(data.erro || 'Não foi possível forçar logout.');
+                    }
+                    setFeedback(data.mensagem || 'Usuário deslogado.', 'ok');
+                    await refreshUsuariosLogados();
+                } catch (error) {
+                    setFeedback(error.message, 'erro');
+                } finally {
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = '⛔ Deslogar e liberar';
+                    }
+                }
+            });
+        });
+    }
 
     async function refreshUsuariosLogados() {
         if (!tbody || document.hidden) return;
         const response = await fetch(`${window.location.pathname}?partial=table`, {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'text/html',
+            },
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+            throw new Error(`Falha ao atualizar lista (${response.status}).`);
+        }
         const html = await response.text();
-        tbody.innerHTML = html;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html');
+        tbody.innerHTML = doc.querySelector('tbody') ? doc.querySelector('tbody').innerHTML : html;
+        atualizarTokensCsrf(doc);
+        vincularLogoutAjax();
     }
 
+    vincularLogoutAjax();
     setInterval(function () {
-        refreshUsuariosLogados().catch(function () {});
+        refreshUsuariosLogados().catch(function (error) {
+            setFeedback(error.message, 'erro');
+        });
     }, refreshIntervalMs);
 })();
 </script>

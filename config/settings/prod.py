@@ -16,7 +16,7 @@ ALLOWED_HOSTS = config(
 DATABASE_URL = config('DATABASE_URL')
 CSRF_TRUSTED_ORIGINS = config(
 	'CSRF_TRUSTED_ORIGINS',
-	default='https://*.onrender.com',
+	default='https://.onrender.com',
 	cast=Csv(),
 )
 

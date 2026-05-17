@@ -15,7 +15,7 @@
     <td>T: {{ s.tarefas_execucao }} | C: {{ s.conferencias_execucao }}</td>
     <td>
         {% if user.is_superuser or user.is_staff %}
-        <form method="post" action="{% url 'forcar_logout_usuario' s.usuario.id %}" style="margin:0;">
+        <form method="post" action="{% url 'forcar_logout_usuario' s.usuario.id %}" data-forcar-logout="1" data-usuario-id="{{ s.usuario.id }}" style="margin:0;">
             {% csrf_token %}
             <button type="submit" class="button-link" style="background:#c0392b;color:#fff;">⛔ Deslogar e liberar</button>
         </form>
