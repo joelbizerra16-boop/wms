@@ -109,3 +109,35 @@ def agendar_logs_bipagem_conferencia(*, usuario_id, nf_numero, produto_cod, tare
         )
 
     transaction.on_commit(_registrar)
+
+
+def agendar_conclusao_automatica_separacao(*, tarefa_id, usuario_id):
+    """Conclui tarefa e sincroniza NF fora do caminho crítico da última bipagem."""
+
+    def _concluir():
+        from apps.tarefas.models import Tarefa
+        from apps.tarefas.services.separacao_service import _nfs_afetadas_tarefa, sincronizar_conclusao_automatica_tarefa
+
+        tarefa = Tarefa.objects.filter(id=tarefa_id).first()
+        if not tarefa:
+            return
+        if sincronizar_conclusao_automatica_tarefa(tarefa, None):
+            from apps.nf.services.status_service import sincronizar_status_operacional_nfs
+
+            sincronizar_status_operacional_nfs(_nfs_afetadas_tarefa(tarefa))
+
+    transaction.on_commit(_concluir)
+
+
+def agendar_nf_ids_separacao(nf_ids):
+    ids = [nf_id for nf_id in nf_ids if nf_id]
+    if not ids:
+        return
+
+    def _sincronizar():
+        from apps.nf.models import NotaFiscal
+        from apps.nf.services.status_service import sincronizar_status_operacional_nfs
+
+        sincronizar_status_operacional_nfs(list(NotaFiscal.objects.filter(id__in=ids)))
+
+    transaction.on_commit(_sincronizar)

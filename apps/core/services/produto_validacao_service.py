@@ -38,16 +38,19 @@ def selecionar_item_por_codigo_lido(codigo_lido, itens, *, fallback=None):
     return fallback
 
 
-def validar_produto(codigo_lido, item_id, usuario, item_model, tipo_validacao):
+def validar_produto(codigo_lido, item_id, usuario, item_model, tipo_validacao, *, item_travado=None):
     codigo_normalizado = _normalizar_codigo(codigo_lido)
     if not codigo_normalizado:
         raise ProdutoValidacaoError('Informe um código válido para bipagem.')
 
-    item = (
-        item_model.objects.select_for_update()
-        .select_related('produto')
-        .get(id=item_id)
-    )
+    if item_travado is not None:
+        item = item_travado
+    else:
+        item = (
+            item_model.objects.select_for_update()
+            .select_related('produto')
+            .get(id=item_id)
+        )
     produto_esperado = item.produto
     identificadores_esperados = _identificadores_produto(produto_esperado)
     if _codigo_corresponde_identificador(codigo_normalizado, identificadores_esperados):
@@ -131,17 +134,6 @@ def validar_produto(codigo_lido, item_id, usuario, item_model, tipo_validacao):
             f'Produto do setor {produto_setor or "-"} não corresponde ao item do setor {item_setor or "-"}'
         )
 
-    _log_validacao(
-        usuario=usuario,
-        tipo_validacao=tipo_validacao,
-        codigo_lido=codigo_lido,
-        produto_encontrado_id=produto.id,
-        item_id=item_id,
-        produto_esperado_id=produto_esperado_id,
-        produto_setor=produto_setor,
-        item_setor=item_setor,
-        resultado='ok',
-    )
     return ProdutoValidado(
         produto=produto,
         item=item,

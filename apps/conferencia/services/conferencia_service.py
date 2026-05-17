@@ -80,12 +80,18 @@ def _usuario_pode_ver_todos_setores(usuario):
 
 
 def _setores_usuario(usuario):
+    from apps.core.operacional_cache import setores_usuario_operacional
+
     if usuario is None:
         return set()
-    setores = list(usuario.setores.values_list('nome', flat=True))
-    if not setores and getattr(usuario, 'setor', None) and usuario.setor != Setor.Codigo.NAO_ENCONTRADO:
-        setores = [usuario.setor]
-    return {_normalizar_setor_operacional(valor) for valor in setores if _normalizar_setor_operacional(valor)}
+    setores = setores_usuario_operacional(usuario)
+    if setores is None:
+        return set()
+    if setores:
+        return setores
+    if getattr(usuario, 'setor', None) and usuario.setor != Setor.Codigo.NAO_ENCONTRADO:
+        return {_normalizar_setor_operacional(usuario.setor)}
+    return set()
 
 
 def _nf_pertence_a_setores_usuario(nf, usuario):
@@ -631,165 +637,176 @@ def iniciar_conferencia(nf_id, usuario):
 
 
 def bipar_conferencia(conferencia_id, codigo, usuario):
-    inicio = time.perf_counter()
+    from apps.core.operacional_bipagem_metrics import BipagemMetrics
+    from apps.core.operacional_side_effects import agendar_atualizar_status_nf, agendar_logs_bipagem_conferencia
+
+    metricas = BipagemMetrics('conferencia', conferencia_id, getattr(usuario, 'id', None))
     try:
-        conferencia = _obter_conferencia_em_andamento(conferencia_id, usuario)
+        nf_id = None
+        nf_numero = ''
+        produto_cod = ''
+        finalizado = False
+        conferido = Decimal('0')
+        esperado = Decimal('0')
+        setor_cache = ''
+
+        def _executar():
+            nonlocal nf_id, nf_numero, produto_cod, finalizado, conferido, esperado, setor_cache
+            with transaction.atomic():
+                with metricas.fase('lock'):
+                    lock_kwargs = {'nowait': True} if connection.vendor == 'postgresql' else {}
+                    conferencia_local = (
+                        Conferencia.objects.select_for_update(**lock_kwargs)
+                        .select_related('nf')
+                        .only(
+                            'id',
+                            'status',
+                            'conferente_id',
+                            'nf_id',
+                            'nf__id',
+                            'nf__numero',
+                            'nf__status_fiscal',
+                        )
+                        .get(id=conferencia_id)
+                    )
+                    if conferencia_local.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
+                        raise ConferenciaError(NF_CANCELADA_ERRO)
+                    if conferencia_local.status not in {
+                        Conferencia.Status.EM_CONFERENCIA,
+                        Conferencia.Status.LIBERADO_COM_RESTRICAO,
+                    }:
+                        raise ConferenciaError('Conferencia nao esta em andamento.')
+                    if conferencia_local.conferente_id != usuario.id:
+                        raise ConferenciaError('Conferencia vinculada a outro usuario.')
+
+                with metricas.fase('query'):
+                    itens_pendentes = list(
+                        ConferenciaItem.objects.select_for_update(skip_locked=True)
+                        .filter(
+                            conferencia_id=conferencia_id,
+                            status=ConferenciaItem.Status.AGUARDANDO,
+                            qtd_conferida__lt=F('qtd_esperada'),
+                        )
+                        .select_related('produto')
+                        .only(
+                            'id',
+                            'conferencia_id',
+                            'produto_id',
+                            'qtd_esperada',
+                            'qtd_conferida',
+                            'status',
+                            'produto__id',
+                            'produto__cod_prod',
+                            'produto__cod_ean',
+                            'produto__codigo',
+                            'produto__setor',
+                        )
+                        .order_by('id')
+                    )
+                    if not itens_pendentes:
+                        raise ConferenciaError('Não existem itens pendentes para bipagem.')
+
+                    item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
+                    try:
+                        validacao = validar_produto(
+                            codigo_lido=codigo,
+                            item_id=item_esperado.id,
+                            usuario=usuario,
+                            item_model=ConferenciaItem,
+                            tipo_validacao='CONFERENCIA',
+                            item_travado=item_esperado,
+                        )
+                    except ProdutoValidacaoError as exc:
+                        raise ConferenciaError(str(exc)) from exc
+
+                    item_local = validacao.item
+                    if item_local.status == ConferenciaItem.Status.DIVERGENCIA:
+                        raise ConferenciaError('Item em divergencia nao pode ser bipado sem tratativa.')
+                    if item_local.qtd_conferida >= item_local.qtd_esperada:
+                        raise ConferenciaError('Quantidade conferida excede o esperado.')
+
+                    nova_conferida = item_local.qtd_conferida + Decimal('1')
+                    completo = nova_conferida >= item_local.qtd_esperada
+                    agora = timezone.now()
+                    novo_status = ConferenciaItem.Status.OK if completo else ConferenciaItem.Status.AGUARDANDO
+
+                with metricas.fase('save'):
+                    valores_update = {
+                        'qtd_conferida': nova_conferida,
+                        'status': novo_status,
+                        'bipado_por_id': usuario.id,
+                        'data_bipagem': agora,
+                        'updated_at': agora,
+                    }
+                    if completo:
+                        valores_update['motivo_divergencia'] = None
+                        valores_update['observacao_divergencia'] = ''
+                    ConferenciaItem.objects.filter(pk=item_local.pk).update(**valores_update)
+                    item_local.qtd_conferida = nova_conferida
+                    item_local.status = novo_status
+
+                itens_restantes = []
+                for item_pendente in itens_pendentes:
+                    if item_pendente.id == item_local.id:
+                        if not completo:
+                            itens_restantes.append(item_local)
+                        continue
+                    itens_restantes.append(item_pendente)
+
+                finalizado = not itens_restantes
+                nf_id = conferencia_local.nf_id
+                nf_numero = conferencia_local.nf.numero
+                produto_cod = item_local.produto.cod_prod
+                conferido = nova_conferida
+                esperado = item_local.qtd_esperada
+                setor_cache = _setor_operacional_produto(item_local.produto)
+
+                agendar_logs_bipagem_conferencia(
+                    usuario_id=usuario.id,
+                    nf_numero=nf_numero,
+                    produto_cod=produto_cod,
+                    tarefa_id=None,
+                )
+                if not finalizado:
+                    agendar_atualizar_status_nf(nf_id)
+
+                    def _invalidar_apos_bipagem():
+                        _invalidate_conferencia_operacional_cache(
+                            motivo='bipagem_conferencia',
+                            nf_id=nf_id,
+                            setor=setor_cache,
+                        )
+
+                    transaction.on_commit(_invalidar_apos_bipagem)
 
         try:
-            with transaction.atomic():
-                lock_kwargs = {'nowait': True} if connection.vendor == 'postgresql' else {}
-                conferencia = (
-                    Conferencia.objects.select_for_update(**lock_kwargs)
-                    .select_related('nf', 'conferente')
-                    .get(id=conferencia.id)
-                )
-                itens_pendentes = list(
-                    ConferenciaItem.objects.select_for_update(skip_locked=True)
-                    .filter(
-                        conferencia=conferencia,
-                        status=ConferenciaItem.Status.AGUARDANDO,
-                        qtd_conferida__lt=F('qtd_esperada'),
-                    )
-                    .select_related('produto')
-                    .order_by('id')
-                )
-                if not itens_pendentes:
-                    raise ConferenciaError('Não existem itens pendentes para bipagem.')
-                item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
-                try:
-                    validacao = validar_produto(
-                        codigo_lido=codigo,
-                        item_id=item_esperado.id,
-                        usuario=usuario,
-                        item_model=ConferenciaItem,
-                        tipo_validacao='CONFERENCIA',
-                    )
-                except ProdutoValidacaoError as exc:
-                    raise ConferenciaError(str(exc)) from exc
-
-                item = validacao.item
-                if item.status == ConferenciaItem.Status.DIVERGENCIA:
-                    raise ConferenciaError('Item em divergencia nao pode ser bipado sem tratativa.')
-                if item.qtd_conferida >= item.qtd_esperada:
-                    raise ConferenciaError('Quantidade conferida excede o esperado.')
-
-                item.qtd_conferida += Decimal('1')
-                item.bipado_por = usuario
-                item.data_bipagem = timezone.now()
-                if item.qtd_conferida == item.qtd_esperada:
-                    item.status = ConferenciaItem.Status.OK
-                    item.motivo_divergencia = None
-                    item.observacao_divergencia = ''
-                item.save(
-                    update_fields=[
-                        'qtd_conferida',
-                        'status',
-                        'motivo_divergencia',
-                        'observacao_divergencia',
-                        'bipado_por',
-                        'data_bipagem',
-                        'updated_at',
-                    ]
-                )
-
-                nf_id = conferencia.nf_id
-                nf_numero = conferencia.nf.numero
-                produto_cod = item.produto.cod_prod
+            _executar()
         except OperationalError as exc:
             if connection.vendor == 'postgresql' and 'could not obtain lock' in str(exc).lower():
                 raise ConferenciaError('Conferência em uso por outra operação. Tente novamente.') from exc
             raise
 
-        itens_restantes = []
-        for item_pendente in itens_pendentes:
-            if item_pendente.id == item.id:
-                if item.qtd_conferida < item.qtd_esperada and item.status == ConferenciaItem.Status.AGUARDANDO:
-                    itens_restantes.append(item)
-                continue
-            itens_restantes.append(item_pendente)
-        proximo_item = itens_restantes[0] if itens_restantes else None
-        todos_itens_completos = not itens_restantes
-        finalizado = todos_itens_completos
+        with metricas.fase('response'):
+            resposta = {
+                'status': 'ok',
+                'esperado': float(esperado),
+                'conferido': float(conferido),
+                'finalizado': finalizado,
+            }
+            if finalizado:
+                finalizar_conferencia(conferencia_id, usuario)
+                conferencia_final = Conferencia.objects.only('id', 'status').get(id=conferencia_id)
+                resposta['conferencia'] = {
+                    'id': conferencia_final.id,
+                    'status': conferencia_final.status,
+                    'progresso': {'percentual': 100.0},
+                }
+                from apps.core.operacional_transicao import anexar_transicao_conferencia
 
-        conferencia_resultado = None
-        if finalizado:
-            conferencia_resultado = finalizar_conferencia(conferencia.id, usuario)
-            conferencia.refresh_from_db(fields=['status', 'updated_at'])
-        else:
-            conferencia_resultado = _dados_conferencia(conferencia)
-
-        if not finalizado:
-            from apps.core.operacional_side_effects import (
-                agendar_atualizar_status_nf,
-                agendar_logs_bipagem_conferencia,
-            )
-
-            tarefa_id = conferencia.nf.tarefas.values_list('id', flat=True).first()
-            agendar_atualizar_status_nf(nf_id)
-            agendar_logs_bipagem_conferencia(
-                usuario_id=usuario.id,
-                nf_numero=nf_numero,
-                produto_cod=produto_cod,
-                tarefa_id=tarefa_id,
-            )
-            nf_id_cache = conferencia.nf_id
-            setor_cache = _setor_operacional_produto(item.produto)
-
-            def _invalidar_apos_bipagem():
-                _invalidate_conferencia_operacional_cache(
-                    motivo='bipagem_conferencia',
-                    nf_id=nf_id_cache,
-                    setor=setor_cache,
-                )
-
-            transaction.on_commit(_invalidar_apos_bipagem)
-        else:
-            tarefa_id = conferencia.nf.tarefas.values_list('id', flat=True).first()
-            from apps.core.operacional_side_effects import agendar_logs_bipagem_conferencia
-
-            agendar_logs_bipagem_conferencia(
-                usuario_id=usuario.id,
-                nf_numero=nf_numero,
-                produto_cod=produto_cod,
-                tarefa_id=tarefa_id,
-            )
-
-        item_atual = _dados_item(item)
-        resposta = {
-            'status': 'ok',
-            'item_atual': item_atual,
-            'item_id': item_atual['item_id'],
-            'produto': item_atual['produto'],
-            'ean': item_atual['ean'],
-            'esperado': item_atual['esperado'],
-            'conferido': item_atual['conferido'],
-            'percentual': item_atual['percentual'],
-            'progresso': item_atual['progresso'],
-            'proximo_item': _dados_item_operacional(proximo_item) if proximo_item else None,
-            'finalizado': finalizado,
-            'conferencia': conferencia_resultado,
-        }
-        if finalizado:
-            from apps.core.operacional_transicao import anexar_transicao_conferencia
-
-            anexar_transicao_conferencia(resposta, usuario, nf_id_atual=conferencia.nf_id)
-        return resposta
+                anexar_transicao_conferencia(resposta, usuario, nf_id_atual=nf_id)
+            return resposta
     finally:
-        elapsed_ms = (time.perf_counter() - inicio) * 1000
-        slow_threshold = float(getattr(settings, 'BIPAGEM_SLOW_LOG_MS', 150))
-        logger.info(
-            'CONFERENCIA_BIPAGEM_MS conferencia_id=%s user_id=%s tempo_ms=%.2f',
-            conferencia_id,
-            getattr(usuario, 'id', None),
-            elapsed_ms,
-        )
-        if elapsed_ms >= slow_threshold:
-            logger.warning(
-                'CONFERENCIA_BIPAGEM_LENTA conferencia_id=%s user_id=%s tempo_ms=%.2f',
-                conferencia_id,
-                getattr(usuario, 'id', None),
-                elapsed_ms,
-            )
+        metricas.registrar()
 
 
 @transaction.atomic
