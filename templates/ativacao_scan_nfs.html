@@ -16,6 +16,16 @@
 </div>
 
 <div class="card">
+    <div class="balcao-row">
+        <span class="balcao-row__label">Pedido Balcao</span>
+        <label class="balcao-inline" for="balcao-toggle-scan">
+            <span class="switch">
+                <input id="balcao-toggle-scan" type="checkbox" name="balcao"{% if balcao_ativo %} checked{% endif %}>
+                <span class="slider"></span>
+            </span>
+            <span class="balcao-inline__text">Pedido Balcao (retirada na empresa)</span>
+        </label>
+    </div>
     <label for="scanner">Scanner NF</label>
     <input type="text" id="scanner" autofocus placeholder="Bipar NF (chave ou número)">
     <p id="scan-feedback" class="muted" style="margin-top:10px;">Aguardando leitura...</p>
@@ -134,7 +144,35 @@
     const errorAudio = document.getElementById('beep-error');
     const scanEndpoint = '/api/scan-nf/';
     const removeEndpoint = '/api/scan-nf/remover/';
+    const balcaoToggle = document.getElementById('balcao-toggle-scan');
+    const BALCAO_STORAGE_KEY = 'wms_scan_pedido_balcao';
+    const balcaoInicialServidor = {% if balcao_ativo %}true{% else %}false{% endif %};
     let scanTimer = null;
+
+    function pedidoBalcaoAtivo() {
+        return Boolean(balcaoToggle && balcaoToggle.checked);
+    }
+
+    function restaurarEstadoBalcao() {
+        if (!balcaoToggle) return;
+        const salvo = sessionStorage.getItem(BALCAO_STORAGE_KEY);
+        if (salvo === '1') balcaoToggle.checked = true;
+        else if (salvo === '0') balcaoToggle.checked = false;
+        else balcaoToggle.checked = balcaoInicialServidor;
+    }
+
+    function persistirEstadoBalcao() {
+        if (!balcaoToggle) return;
+        sessionStorage.setItem(BALCAO_STORAGE_KEY, pedidoBalcaoAtivo() ? '1' : '0');
+    }
+
+    restaurarEstadoBalcao();
+    if (balcaoToggle) {
+        balcaoToggle.addEventListener('change', function () {
+            persistirEstadoBalcao();
+            scanner.focus();
+        });
+    }
 
     function setFeedback(message, type) {
         feedback.textContent = message;
@@ -259,7 +297,7 @@
                 'X-CSRFToken': csrfToken,
                 'X-Requested-With': 'XMLHttpRequest',
             },
-            body: JSON.stringify({ codigo }),
+            body: JSON.stringify({ codigo, balcao: pedidoBalcaoAtivo() }),
         });
         const data = await response.json();
         if (!response.ok || !data.ok) {

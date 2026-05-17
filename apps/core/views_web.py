@@ -813,7 +813,14 @@ def ativacao_scan_nfs_web(request):
     entradas = list(EntradaNF.objects.filter(id__in=entradas_ids))
     entradas_map = {entrada.id: entrada for entrada in entradas}
     entradas_ordenadas = [entradas_map[i] for i in entradas_ids if i in entradas_map]
-    return _render(request, 'ativacao_scan_nfs.html', {'entradas_scan': entradas_ordenadas})
+    return _render(
+        request,
+        'ativacao_scan_nfs.html',
+        {
+            'entradas_scan': entradas_ordenadas,
+            'balcao_ativo': bool(request.session.get('scan_pedido_balcao', False)),
+        },
+    )
 
 
 @require_profiles(Usuario.Perfil.GESTOR)
@@ -829,6 +836,10 @@ def scan_nf_api(request):
     codigo = (payload.get('codigo') or request.POST.get('codigo') or '').strip()
     if not codigo:
         return JsonResponse({'ok': False, 'erro': 'Informe um código para leitura.'}, status=400)
+
+    balcao = payload.get('balcao') in {True, 1, '1', 'on', 'true', 'True'}
+    request.session['scan_pedido_balcao'] = balcao
+    request.session.modified = True
 
     entrada = (
         EntradaNF.objects.filter(chave_nf=codigo).order_by('-id').first()
@@ -879,6 +890,10 @@ def scan_nf_api(request):
         )
 
     ids = _scan_ids_session(request)
+    if balcao and entrada.tipo != EntradaNF.Tipo.BALCAO:
+        entrada.tipo = EntradaNF.Tipo.BALCAO
+        entrada.save(update_fields=['tipo', 'updated_at'])
+
     if entrada.id in ids:
         return JsonResponse(
             {
@@ -890,6 +905,7 @@ def scan_nf_api(request):
                     'numero_nf': entrada.numero_nf,
                     'chave_nf': entrada.chave_nf,
                     'status': entrada.status,
+                    'tipo': entrada.tipo,
                     'data_importacao': entrada.data_importacao.strftime('%d/%m/%Y %H:%M:%S'),
                 },
             }
