@@ -360,14 +360,13 @@
         let redirecionandoConclusao = false;
         const listaSeparacaoUrl = "{% url 'web-separacao-lista' %}";
 
-        function navegarAposConclusao(data) {
+        function navegarAposConclusao() {
             if (redirecionandoConclusao) return;
             redirecionandoConclusao = true;
-            const destino = (data && data.redirect_url) ? data.redirect_url : listaSeparacaoUrl;
             stopPolling();
             bloquearBipagem();
             if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
-            window.location.replace(destino);
+            window.location.replace(listaSeparacaoUrl);
         }
         let scannerBuffer = '';
         let scannerTimer = null;
@@ -486,8 +485,8 @@
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
 
                 if (tarefaConcluida(data.status_tarefa) || data.finalizado) {
-                    setFeedback(data.tem_proxima ? 'Próxima tarefa...' : 'Separação concluída.', 'ok');
-                    navegarAposConclusao(data);
+                    setFeedback('Separação concluída.', 'ok');
+                    navegarAposConclusao();
                     return;
                 }
 

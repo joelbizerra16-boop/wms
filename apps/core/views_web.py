@@ -1280,6 +1280,7 @@ def separacao_exec_web(request, tarefa_id):
                 else:
                     finalizar_tarefa(tarefa.id, status_final, request.user, request.POST.get('motivo_restricao'))
                     messages.success(request, 'Tarefa finalizada.')
+                    return redirect('web-separacao-lista')
             elif acao == 'continuar_depois':
                 liberar_execucao_tarefa(tarefa.id, request.user)
                 messages.warning(request, 'Tarefa mantida para continuar depois.')
@@ -1404,6 +1405,7 @@ def conferencia_exec_web(request, nf_id):
                 else:
                     finalizar_conferencia(conferencia_ativa.id, request.user)
                     messages.success(request, 'Conferência finalizada.')
+                    return redirect('web-conferencia-lista')
         except ConferenciaError as exc:
             messages.error(request, str(exc))
         return redirect('web-conferencia-exec', nf_id=nf.id)

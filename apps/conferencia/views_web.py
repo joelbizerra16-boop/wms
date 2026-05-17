@@ -294,11 +294,13 @@ def conferir_nf(request, nf_id):
                     return redirect('web-conferencia-divergencia', item_id=item.id)
                 finalizar_conferencia(conferencia_ativa.id, request.user)
                 messages.success(request, 'Conferência finalizada.')
+                return redirect('web-conferencia-lista')
             elif acao == 'finalizar':
                 if not conferencia_ativa:
                     raise ConferenciaError('Nenhuma conferência em andamento para finalizar.')
                 finalizar_conferencia(conferencia_ativa.id, request.user)
                 messages.success(request, 'Conferência finalizada.')
+                return redirect('web-conferencia-lista')
             elif acao == 'continuar_depois':
                 if conferencia_ativa and conferencia_ativa.status == Conferencia.Status.EM_CONFERENCIA:
                     conferencia_ativa.status = Conferencia.Status.AGUARDANDO

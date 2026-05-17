@@ -2651,3 +2651,43 @@ class AtivacaoScanBalcaoTests(TestCase):
 		entrada.refresh_from_db()
 		self.assertEqual(entrada.tipo, EntradaNF.Tipo.BALCAO)
 		self.assertTrue(importar_mock.call_args.kwargs.get('balcao'))
+
+
+class OperacionalTransicaoTests(SimpleTestCase):
+	def test_anexar_transicao_separacao_redireciona_para_lista(self):
+		from apps.core.operacional_transicao import anexar_transicao_separacao, url_lista_separacao
+
+		payload = {}
+		anexar_transicao_separacao(payload, usuario=None, tarefa_id_atual=99)
+		self.assertEqual(payload['redirect_url'], url_lista_separacao())
+		self.assertFalse(payload['tem_proxima'])
+		self.assertIsNone(payload['proxima_tarefa_id'])
+
+	def test_anexar_transicao_conferencia_redireciona_para_lista(self):
+		from apps.core.operacional_transicao import anexar_transicao_conferencia, url_lista_conferencia
+
+		payload = {}
+		anexar_transicao_conferencia(payload, usuario=None, nf_id_atual=42)
+		self.assertEqual(payload['redirect_url'], url_lista_conferencia())
+		self.assertFalse(payload['tem_proxima'])
+		self.assertIsNone(payload['proxima_nf_id'])
+
+
+class OperacionalTransicaoTests(SimpleTestCase):
+	def test_anexar_transicao_separacao_redireciona_para_lista(self):
+		from apps.core.operacional_transicao import anexar_transicao_separacao, url_lista_separacao
+
+		payload = {}
+		anexar_transicao_separacao(payload, usuario=None, tarefa_id_atual=99)
+		self.assertEqual(payload['redirect_url'], url_lista_separacao())
+		self.assertFalse(payload['tem_proxima'])
+		self.assertIsNone(payload['proxima_tarefa_id'])
+
+	def test_anexar_transicao_conferencia_redireciona_para_lista(self):
+		from apps.core.operacional_transicao import anexar_transicao_conferencia, url_lista_conferencia
+
+		payload = {}
+		anexar_transicao_conferencia(payload, usuario=None, nf_id_atual=42)
+		self.assertEqual(payload['redirect_url'], url_lista_conferencia())
+		self.assertFalse(payload['tem_proxima'])
+		self.assertIsNone(payload['proxima_nf_id'])

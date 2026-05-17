@@ -418,17 +418,16 @@
         let redirecionandoConclusao = false;
         const listaConferenciaUrl = "{% url 'web-conferencia-lista' %}";
 
-        function navegarAposConclusao(data) {
+        function navegarAposConclusao() {
             if (redirecionandoConclusao) return;
             redirecionandoConclusao = true;
-            const destino = (data && data.redirect_url) ? data.redirect_url : listaConferenciaUrl;
             stopPolling();
             if (codigoInput) {
                 codigoInput.disabled = true;
                 codigoInput.placeholder = 'Conferencia finalizada';
             }
             if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
-            window.location.replace(destino);
+            window.location.replace(listaConferenciaUrl);
         }
 
         function getCookie(name) {
@@ -590,8 +589,8 @@
                 codigoInput.value = '';
                 setFeedback('Leitura registrada com sucesso.', 'ok');
                 if (data.finalizado) {
-                    setFeedback(data.tem_proxima ? 'Próxima NF...' : 'Conferência concluída.', 'ok');
-                    navegarAposConclusao(data);
+                    setFeedback('Conferência concluída.', 'ok');
+                    navegarAposConclusao();
                     return;
                 }
                 await refreshNFStatus();
