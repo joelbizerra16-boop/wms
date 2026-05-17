@@ -1,5 +1,6 @@
 import time
 import traceback
+from datetime import timedelta
 from decimal import Decimal
 import logging
 
@@ -18,8 +19,7 @@ from apps.core.services.produto_validacao_service import (
 from apps.nf.services.status_service import sincronizar_status_operacional_nfs
 from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa, TarefaItem
-from apps.usuarios.models import Setor
-from apps.usuarios.session_utils import usuario_esta_logado
+from apps.usuarios.models import Setor, UsuarioSessao
 
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,9 @@ class SeparacaoError(Exception):
 def _tarefa_lock_queryset():
     # PostgreSQL rejects FOR UPDATE on nullable OUTER JOINs, so lock only the
     # tarefa row itself and keep nullable relations lazy-loaded.
+    lock_kwargs = {'nowait': True} if connection.vendor == 'postgresql' else {}
     return (
-        Tarefa.objects.select_for_update()
+        Tarefa.objects.select_for_update(**lock_kwargs)
         .select_related('rota')
         .prefetch_related('itens__produto', 'itens__nf')
     )
@@ -130,25 +131,7 @@ def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None)
         )
     queryset = _filtrar_tarefas_por_setor(queryset, usuario)
     tarefas = list(queryset)
-    for tarefa in tarefas:
-        sincronizar_conclusao_automatica_tarefa(tarefa, usuario)
-        if tarefa.status == Tarefa.Status.CONCLUIDO:
-            continue
-        usuario_responsavel = tarefa.usuario_em_execucao or tarefa.usuario
-        if usuario_responsavel and not usuario_esta_logado(usuario_responsavel):
-            tarefa.usuario = None
-            tarefa.usuario_em_execucao = None
-            tarefa.data_inicio = None
-            if tarefa.status == Tarefa.Status.EM_EXECUCAO:
-                tarefa.status = Tarefa.Status.ABERTO
-                tarefa.save(update_fields=['usuario', 'usuario_em_execucao', 'data_inicio', 'status', 'updated_at'])
-                continue
-            tarefa.save(update_fields=['usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
-        if tarefa.status == Tarefa.Status.EM_EXECUCAO and tarefa.usuario_em_execucao_id is None:
-            tarefa.status = Tarefa.Status.ABERTO
-            tarefa.usuario = None
-            tarefa.data_inicio = None
-            tarefa.save(update_fields=['status', 'usuario', 'data_inicio', 'updated_at'])
+    _normalizar_tarefas_lista_operacional(tarefas, usuario)
 
     tarefas = [tarefa for tarefa in tarefas if tarefa.status in STATUS_TAREFA_DISPONIVEL]
     tarefas_ordenadas = sorted(
@@ -160,6 +143,68 @@ def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None)
         ),
     )
     return [_serializar_tarefa_lista(tarefa, usuario) for tarefa in tarefas_ordenadas]
+
+
+def _normalizar_tarefas_lista_operacional(tarefas, usuario=None):
+    """Conclusão automática e liberação de tarefas órfãs sem N saves na listagem."""
+    if not tarefas:
+        return
+    limite_online = timezone.now() - timedelta(minutes=5)
+    responsaveis_ids = {
+        tarefa.usuario_em_execucao_id or tarefa.usuario_id
+        for tarefa in tarefas
+        if (tarefa.usuario_em_execucao_id or tarefa.usuario_id)
+    }
+    online_ids = set()
+    if responsaveis_ids:
+        online_ids = set(
+            UsuarioSessao.objects.filter(
+                usuario_id__in=responsaveis_ids,
+                ativo=True,
+                ultimo_acesso__gte=limite_online,
+            ).values_list('usuario_id', flat=True)
+        )
+
+    ids_reabrir = []
+    ids_limpar_responsavel = []
+    agora = timezone.now()
+    for tarefa in tarefas:
+        if sincronizar_conclusao_automatica_tarefa(tarefa, usuario):
+            continue
+        if tarefa.status == Tarefa.Status.CONCLUIDO:
+            continue
+        responsavel_id = tarefa.usuario_em_execucao_id or tarefa.usuario_id
+        if responsavel_id and responsavel_id not in online_ids:
+            if tarefa.status == Tarefa.Status.EM_EXECUCAO:
+                ids_reabrir.append(tarefa.id)
+                tarefa.status = Tarefa.Status.ABERTO
+            else:
+                ids_limpar_responsavel.append(tarefa.id)
+            tarefa.usuario_id = None
+            tarefa.usuario_em_execucao_id = None
+            tarefa.data_inicio = None
+            continue
+        if tarefa.status == Tarefa.Status.EM_EXECUCAO and tarefa.usuario_em_execucao_id is None:
+            ids_reabrir.append(tarefa.id)
+            tarefa.status = Tarefa.Status.ABERTO
+            tarefa.usuario_id = None
+            tarefa.data_inicio = None
+
+    if ids_reabrir:
+        Tarefa.objects.filter(id__in=ids_reabrir).update(
+            status=Tarefa.Status.ABERTO,
+            usuario_id=None,
+            usuario_em_execucao_id=None,
+            data_inicio=None,
+            updated_at=agora,
+        )
+    if ids_limpar_responsavel:
+        Tarefa.objects.filter(id__in=ids_limpar_responsavel).update(
+            usuario_id=None,
+            usuario_em_execucao_id=None,
+            data_inicio=None,
+            updated_at=agora,
+        )
 
 
 def _serializar_tarefa_lista(tarefa, usuario=None):
@@ -496,25 +541,21 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                 if item_local.quantidade_separada >= item_local.quantidade_total:
                     item_local.possui_restricao = False
                 item_local.save(update_fields=['quantidade_separada', 'possui_restricao', 'bipado_por', 'data_bipagem', 'updated_at'])
-                Log.objects.create(
-                    usuario=usuario,
-                    acao='BIPAGEM SEPARACAO',
-                    detalhe=f'Tarefa {tarefa_local.id} - produto {item_local.produto.cod_prod} bipado.',
+                from apps.core.operacional_side_effects import (
+                    agendar_logs_bipagem_separacao,
+                    agendar_sincronizar_nfs_separacao,
                 )
-                UserActivityLog.objects.create(
-                    usuario=usuario,
-                    tipo=UserActivityLog.Tipo.BIPAGEM,
-                    tarefa=tarefa_local,
-                    timestamp=timezone.now(),
-                )
-                if sincronizar_conclusao_automatica_tarefa(tarefa_local, usuario):
-                    Log.objects.create(
-                        usuario=usuario,
-                        acao='FINALIZACAO AUTOMATICA SEPARACAO',
-                        detalhe=f'Tarefa {tarefa_local.id} finalizada automaticamente apos concluir a bipagem.',
-                    )
+
+                finalizacao_automatica = sincronizar_conclusao_automatica_tarefa(tarefa_local, usuario)
+                if finalizacao_automatica:
                     tarefa_local.refresh_from_db(fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
-                sincronizar_status_operacional_nfs(_nfs_afetadas_tarefa(tarefa_local))
+                agendar_logs_bipagem_separacao(
+                    usuario_id=usuario.id,
+                    tarefa_id=tarefa_local.id,
+                    produto_cod=item_local.produto.cod_prod,
+                    finalizacao_automatica=finalizacao_automatica,
+                )
+                agendar_sincronizar_nfs_separacao(_nfs_afetadas_tarefa(tarefa_local))
                 itens_restantes = []
                 for item_pendente in itens_pendentes:
                     if item_pendente.id == item_local.id:
@@ -527,7 +568,9 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
         tarefa, item, itens_restantes = _executar_com_retry_sqlite_lock(_executar)
         proximo_item = itens_restantes[0] if itens_restantes else None
         finalizado = proximo_item is None or tarefa.status in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}
-        _invalidate_dashboards_operacionais(motivo='bipagem_separacao')
+        from apps.core.operacional_side_effects import agendar_invalidacao_operacional
+
+        agendar_invalidacao_operacional(motivo='bipagem_separacao')
         resposta = {
             'status': 'ok',
             'tarefa_id': tarefa.id,
@@ -586,7 +629,10 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
     _validar_execucao_tarefa(tarefa, usuario)
     if status not in {Tarefa.Status.CONCLUIDO, Tarefa.Status.FECHADO_COM_RESTRICAO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}:
         raise SeparacaoError('Status de finalização inválido')
-    possui_pendencia = any(item.quantidade_separada < item.quantidade_total for item in tarefa.itens.all())
+    possui_pendencia = TarefaItem.objects.filter(
+        tarefa_id=tarefa.id,
+        quantidade_separada__lt=F('quantidade_total'),
+    ).exists()
     tarefa_liberada = tarefa.status == Tarefa.Status.LIBERADO_COM_RESTRICAO
     status_final = status
     if status == Tarefa.Status.CONCLUIDO and possui_pendencia and tarefa_liberada:
@@ -680,7 +726,9 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
             return tarefa_local
 
     tarefa = _executar_com_retry_sqlite_lock(_executar)
-    _invalidate_dashboards_operacionais(motivo='finalizacao_separacao')
+    from apps.core.operacional_side_effects import agendar_invalidacao_operacional
+
+    agendar_invalidacao_operacional(motivo='finalizacao_separacao')
     dados = _dados_tarefa(tarefa)
     from apps.core.operacional_transicao import anexar_transicao_separacao
 
@@ -705,24 +753,9 @@ def _filtrar_tarefas_por_setor(queryset, usuario):
 
 
 def _invalidate_dashboards_operacionais(*, motivo=''):
-    try:
-        from apps.conferencia.services.conferencia_service import invalidate_nfs_disponiveis_cache
+    from apps.core.operacional_side_effects import agendar_invalidacao_operacional
 
-        invalidate_nfs_disponiveis_cache(motivo=motivo)
-    except Exception as exc:
-        logger.warning('Falha ao invalidar fila de conferencia: %s', exc)
-
-    def _invalidar_painel():
-        try:
-            from apps.core.views_dashboard import invalidate_dashboard_separacao_cache
-            from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
-
-            invalidate_dashboard_separacao_cache(motivo=motivo)
-            invalidate_monitoramento_conferencia_cache(motivo=motivo)
-        except Exception as exc:
-            logger.warning('Falha ao invalidar cache operacional: %s', exc)
-
-    transaction.on_commit(_invalidar_painel)
+    agendar_invalidacao_operacional(motivo=motivo)
 
 
 def _validar_setor_tarefa(tarefa, usuario):
@@ -888,6 +921,8 @@ def _executar_com_retry_sqlite_lock(func):
         try:
             return func()
         except OperationalError as exc:
+            if connection.vendor == 'postgresql' and 'could not obtain lock' in str(exc).lower():
+                raise SeparacaoError('Tarefa em uso por outra operação. Tente novamente.') from exc
             if not _is_sqlite_database_locked(exc):
                 raise
             if tentativa >= SQLITE_LOCK_RETRY_MAX - 1:

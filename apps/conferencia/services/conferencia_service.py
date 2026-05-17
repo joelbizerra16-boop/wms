@@ -5,7 +5,7 @@ import time
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import transaction
+from django.db import OperationalError, connection, transaction
 from django.db.models import F, Prefetch, Q
 from django.utils import timezone
 
@@ -55,7 +55,7 @@ STATUS_CONFERENCIA_FINALIZADA = {
 }
 
 STATUS_CONFERENCIA_RESERVA_ITENS = STATUS_CONFERENCIA_EM_FLUXO | STATUS_CONFERENCIA_FINALIZADA
-CONFERENCIA_LIST_CACHE_TTL = 30
+CONFERENCIA_LIST_CACHE_TTL = 15
 CACHE_VERSION_KEY_NFS_DISPONIVEIS = 'conferencia:nfs:version'
 
 
@@ -635,74 +635,71 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
     try:
         conferencia = _obter_conferencia_em_andamento(conferencia_id, usuario)
 
-        with transaction.atomic():
-            conferencia = (
-                Conferencia.objects.select_for_update()
-                .select_related('nf', 'conferente')
-                .get(id=conferencia.id)
-            )
-            itens_pendentes = list(
-                ConferenciaItem.objects.select_for_update()
-                .filter(
-                    conferencia=conferencia,
-                    status=ConferenciaItem.Status.AGUARDANDO,
-                    qtd_conferida__lt=F('qtd_esperada'),
+        try:
+            with transaction.atomic():
+                lock_kwargs = {'nowait': True} if connection.vendor == 'postgresql' else {}
+                conferencia = (
+                    Conferencia.objects.select_for_update(**lock_kwargs)
+                    .select_related('nf', 'conferente')
+                    .get(id=conferencia.id)
                 )
-                .select_related('produto')
-                .order_by('id')
-            )
-            if not itens_pendentes:
-                raise ConferenciaError('Não existem itens pendentes para bipagem.')
-            item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
-            try:
-                validacao = validar_produto(
-                    codigo_lido=codigo,
-                    item_id=item_esperado.id,
-                    usuario=usuario,
-                    item_model=ConferenciaItem,
-                    tipo_validacao='CONFERENCIA',
+                itens_pendentes = list(
+                    ConferenciaItem.objects.select_for_update(skip_locked=True)
+                    .filter(
+                        conferencia=conferencia,
+                        status=ConferenciaItem.Status.AGUARDANDO,
+                        qtd_conferida__lt=F('qtd_esperada'),
+                    )
+                    .select_related('produto')
+                    .order_by('id')
                 )
-            except ProdutoValidacaoError as exc:
-                raise ConferenciaError(str(exc)) from exc
+                if not itens_pendentes:
+                    raise ConferenciaError('Não existem itens pendentes para bipagem.')
+                item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
+                try:
+                    validacao = validar_produto(
+                        codigo_lido=codigo,
+                        item_id=item_esperado.id,
+                        usuario=usuario,
+                        item_model=ConferenciaItem,
+                        tipo_validacao='CONFERENCIA',
+                    )
+                except ProdutoValidacaoError as exc:
+                    raise ConferenciaError(str(exc)) from exc
 
-            item = validacao.item
-            if item.status == ConferenciaItem.Status.DIVERGENCIA:
-                raise ConferenciaError('Item em divergencia nao pode ser bipado sem tratativa.')
-            if item.qtd_conferida >= item.qtd_esperada:
-                raise ConferenciaError('Quantidade conferida excede o esperado.')
+                item = validacao.item
+                if item.status == ConferenciaItem.Status.DIVERGENCIA:
+                    raise ConferenciaError('Item em divergencia nao pode ser bipado sem tratativa.')
+                if item.qtd_conferida >= item.qtd_esperada:
+                    raise ConferenciaError('Quantidade conferida excede o esperado.')
 
-            item.qtd_conferida += Decimal('1')
-            item.bipado_por = usuario
-            item.data_bipagem = timezone.now()
-            if item.qtd_conferida == item.qtd_esperada:
-                item.status = ConferenciaItem.Status.OK
-                item.motivo_divergencia = None
-                item.observacao_divergencia = ''
-            item.save(
-                update_fields=[
-                    'qtd_conferida',
-                    'status',
-                    'motivo_divergencia',
-                    'observacao_divergencia',
-                    'bipado_por',
-                    'data_bipagem',
-                    'updated_at',
-                ]
-            )
+                item.qtd_conferida += Decimal('1')
+                item.bipado_por = usuario
+                item.data_bipagem = timezone.now()
+                if item.qtd_conferida == item.qtd_esperada:
+                    item.status = ConferenciaItem.Status.OK
+                    item.motivo_divergencia = None
+                    item.observacao_divergencia = ''
+                item.save(
+                    update_fields=[
+                        'qtd_conferida',
+                        'status',
+                        'motivo_divergencia',
+                        'observacao_divergencia',
+                        'bipado_por',
+                        'data_bipagem',
+                        'updated_at',
+                    ]
+                )
 
-            atualizar_status_nf(conferencia.nf)
+                nf_id = conferencia.nf_id
+                nf_numero = conferencia.nf.numero
+                produto_cod = item.produto.cod_prod
+        except OperationalError as exc:
+            if connection.vendor == 'postgresql' and 'could not obtain lock' in str(exc).lower():
+                raise ConferenciaError('Conferência em uso por outra operação. Tente novamente.') from exc
+            raise
 
-            Log.objects.create(
-                usuario=usuario,
-                acao='BIPAGEM CONFERENCIA',
-                detalhe=f'NF {conferencia.nf.numero} - produto {item.produto.cod_prod} bipado.',
-            )
-            UserActivityLog.objects.create(
-                usuario=usuario,
-                tipo=UserActivityLog.Tipo.BIPAGEM,
-                tarefa=conferencia.nf.tarefas.first(),
-                timestamp=timezone.now(),
-            )
         itens_restantes = []
         for item_pendente in itens_pendentes:
             if item_pendente.id == item.id:
@@ -722,10 +719,39 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
             conferencia_resultado = _dados_conferencia(conferencia)
 
         if not finalizado:
-            _invalidate_conferencia_operacional_cache(
-                motivo='bipagem_conferencia',
-                nf_id=conferencia.nf_id,
-                setor=_setor_operacional_produto(item.produto),
+            from apps.core.operacional_side_effects import (
+                agendar_atualizar_status_nf,
+                agendar_logs_bipagem_conferencia,
+            )
+
+            tarefa_id = conferencia.nf.tarefas.values_list('id', flat=True).first()
+            agendar_atualizar_status_nf(nf_id)
+            agendar_logs_bipagem_conferencia(
+                usuario_id=usuario.id,
+                nf_numero=nf_numero,
+                produto_cod=produto_cod,
+                tarefa_id=tarefa_id,
+            )
+            nf_id_cache = conferencia.nf_id
+            setor_cache = _setor_operacional_produto(item.produto)
+
+            def _invalidar_apos_bipagem():
+                _invalidate_conferencia_operacional_cache(
+                    motivo='bipagem_conferencia',
+                    nf_id=nf_id_cache,
+                    setor=setor_cache,
+                )
+
+            transaction.on_commit(_invalidar_apos_bipagem)
+        else:
+            tarefa_id = conferencia.nf.tarefas.values_list('id', flat=True).first()
+            from apps.core.operacional_side_effects import agendar_logs_bipagem_conferencia
+
+            agendar_logs_bipagem_conferencia(
+                usuario_id=usuario.id,
+                nf_numero=nf_numero,
+                produto_cod=produto_cod,
+                tarefa_id=tarefa_id,
             )
 
         item_atual = _dados_item(item)
