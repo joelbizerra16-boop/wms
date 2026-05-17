@@ -1,6 +1,7 @@
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+import hashlib
 import logging
 import re
 import unicodedata
@@ -9,6 +10,7 @@ import uuid
 from django.core.cache import cache
 from django.db import connection, OperationalError, ProgrammingError, transaction
 from django.db.models import Q
+from django.utils import timezone
 from openpyxl import load_workbook
 
 from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
@@ -26,6 +28,119 @@ MINUTA_STATUS_CANCELADA = {'NF CANCELADA', 'CANCELADA'}
 MINUTA_STATUS_INCONSISTENTE = {'NF INCONSISTENTE', 'INCONSISTENTE', 'NF COM PROBLEMA', 'NF DENEGADA', 'NF BLOQUEADA', 'NF INATIVA'}
 MINUTA_STATUS_DUPLICADA = {'DUPLICADA', 'DUPLI'}
 MINUTA_CARDS_CACHE_TTL = 10
+MINUTA_RETENCAO_DIAS = 10
+MINUTA_CACHE_VERSION_KEY = 'minuta:cache:version'
+
+
+def invalidar_cache_minuta():
+    try:
+        cache.set(MINUTA_CACHE_VERSION_KEY, cache.get(MINUTA_CACHE_VERSION_KEY, 0) + 1, None)
+    except Exception:
+        logger.exception('ERRO MINUTA: falha ao invalidar cache da minuta.')
+
+
+def retencao_cutoff_date():
+    return timezone.localdate() - timedelta(days=MINUTA_RETENCAO_DIAS)
+
+
+def consulta_minuta_historica_ativa(romaneio='', busca=''):
+    return bool((romaneio or '').strip() or (busca or '').strip())
+
+
+def _nome_usuario_minuta(usuario):
+    if usuario is None:
+        return ''
+    return (getattr(usuario, 'nome', None) or getattr(usuario, 'username', None) or '').strip()
+
+
+def serializar_vinculo_nf_item(item):
+    romaneio = item.romaneio
+    usuario_pdf = _nome_usuario_minuta(getattr(romaneio, 'pdf_gerado_por', None))
+    usuario_importacao = _nome_usuario_minuta(getattr(romaneio, 'usuario_importacao', None))
+    return {
+        'numero_nota': item.numero_nota,
+        'romaneio': romaneio.codigo_romaneio,
+        'data': romaneio.data_saida.strftime('%d/%m/%Y') if romaneio.data_saida else '-',
+        'data_pdf': romaneio.pdf_gerado_em.strftime('%d/%m/%Y %H:%M') if romaneio.pdf_gerado_em else '',
+        'motorista': romaneio.motorista or '-',
+        'placa': romaneio.placa or '-',
+        'usuario': usuario_pdf or usuario_importacao or item.duplicidade_usuario or '-',
+        'pdf_gerado': bool(romaneio.pdf_gerado_em),
+        'status_expedicao': romaneio.status_expedicao,
+        'tipo_minuta': romaneio.tipo_minuta or '',
+        'hash_operacional': romaneio.hash_operacional or '',
+    }
+
+
+def buscar_vinculo_nf_historico(numero_nota, *, excluir_romaneio_codigo=None):
+    numero = _texto_limpo(numero_nota)
+    if not numero:
+        return None
+    queryset = (
+        MinutaRomaneioItem.objects.select_related(
+            'romaneio',
+            'romaneio__usuario_importacao',
+            'romaneio__pdf_gerado_por',
+        )
+        .filter(numero_nota=numero, romaneio__created_at__date__gte=retencao_cutoff_date())
+        .order_by('-romaneio__pdf_gerado_em', '-romaneio__created_at', '-id')
+    )
+    if excluir_romaneio_codigo:
+        queryset = queryset.exclude(romaneio__codigo_romaneio=excluir_romaneio_codigo)
+    return queryset.first()
+
+
+def registrar_minuta_pdf_gerada(itens, usuario, *, carregamento=True, entrega=False):
+    if not itens:
+        return []
+    tipos = []
+    if carregamento:
+        tipos.append('CARREGAMENTO')
+    if entrega:
+        tipos.append('ENTREGA')
+    tipo_minuta = ','.join(tipos) or 'CARREGAMENTO'
+    agora = timezone.now()
+    romaneios_atualizados = []
+
+    romaneio_ids = {item.romaneio_id for item in itens if getattr(item, 'romaneio_id', None)}
+    with transaction.atomic():
+        for romaneio in MinutaRomaneio.objects.select_for_update().filter(id__in=romaneio_ids):
+            hash_base = f'{romaneio.id}:{agora.isoformat()}:{tipo_minuta}:{romaneio.codigo_romaneio}'
+            romaneio.pdf_gerado_em = agora
+            romaneio.pdf_gerado_por = usuario
+            romaneio.tipo_minuta = tipo_minuta
+            romaneio.hash_operacional = hashlib.sha256(hash_base.encode('utf-8')).hexdigest()[:32]
+            romaneio.status_expedicao = MinutaRomaneio.StatusExpedicao.IMPRESSA
+            romaneio.save(
+                update_fields=[
+                    'pdf_gerado_em',
+                    'pdf_gerado_por',
+                    'tipo_minuta',
+                    'hash_operacional',
+                    'status_expedicao',
+                    'updated_at',
+                ]
+            )
+            romaneios_atualizados.append(romaneio)
+
+    invalidar_cache_minuta()
+    logger.info(
+        'MINUTA_PDF_PERSISTIDA romaneios=%s user_id=%s tipo=%s',
+        len(romaneios_atualizados),
+        getattr(usuario, 'id', None),
+        tipo_minuta,
+    )
+    return romaneios_atualizados
+
+
+def limpar_minutas_antigas(*, dias=None):
+    dias_retencao = dias if dias is not None else MINUTA_RETENCAO_DIAS
+    cutoff = timezone.localdate() - timedelta(days=dias_retencao)
+    queryset = MinutaRomaneio.objects.filter(created_at__date__lt=cutoff)
+    total_romaneios, _ = queryset.delete()
+    invalidar_cache_minuta()
+    logger.info('MINUTA_CLEANUP romaneios_removidos=%s cutoff=%s', total_romaneios, cutoff)
+    return total_romaneios
 
 
 class MinutaImportacaoError(Exception):
@@ -488,9 +603,15 @@ def montar_preview_importacao_minuta(arquivo, usuario):
     diagnostico_tabelas = _diagnostico_tabelas_minuta()
     if diagnostico_tabelas['resultado_validacao']:
         itens_existentes = list(
-            MinutaRomaneioItem.objects.select_related('romaneio__usuario_importacao')
-            .filter(numero_nota__in=numeros_notas)
-            .order_by('numero_nota', '-romaneio__data_saida', '-created_at')
+            MinutaRomaneioItem.objects.select_related(
+                'romaneio__usuario_importacao',
+                'romaneio__pdf_gerado_por',
+            )
+            .filter(
+                numero_nota__in=numeros_notas,
+                romaneio__created_at__date__gte=retencao_cutoff_date(),
+            )
+            .order_by('numero_nota', '-romaneio__pdf_gerado_em', '-romaneio__data_saida', '-created_at')
         )
     else:
         itens_existentes = []
@@ -516,7 +637,11 @@ def montar_preview_importacao_minuta(arquivo, usuario):
         nf = referencia_nf['nf']
         duplicidade = None
         for item_existente in itens_por_nota.get(linha['numero_nota'], []):
-            if item_existente.romaneio.codigo_romaneio != linha['codigo_romaneio']:
+            romaneio_existente = item_existente.romaneio
+            mesmo_romaneio = romaneio_existente.codigo_romaneio == linha['codigo_romaneio']
+            if mesmo_romaneio and not romaneio_existente.pdf_gerado_em:
+                continue
+            if romaneio_existente.pdf_gerado_em or romaneio_existente.codigo_romaneio != linha['codigo_romaneio']:
                 duplicidade = item_existente
                 break
 
@@ -558,8 +683,9 @@ def montar_preview_importacao_minuta(arquivo, usuario):
             'duplicidade_placa': duplicidade.romaneio.placa if duplicidade else '',
             'duplicidade_motorista': duplicidade.romaneio.motorista if duplicidade else '',
             'duplicidade_usuario': (
-                getattr(duplicidade.romaneio.usuario_importacao, 'nome', '')
-                or getattr(duplicidade.romaneio.usuario_importacao, 'username', '')
+                _nome_usuario_minuta(getattr(duplicidade.romaneio, 'pdf_gerado_por', None))
+                or _nome_usuario_minuta(getattr(duplicidade.romaneio, 'usuario_importacao', None))
+                or duplicidade.duplicidade_usuario
             )
             if duplicidade
             else '',
@@ -631,7 +757,10 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
     with transaction.atomic():
         codigos_romaneio = list(linhas_por_romaneio.keys())
         lote_importacao = uuid.uuid4()
-        MinutaRomaneio.objects.filter(codigo_romaneio__in=codigos_romaneio).delete()
+        MinutaRomaneio.objects.filter(
+            codigo_romaneio__in=codigos_romaneio,
+            pdf_gerado_em__isnull=True,
+        ).delete()
 
         for codigo_romaneio, linhas_romaneio in linhas_por_romaneio.items():
             logger.info('DEBUG MINUTA: criando_romaneio codigo=%s itens=%s', codigo_romaneio, len(linhas_romaneio))
@@ -695,6 +824,7 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
                 MinutaRomaneioItem.objects.bulk_create(itens_novos)
 
     logger.info('DEBUG MINUTA: finalizando_importacao romaneios=%s itens=%s duplicados=%s', romaneios_processados, itens_processados, duplicados)
+    invalidar_cache_minuta()
 
     return {
         'romaneios': romaneios_processados,
@@ -717,16 +847,28 @@ def _obter_lote_minuta_ativo():
 
 def consultar_minuta_itens_queryset(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
     try:
-        queryset = MinutaRomaneioItem.objects.select_related('romaneio', 'nf', 'nf__rota', 'romaneio__usuario_importacao').all()
-        lote_ativo = _obter_lote_minuta_ativo()
-        if lote_ativo:
-            queryset = queryset.filter(romaneio__importacao_lote=lote_ativo)
+        historico = consulta_minuta_historica_ativa(romaneio, busca)
+        queryset = MinutaRomaneioItem.objects.select_related(
+            'romaneio',
+            'nf',
+            'nf__rota',
+            'romaneio__usuario_importacao',
+            'romaneio__pdf_gerado_por',
+        )
+        queryset = queryset.filter(romaneio__created_at__date__gte=retencao_cutoff_date())
+
+        if historico:
+            pass
         else:
-            queryset = queryset.none()
-        if data_inicio is not None:
-            queryset = queryset.filter(romaneio__created_at__date__gte=data_inicio)
-        if data_fim is not None:
-            queryset = queryset.filter(romaneio__created_at__date__lte=data_fim)
+            lote_ativo = _obter_lote_minuta_ativo()
+            if lote_ativo:
+                queryset = queryset.filter(romaneio__importacao_lote=lote_ativo)
+            else:
+                queryset = queryset.none()
+            if data_inicio is not None:
+                queryset = queryset.filter(romaneio__created_at__date__gte=data_inicio)
+            if data_fim is not None:
+                queryset = queryset.filter(romaneio__created_at__date__lte=data_fim)
         if romaneio:
             queryset = queryset.filter(romaneio__codigo_romaneio__icontains=romaneio)
         if status:
@@ -770,21 +912,43 @@ def serializar_linha_minuta_item(item):
         'possui_inconsistencia': bool(item.duplicado)
         or not status
         or status in (MINUTA_STATUS_NAO_LOCALIZADA | MINUTA_STATUS_XML_ERRO | MINUTA_STATUS_CANCELADA | MINUTA_STATUS_INCONSISTENTE | MINUTA_STATUS_DUPLICADA),
-        'duplicidade_texto': (
-            f"NF vinculada ao romaneio {item.duplicidade_romaneio_codigo} em {item.duplicidade_data_saida.strftime('%d/%m/%Y') if item.duplicidade_data_saida else '-'}"
-            if item.duplicado
-            else ''
-        ),
+        'duplicidade_texto': _texto_duplicidade_item(item),
+        'pdf_gerado': bool(getattr(item.romaneio, 'pdf_gerado_em', None)),
+        'status_expedicao': getattr(item.romaneio, 'status_expedicao', '') or '',
         'peso_kg': f'{item.peso_kg:.3f}'.replace('.', ','),
         'valor_total': f'{item.valor_total:.2f}'.replace('.', ','),
     }
 
 
+def _texto_duplicidade_item(item):
+    if not item.duplicado:
+        return ''
+    if item.duplicidade_romaneio_codigo:
+        data_ref = item.duplicidade_data_saida.strftime('%d/%m/%Y') if item.duplicidade_data_saida else '-'
+        usuario = (item.duplicidade_usuario or '').strip()
+        motorista = (item.duplicidade_motorista or '').strip()
+        partes = [f'NF vinculada ao romaneio {item.duplicidade_romaneio_codigo} em {data_ref}']
+        if motorista:
+            partes.append(f'motorista {motorista}')
+        if usuario:
+            partes.append(f'usuário {usuario}')
+        return '. '.join(partes)
+    romaneio = item.romaneio
+    if getattr(romaneio, 'pdf_gerado_em', None):
+        return (
+            f'NF com minuta impressa no romaneio {romaneio.codigo_romaneio} em '
+            f'{romaneio.pdf_gerado_em.strftime("%d/%m/%Y")}'
+        )
+    return ''
+
+
 def _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim):
+    versao = cache.get(MINUTA_CACHE_VERSION_KEY, 0)
     return ':'.join(
         [
             'minuta',
             'cards',
+            str(versao),
             str(data_inicio or ''),
             str(data_fim or ''),
             (romaneio or '').strip().lower(),

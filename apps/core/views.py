@@ -1175,6 +1175,15 @@ def minuta_pdf(request):
         messages.error(request, f'ERRO REAL: {str(exc)}')
         raise
 
+    from apps.core.services.minuta_service import registrar_minuta_pdf_gerada
+
+    registrar_minuta_pdf_gerada(
+        itens,
+        request.user,
+        carregamento=gerar_carregamento,
+        entrega=gerar_entrega,
+    )
+
     if len(arquivos) == 1:
         nome_arquivo, conteudo, content_type = arquivos[0]
         response = HttpResponse(conteudo, content_type=content_type)

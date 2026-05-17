@@ -28,7 +28,14 @@ from openpyxl import Workbook
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
-from apps.core.services.minuta_service import MinutaImportacaoError, listar_minuta_itens
+from apps.core.services.minuta_service import (
+    MinutaImportacaoError,
+    buscar_vinculo_nf_historico,
+    consultar_minuta_itens_queryset,
+    limpar_minutas_antigas,
+    listar_minuta_itens,
+    registrar_minuta_pdf_gerada,
+)
 from apps.core.views_web import MAX_XML_FILES_POR_ENVIO
 from apps.logs.models import LiberacaoDivergencia, Log
 from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem
@@ -1862,6 +1869,146 @@ class MinutaImportacaoTests(TestCase):
 		self.assertContains(response, 'conferencia-feedback', html=False)
 		self.assertNotContains(response, '>Finalizar<', html=False)
 		self.assertNotContains(response, '<h1>Conferência</h1>', html=False)
+
+
+@override_settings(ROOT_URLCONF='config.urls')
+class MinutaPersistenciaTests(TestCase):
+	def setUp(self):
+		from django.core.cache import cache
+		import uuid
+
+		cache.clear()
+		self._uuid = uuid
+		self.client = Client()
+		self.usuario = Usuario.objects.create_user(
+			username='gestor_minuta_persist',
+			nome='admin2',
+			perfil=Usuario.Perfil.GESTOR,
+			setores=[Setor.Codigo.FILTROS],
+			password='123456',
+			is_active=True,
+		)
+		self.client.login(username='gestor_minuta_persist', password='123456')
+
+	def test_registrar_pdf_marca_romaneio_impresso(self):
+		romaneio = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081791',
+			data_saida=timezone.localdate(),
+			motorista='JOAO',
+			usuario_importacao=self.usuario,
+		)
+		item = MinutaRomaneioItem.objects.create(
+			romaneio=romaneio,
+			numero_nota='1416034',
+			status='LIBERADA',
+		)
+		registrar_minuta_pdf_gerada([item], self.usuario, carregamento=True, entrega=False)
+		romaneio.refresh_from_db()
+		self.assertIsNotNone(romaneio.pdf_gerado_em)
+		self.assertEqual(romaneio.pdf_gerado_por_id, self.usuario.id)
+		self.assertEqual(romaneio.status_expedicao, MinutaRomaneio.StatusExpedicao.IMPRESSA)
+		self.assertTrue(romaneio.hash_operacional)
+
+	def test_busca_nf_consulta_historico_fora_do_lote_ativo(self):
+		lote_antigo = self._uuid.uuid4()
+		romaneio_antigo = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081001',
+			importacao_lote=lote_antigo,
+			data_saida=timezone.localdate(),
+			motorista='JOAO',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(romaneio=romaneio_antigo, numero_nota='1416034', status='LIBERADA')
+
+		lote_novo = self._uuid.uuid4()
+		romaneio_novo = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081002',
+			importacao_lote=lote_novo,
+			data_saida=timezone.localdate(),
+			motorista='MARIA',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(romaneio=romaneio_novo, numero_nota='1419999', status='LIBERADA')
+
+		linhas_padrao, _ = listar_minuta_itens()
+		self.assertNotIn('1416034', {linha['numero_nota'] for linha in linhas_padrao})
+
+		historico = consultar_minuta_itens_queryset(busca='1416034')
+		self.assertTrue(historico.filter(numero_nota='1416034').exists())
+
+	def test_api_historico_nf_retorna_vinculo(self):
+		romaneio = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081791',
+			data_saida=timezone.localdate(),
+			motorista='JOAO',
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(romaneio=romaneio, numero_nota='1416034', status='LIBERADA')
+		registrar_minuta_pdf_gerada(
+			list(MinutaRomaneioItem.objects.filter(romaneio=romaneio)),
+			self.usuario,
+		)
+
+		response = self.client.get('/api/minuta/historico/?numero=1416034')
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertTrue(payload['encontrado'])
+		self.assertEqual(payload['vinculo']['romaneio'], '5081791')
+		self.assertEqual(payload['vinculo']['motorista'], 'JOAO')
+		self.assertTrue(payload['vinculo']['pdf_gerado'])
+
+	def test_importacao_nao_remove_romaneio_com_pdf_gerado(self):
+		romaneio_pdf = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081690',
+			data_saida=timezone.localdate(),
+			motorista='JOAO',
+			usuario_importacao=self.usuario,
+		)
+		item = MinutaRomaneioItem.objects.create(romaneio=romaneio_pdf, numero_nota='1416034', status='LIBERADA')
+		registrar_minuta_pdf_gerada([item], self.usuario)
+
+		arquivo = SimpleUploadedFile(
+			'romaneio_novo.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'CLIENTE', 'CLIENTE', 'Cliente', 'Cliente', '5081690', '1418888', 'PED001', 'MXS_15', '10', '0', '100'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+		self.assertEqual(response.status_code, 200)
+		self.assertTrue(MinutaRomaneio.objects.filter(id=romaneio_pdf.id, pdf_gerado_em__isnull=False).exists())
+		self.assertTrue(MinutaRomaneioItem.objects.filter(romaneio__codigo_romaneio='5081690', numero_nota='1418888').exists())
+
+	def test_cleanup_remove_minutas_antigas(self):
+		romaneio = MinutaRomaneio.objects.create(
+			codigo_romaneio='5080001',
+			data_saida=timezone.localdate(),
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(romaneio=romaneio, numero_nota='1410001', status='LIBERADA')
+		MinutaRomaneio.objects.filter(pk=romaneio.pk).update(created_at=timezone.now() - timedelta(days=15))
+		limpar_minutas_antigas(dias=10)
+		self.assertFalse(MinutaRomaneio.objects.filter(pk=romaneio.pk).exists())
+
+	def test_buscar_vinculo_nf_historico_prioriza_pdf(self):
+		romaneio_rascunho = MinutaRomaneio.objects.create(
+			codigo_romaneio='5082001',
+			data_saida=timezone.localdate(),
+			usuario_importacao=self.usuario,
+		)
+		MinutaRomaneioItem.objects.create(romaneio=romaneio_rascunho, numero_nota='1416034', status='LIBERADA')
+
+		romaneio_pdf = MinutaRomaneio.objects.create(
+			codigo_romaneio='5081791',
+			data_saida=timezone.localdate(),
+			motorista='JOAO',
+			usuario_importacao=self.usuario,
+		)
+		item_pdf = MinutaRomaneioItem.objects.create(romaneio=romaneio_pdf, numero_nota='1416034', status='LIBERADA')
+		registrar_minuta_pdf_gerada([item_pdf], self.usuario)
+
+		vinculo = buscar_vinculo_nf_historico('1416034')
+		self.assertEqual(vinculo.romaneio.codigo_romaneio, '5081791')
 
 
 @override_settings(ROOT_URLCONF='config.urls')

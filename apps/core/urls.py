@@ -5,6 +5,7 @@ from apps.core.views import HealthCheckView
 from apps.core.views_minuta import (
     MinutaCardsAPIView,
     MinutaDuplicidadesAPIView,
+    MinutaHistoricoNFAPIView,
     MinutaInconsistenciasAPIView,
     MinutaListaAPIView,
 )
@@ -19,6 +20,7 @@ urlpatterns = [
     path('tarefa-status/<int:tarefa_id>/', StatusTarefaAPIView.as_view(), name='api-tarefa-status'),
     path('dashboard/resumo/', DashboardResumoAPIView.as_view(), name='dashboard-resumo'),
     path('minuta/cards/', MinutaCardsAPIView.as_view(), name='api-minuta-cards'),
+    path('minuta/historico/', MinutaHistoricoNFAPIView.as_view(), name='api-minuta-historico'),
     path('minuta/lista/', MinutaListaAPIView.as_view(), name='api-minuta-lista'),
     path('minuta/inconsistencias/', MinutaInconsistenciasAPIView.as_view(), name='api-minuta-inconsistencias'),
     path('minuta/duplicidades/', MinutaDuplicidadesAPIView.as_view(), name='api-minuta-duplicidades'),

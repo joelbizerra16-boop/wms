@@ -1,3 +1,5 @@
+import json
+
 from django.conf import settings
 from django.core.paginator import Paginator
 from django.shortcuts import render
@@ -7,9 +9,11 @@ from rest_framework.views import APIView
 
 from apps.core.operacional_periodo import filtros_template_periodo, resolver_periodo_operacional_request
 from apps.core.services.minuta_service import (
+    buscar_vinculo_nf_historico,
     consultar_minuta_itens_queryset,
     obter_cards_minuta,
     serializar_linha_minuta_item,
+    serializar_vinculo_nf_item,
 )
 from apps.usuarios.access import PerfilPermitido
 from apps.usuarios.models import Usuario
@@ -98,6 +102,20 @@ class MinutaInconsistenciasAPIView(APIView):
         filtros = resolver_filtros_minuta_request(request)
         payload = obter_cards_minuta(**_filtros_consulta_minuta(filtros))
         return Response({'minuta_inconsistencias': payload['minuta_inconsistencias']})
+
+
+class MinutaHistoricoNFAPIView(APIView):
+    permission_classes = [IsAuthenticated, PerfilPermitido]
+    allowed_profiles = (Usuario.Perfil.GESTOR,)
+
+    def get(self, request):
+        numero = (request.GET.get('numero') or request.GET.get('nf') or '').strip()
+        if not numero:
+            return Response({'erro': 'Informe o número da NF.'}, status=400)
+        item = buscar_vinculo_nf_historico(numero)
+        if item is None:
+            return Response({'encontrado': False, 'vinculo': None})
+        return Response({'encontrado': True, 'vinculo': serializar_vinculo_nf_item(item)})
 
 
 class MinutaDuplicidadesAPIView(APIView):

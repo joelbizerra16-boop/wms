@@ -14,6 +14,10 @@ class BaseModel(models.Model):
 
 
 class MinutaRomaneio(BaseModel):
+	class StatusExpedicao(models.TextChoices):
+		ATIVA = 'ATIVA', 'Ativa'
+		IMPRESSA = 'IMPRESSA', 'Impressa'
+
 	codigo_romaneio = models.CharField(max_length=40, db_index=True, verbose_name='codigo do romaneio')
 	importacao_lote = models.UUIDField(default=uuid.uuid4, db_index=True, editable=False, verbose_name='lote da importacao')
 	filial = models.CharField(max_length=255, blank=True, default='', verbose_name='filial')
@@ -40,6 +44,24 @@ class MinutaRomaneio(BaseModel):
 		blank=True,
 		verbose_name='usuario responsavel pela importacao',
 	)
+	pdf_gerado_em = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name='pdf gerado em')
+	pdf_gerado_por = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.SET_NULL,
+		related_name='romaneios_minuta_pdf_gerados',
+		null=True,
+		blank=True,
+		verbose_name='usuario que gerou o pdf',
+	)
+	tipo_minuta = models.CharField(max_length=40, blank=True, default='', verbose_name='tipo da minuta')
+	hash_operacional = models.CharField(max_length=64, blank=True, default='', db_index=True, verbose_name='hash operacional')
+	status_expedicao = models.CharField(
+		max_length=20,
+		choices=StatusExpedicao.choices,
+		default=StatusExpedicao.ATIVA,
+		db_index=True,
+		verbose_name='status da expedicao',
+	)
 
 	class Meta:
 		verbose_name = 'romaneio da minuta'
@@ -50,6 +72,8 @@ class MinutaRomaneio(BaseModel):
 		]
 		indexes = [
 			models.Index(fields=['codigo_romaneio', 'data_saida'], name='min_rom_cod_data_ix'),
+			models.Index(fields=['created_at'], name='min_rom_created_ix'),
+			models.Index(fields=['status_expedicao', 'pdf_gerado_em'], name='min_rom_exp_pdf_ix'),
 		]
 
 	def __str__(self):

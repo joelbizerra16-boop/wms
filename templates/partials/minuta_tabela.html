@@ -34,6 +34,9 @@
                         <span class="status-badge {% if linha.possui_inconsistencia %}status-badge--danger{% elif linha.status == 'LIBERADA' or linha.status == 'FINALIZADA' or linha.status == 'FINALIZADA COM RESTRICAO' or linha.status == 'NF VINCULADA' %}status-badge--success{% else %}status-badge--warning{% endif %}">
                             {{ linha.status|default:'-' }}
                         </span>
+                        {% if linha.pdf_gerado %}
+                        <span class="status-badge status-badge--success" style="margin-left: 6px;">PDF</span>
+                        {% endif %}
                     </td>
                     <td>
                         {% if linha.duplicado %}
