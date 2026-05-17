@@ -6,6 +6,7 @@ import re
 import unicodedata
 import uuid
 
+from django.core.cache import cache
 from django.db import connection, OperationalError, ProgrammingError, transaction
 from django.db.models import Q
 from openpyxl import load_workbook
@@ -24,6 +25,7 @@ MINUTA_STATUS_XML_ERRO = {'XML INVALIDO', 'ERRO XML'}
 MINUTA_STATUS_CANCELADA = {'NF CANCELADA', 'CANCELADA'}
 MINUTA_STATUS_INCONSISTENTE = {'NF INCONSISTENTE', 'INCONSISTENTE', 'NF COM PROBLEMA', 'NF DENEGADA', 'NF BLOQUEADA', 'NF INATIVA'}
 MINUTA_STATUS_DUPLICADA = {'DUPLICADA', 'DUPLI'}
+MINUTA_CARDS_CACHE_TTL = 10
 
 
 class MinutaImportacaoError(Exception):
@@ -746,6 +748,99 @@ def consultar_minuta_itens_queryset(romaneio='', status='', busca='', data_inici
         return MinutaRomaneioItem.objects.none()
 
 
+def serializar_linha_minuta_item(item):
+    status = (item.status or '').strip()
+    return {
+        'romaneio': item.romaneio.codigo_romaneio,
+        'codigo_romaneio': item.romaneio.codigo_romaneio,
+        'nf_id': item.nf_id,
+        'numero_nota': item.numero_nota,
+        'data_saida': item.romaneio.data_saida.strftime('%d/%m/%Y') if item.romaneio.data_saida else '-',
+        'motorista': item.romaneio.motorista or '-',
+        'placa': item.romaneio.placa or '-',
+        'cliente': item.razao_social or item.fantasia or (item.nf.cliente.nome if item.nf_id else '-'),
+        'cliente_nf': item.nf.cliente.nome if item.nf_id and getattr(item.nf, 'cliente', None) else '',
+        'razao_social': item.razao_social or '',
+        'fantasia': item.fantasia or '',
+        'bairro': item.bairro or _bairro_nf(item.nf) or '-',
+        'bairro_nf': _bairro_nf(item.nf) if item.nf_id else '',
+        'status': item.status,
+        'duplicado': item.duplicado,
+        'duplicidade_romaneio_codigo': item.duplicidade_romaneio_codigo or '',
+        'possui_inconsistencia': bool(item.duplicado)
+        or not status
+        or status in (MINUTA_STATUS_NAO_LOCALIZADA | MINUTA_STATUS_XML_ERRO | MINUTA_STATUS_CANCELADA | MINUTA_STATUS_INCONSISTENTE | MINUTA_STATUS_DUPLICADA),
+        'duplicidade_texto': (
+            f"NF vinculada ao romaneio {item.duplicidade_romaneio_codigo} em {item.duplicidade_data_saida.strftime('%d/%m/%Y') if item.duplicidade_data_saida else '-'}"
+            if item.duplicado
+            else ''
+        ),
+        'peso_kg': f'{item.peso_kg:.3f}'.replace('.', ','),
+        'valor_total': f'{item.valor_total:.2f}'.replace('.', ','),
+    }
+
+
+def _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim):
+    return ':'.join(
+        [
+            'minuta',
+            'cards',
+            str(data_inicio or ''),
+            str(data_fim or ''),
+            (romaneio or '').strip().lower(),
+            (status or '').strip().lower(),
+            (busca or '').strip().lower(),
+        ]
+    )
+
+
+def obter_cards_minuta(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
+    cache_key = _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    queryset = consultar_minuta_itens_queryset(
+        romaneio=romaneio,
+        status=status,
+        busca=busca,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+    )
+    linhas_leves = list(queryset.values('status', 'duplicado'))
+    inconsistencias = get_minuta_inconsistencias(linhas_leves)
+    itens = len(linhas_leves)
+    duplicados = sum(1 for linha in linhas_leves if linha.get('duplicado'))
+    romaneios = queryset.values('romaneio_id').distinct().count() if itens else 0
+    status_bloqueados = {
+        'NF CANCELADA',
+        'NF DENEGADA',
+        'NF INCONSISTENTE',
+        'NF BLOQUEADA',
+        'NF INATIVA',
+        'NF COM PROBLEMA',
+        'XML INVALIDO',
+        'NF NÃO LOCALIZADA',
+    }
+    bloqueadas = sum(1 for linha in linhas_leves if (linha.get('status') or '').strip() in status_bloqueados)
+
+    resumo = {
+        'romaneios': romaneios,
+        'itens': itens,
+        'erros': 0,
+        'duplicados': duplicados,
+        'bloqueadas': bloqueadas,
+        'nfs_nao_localizadas': inconsistencias['nfs_nao_localizadas'],
+        'xml_erros': inconsistencias['xml_erros'],
+        'inconsistencias': inconsistencias['inconsistencias'],
+        'total_problemas': inconsistencias['total_problemas'],
+        'atualizacao': 'Manual',
+    }
+    payload = {'resumo': resumo, 'minuta_inconsistencias': inconsistencias}
+    cache.set(cache_key, payload, MINUTA_CARDS_CACHE_TTL)
+    return payload
+
+
 def listar_minuta_itens(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
     queryset = consultar_minuta_itens_queryset(
         romaneio=romaneio,
@@ -754,42 +849,6 @@ def listar_minuta_itens(romaneio='', status='', busca='', data_inicio=None, data
         data_inicio=data_inicio,
         data_fim=data_fim,
     )
-    linhas = [
-        {
-            'romaneio': item.romaneio.codigo_romaneio,
-            'nf_id': item.nf_id,
-            'numero_nota': item.numero_nota,
-            'data_saida': item.romaneio.data_saida.strftime('%d/%m/%Y') if item.romaneio.data_saida else '-',
-            'motorista': item.romaneio.motorista or '-',
-            'placa': item.romaneio.placa or '-',
-            'cliente': item.razao_social or item.fantasia or (item.nf.cliente.nome if item.nf_id else '-'),
-            'bairro': item.bairro or _bairro_nf(item.nf) or '-',
-            'status': item.status,
-            'duplicado': item.duplicado,
-            'possui_inconsistencia': bool(item.duplicado) or not (item.status or '').strip() or (item.status or '').strip() in (MINUTA_STATUS_NAO_LOCALIZADA | MINUTA_STATUS_XML_ERRO | MINUTA_STATUS_CANCELADA | MINUTA_STATUS_INCONSISTENTE | MINUTA_STATUS_DUPLICADA),
-            'duplicidade_texto': (
-                f"NF vinculada ao romaneio {item.duplicidade_romaneio_codigo} em {item.duplicidade_data_saida.strftime('%d/%m/%Y') if item.duplicidade_data_saida else '-'}"
-                if item.duplicado
-                else ''
-            ),
-            'peso_kg': f'{item.peso_kg:.3f}'.replace('.', ','),
-            'valor_total': f'{item.valor_total:.2f}'.replace('.', ','),
-        }
-        for item in queryset
-    ]
-
-    inconsistencias = get_minuta_inconsistencias(linhas)
-
-    resumo = {
-        'romaneios': len({linha['romaneio'] for linha in linhas}),
-        'itens': len(linhas),
-        'erros': 0,
-        'duplicados': sum(1 for linha in linhas if linha['duplicado']),
-        'bloqueadas': sum(1 for linha in linhas if linha['status'] in {'NF CANCELADA', 'NF DENEGADA', 'NF INCONSISTENTE', 'NF BLOQUEADA', 'NF INATIVA', 'NF COM PROBLEMA', 'XML INVALIDO', 'NF NÃO LOCALIZADA'}),
-        'nfs_nao_localizadas': inconsistencias['nfs_nao_localizadas'],
-        'xml_erros': inconsistencias['xml_erros'],
-        'inconsistencias': inconsistencias['inconsistencias'],
-        'total_problemas': inconsistencias['total_problemas'],
-        'atualizacao': 'Manual',
-    }
-    return linhas, resumo
+    linhas = [serializar_linha_minuta_item(item) for item in queryset]
+    cards = obter_cards_minuta(romaneio=romaneio, status=status, busca=busca, data_inicio=data_inicio, data_fim=data_fim)
+    return linhas, cards['resumo']

@@ -12,12 +12,12 @@
     </div>
 </div>
 
-<div class="metrics-grid minuta-metrics-grid">
+<div class="metrics-grid minuta-metrics-grid{% if defer_load %} metrics-grid--loading{% endif %}">
     <div class="metric-card metric-card--accent metric-card--with-icon">
         <div class="metric-card__icon metric-card__icon--info"><i data-lucide="files"></i></div>
         <div class="metric-card__content">
             <span class="metric-card__label">Romaneios</span>
-            <div class="metric-card__value">{{ resumo.romaneios }}</div>
+            <div class="metric-card__value" id="minuta-metric-romaneios">{% if defer_load %}--{% else %}{{ resumo.romaneios }}{% endif %}</div>
             <div class="metric-card__meta">Agrupamento operacional por carregamento</div>
         </div>
     </div>
@@ -25,7 +25,7 @@
         <div class="metric-card__icon metric-card__icon--success"><i data-lucide="package"></i></div>
         <div class="metric-card__content">
             <span class="metric-card__label">NFs</span>
-            <div class="metric-card__value">{{ resumo.itens }}</div>
+            <div class="metric-card__value" id="minuta-metric-itens">{% if defer_load %}--{% else %}{{ resumo.itens }}{% endif %}</div>
             <div class="metric-card__meta">Relacionamento principal por Número da NF</div>
         </div>
     </div>
@@ -33,15 +33,15 @@
         <div class="metric-card__icon metric-card__icon--warning"><i data-lucide="triangle-alert"></i></div>
         <div class="metric-card__content">
             <span class="metric-card__label">Duplicidades</span>
-            <div class="metric-card__value">{{ resumo.duplicados|default:0 }}</div>
+            <div class="metric-card__value" id="minuta-metric-duplicados">{% if defer_load %}--{% else %}{{ resumo.duplicados|default:0 }}{% endif %}</div>
             <div class="metric-card__meta">Alertas operacionais por NF já vinculada</div>
         </div>
     </div>
-    <div class="metric-card metric-card--with-icon minuta-metric-card-alert{% if minuta_inconsistencias.total_problemas %} minuta-metric-card-alert--active{% endif %}">
+    <div id="minuta-metric-inconsistencias-card" class="metric-card metric-card--with-icon minuta-metric-card-alert{% if not defer_load and minuta_inconsistencias.total_problemas %} minuta-metric-card-alert--active{% endif %}">
         <div class="metric-card__icon minuta-metric-card-alert__icon"><i data-lucide="search-x"></i></div>
         <div class="metric-card__content">
             <span class="metric-card__label">NFs Com Inconsistência</span>
-            <div class="metric-card__value">{{ minuta_inconsistencias.total_problemas|default:0 }}</div>
+            <div class="metric-card__value" id="minuta-metric-inconsistencias">{% if defer_load %}--{% else %}{{ minuta_inconsistencias.total_problemas|default:0 }}{% endif %}</div>
             <div class="metric-card__meta">NF(s) com problemas operacionais na minuta</div>
         </div>
     </div>
@@ -82,10 +82,10 @@
                             href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}&data_inicial={{ filtros.date_from|urlencode }}&data_final={{ filtros.date_to|urlencode }}"
                             data-base-href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}&data_inicial={{ filtros.date_from|urlencode }}&data_final={{ filtros.date_to|urlencode }}"
                             data-confirmar-alertas="0"
-                            data-inconsistencias='{"nfs_nao_localizadas": {{ minuta_inconsistencias.nfs_nao_localizadas|default:0 }}, "xml_erros": {{ minuta_inconsistencias.xml_erros|default:0 }}, "duplicidades": {{ minuta_inconsistencias.duplicidades|default:0 }}, "inconsistencias": {{ minuta_inconsistencias.inconsistencias|default:0 }}, "canceladas": {{ minuta_inconsistencias.canceladas|default:0 }}, "status_vazios": {{ minuta_inconsistencias.status_vazios|default:0 }}, "total_problemas": {{ minuta_inconsistencias.total_problemas|default:0 }}}'
-                            class="btn btn-light minuta-pdf-button{% if not resumo.itens %} is-disabled{% endif %}"
+                            data-inconsistencias="{{ minuta_inconsistencias_json|escapejs }}"
+                            class="btn btn-light minuta-pdf-button{% if defer_load or not resumo.itens %} is-disabled{% endif %}"
                             data-minuta-pdf-trigger
-                            aria-disabled="{% if not resumo.itens %}true{% else %}false{% endif %}"
+                            aria-disabled="{% if defer_load or not resumo.itens %}true{% else %}false{% endif %}"
                             target="_blank"
                             rel="noopener"
                             download
@@ -161,6 +161,7 @@
     </div>
     {% endif %}
 
+    {% if preview %}
     <div class="card table-card">
         <div class="actions-row minuta-table-header">
             <div>
@@ -217,6 +218,15 @@
             </table>
         </div>
     </div>
+    {% else %}
+    <div id="minuta-tabela" class="{% if defer_load %}dashboard-panel--loading{% endif %}">
+        {% if defer_load %}
+        <div class="card table-card"><div class="empty-state">Carregando listagem de minutas...</div></div>
+        {% else %}
+        {% include 'partials/minuta_tabela.html' %}
+        {% endif %}
+    </div>
+    {% endif %}
 
     <div class="modal" id="minuta-pdf-modal" aria-hidden="true">
         <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="minuta-pdf-modal-title">
@@ -551,6 +561,77 @@
         }
     }
     </style>
+    {% if defer_load %}
+    <script>
+    (function () {
+        function buildParams() {
+            return new URLSearchParams(window.location.search);
+        }
+
+        function updateMetric(id, value) {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = value;
+            }
+        }
+
+        function updatePdfState(resumo, inconsistencias) {
+            const pdfButton = document.querySelector('[data-minuta-pdf-trigger]');
+            if (!pdfButton) {
+                return;
+            }
+            pdfButton.setAttribute('data-inconsistencias', JSON.stringify(inconsistencias || {}));
+            const disabled = !(Number(resumo && resumo.itens) > 0);
+            pdfButton.classList.toggle('is-disabled', disabled);
+            pdfButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            const alertCard = document.getElementById('minuta-metric-inconsistencias-card');
+            if (alertCard) {
+                alertCard.classList.toggle('minuta-metric-card-alert--active', Number((inconsistencias || {}).total_problemas || 0) > 0);
+            }
+        }
+
+        async function carregarMinutaProgressiva() {
+            const params = buildParams();
+            const headers = { 'X-Requested-With': 'XMLHttpRequest' };
+            try {
+                const [cardsResponse, listaResponse] = await Promise.all([
+                    fetch(`/api/minuta/cards/?${params.toString()}`, { headers }),
+                    fetch(`/api/minuta/lista/?${params.toString()}`, { headers }),
+                ]);
+
+                if (cardsResponse.ok) {
+                    const payload = await cardsResponse.json();
+                    const resumo = payload.resumo || {};
+                    const inconsistencias = payload.minuta_inconsistencias || {};
+                    updateMetric('minuta-metric-romaneios', resumo.romaneios ?? 0);
+                    updateMetric('minuta-metric-itens', resumo.itens ?? 0);
+                    updateMetric('minuta-metric-duplicados', resumo.duplicados ?? 0);
+                    updateMetric('minuta-metric-inconsistencias', inconsistencias.total_problemas ?? 0);
+                    updatePdfState(resumo, inconsistencias);
+                    document.querySelector('.minuta-metrics-grid')?.classList.remove('metrics-grid--loading');
+                }
+
+                if (listaResponse.ok) {
+                    const html = await listaResponse.text();
+                    const target = document.getElementById('minuta-tabela');
+                    if (target) {
+                        target.innerHTML = html;
+                        target.classList.remove('dashboard-panel--loading');
+                    }
+                }
+            } catch (error) {
+                console.error('Falha ao carregar minuta progressiva', error);
+            }
+
+            if (window.lucide) {
+                window.lucide.createIcons();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', carregarMinutaProgressiva);
+    })();
+    </script>
+    {% endif %}
     <script>
     document.addEventListener('DOMContentLoaded', function () {
         const carregamentoCheckbox = document.getElementById('minuta-tipo-carregamento');

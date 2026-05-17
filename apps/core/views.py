@@ -1,6 +1,7 @@
 from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
+import json
 import logging
 import re
 import traceback
@@ -28,7 +29,6 @@ from apps.core.services.minuta_service import (
     consultar_minuta_itens_queryset,
     confirmar_importacao_minuta,
     get_minuta_inconsistencias,
-    listar_minuta_itens,
     montar_preview_importacao_minuta,
 )
 from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem, nota_fiscal_bairro_valor
@@ -1043,29 +1043,50 @@ def minuta(request):
             )
             return redirect('web-minuta')
 
-    from apps.core.operacional_periodo import filtros_template_periodo, resolver_periodo_operacional_request
-
-    date_from, date_to, busca_periodo = resolver_periodo_operacional_request(request)
-    filtros = {
-        'romaneio': (request.GET.get('romaneio') or '').strip(),
-        'status': (request.GET.get('status') or '').strip(),
-        'busca': (request.GET.get('busca') or '').strip() or busca_periodo,
-        **filtros_template_periodo(date_from, date_to, busca_periodo),
-    }
-    linhas, resumo = listar_minuta_itens(
-        romaneio=filtros['romaneio'],
-        status=filtros['status'],
-        busca=filtros['busca'],
-        data_inicio=date_from,
-        data_fim=date_to,
+    from apps.core.views_minuta import (
+        _minuta_ajax_partial,
+        render_minuta_tabela_partial,
+        resolver_filtros_minuta_request,
     )
+
+    partial = _minuta_ajax_partial(request)
+    if partial == 'table':
+        return render_minuta_tabela_partial(request)
+
+    filtros = resolver_filtros_minuta_request(request)
     preview = request.session.get(MINUTA_PREVIEW_SESSION_KEY)
+    resumo_vazio = {
+        'romaneios': 0,
+        'itens': 0,
+        'erros': 0,
+        'duplicados': 0,
+        'bloqueadas': 0,
+        'nfs_nao_localizadas': 0,
+        'xml_erros': 0,
+        'inconsistencias': 0,
+        'total_problemas': 0,
+        'atualizacao': 'Manual',
+    }
+    inconsistencias_vazio = get_minuta_inconsistencias([])
+    defer_load = preview is None
+
+    if preview:
+        linhas = preview.get('linhas') or []
+        resumo = preview.get('resumo') or resumo_vazio
+        minuta_inconsistencias = get_minuta_inconsistencias(linhas)
+    else:
+        linhas = []
+        resumo = resumo_vazio
+        minuta_inconsistencias = inconsistencias_vazio
+
     context = {
         'usuario': request.user,
         'filtros': filtros,
+        'defer_load': defer_load,
         'resumo': resumo,
-        'minuta_inconsistencias': get_minuta_inconsistencias(linhas),
-        'linhas': preview['linhas'] if preview else linhas,
+        'minuta_inconsistencias': minuta_inconsistencias,
+        'minuta_inconsistencias_json': json.dumps(minuta_inconsistencias),
+        'linhas': linhas,
         'preview': preview,
         'status_opcoes': [
             'XML IMPORTADO',

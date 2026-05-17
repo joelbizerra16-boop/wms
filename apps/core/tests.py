@@ -304,11 +304,12 @@ class DashboardWebTests(TestCase):
 		self.assertNotContains(response, 'id="minuta-tipo-entrega" type="checkbox" disabled', html=False)
 		self.assertContains(response, 'minuta-upload-inline__controls', html=False)
 		self.assertContains(response, 'minuta-check-row--inline', html=False)
-		self.assertContains(response, 'ROMANEIO')
-		self.assertContains(response, 'NF')
-		self.assertContains(response, 'BAIRRO')
-		self.assertContains(response, 'STATUS')
-		self.assertNotContains(response, 'fetch(', html=False)
+		self.assertContains(response, 'Romaneios')
+		self.assertContains(response, 'Buscar romaneio')
+		self.assertTrue(response.context['defer_load'])
+		self.assertContains(response, '/api/minuta/cards/', html=False)
+		self.assertContains(response, 'metrics-grid--loading', html=False)
+		self.assertContains(response, 'Carregando listagem de minutas', html=False)
 		self.assertNotContains(response, 'setInterval', html=False)
 
 
