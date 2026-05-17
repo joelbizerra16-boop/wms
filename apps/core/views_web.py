@@ -1308,7 +1308,11 @@ def conferencia_lista_web(request):
             return _render(request, 'partials/conferencia_lista_tabela.html', contexto)
         messages.error(request, 'Usuário sem setor vinculado. Contate o administrador.')
         return _render(request, 'conferencia_lista.html', contexto)
-    paginacao = _paginar_lista(request, listar_nfs_disponiveis(request.user))
+    date_from, date_to, busca = resolver_periodo_operacional_request(request)
+    paginacao = _paginar_lista(
+        request,
+        listar_nfs_disponiveis(request.user, data_inicio=date_from, data_fim=date_to),
+    )
     contexto = {'nfs': paginacao['page_obj'], **paginacao}
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return _render(request, 'partials/conferencia_lista_tabela.html', contexto)

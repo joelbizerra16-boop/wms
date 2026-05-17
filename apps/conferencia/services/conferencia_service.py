@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 import logging
 import time
@@ -128,9 +129,13 @@ def invalidate_nfs_disponiveis_cache(*, motivo='', nf_id=None, setor=None):
 
 def _invalidate_conferencia_operacional_cache(*, motivo='', nf_id=None, setor=None):
     invalidate_nfs_disponiveis_cache(motivo=motivo, nf_id=nf_id, setor=setor)
-    from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
 
-    invalidate_monitoramento_conferencia_cache(motivo=motivo, nf_id=nf_id, setor=setor)
+    def _invalidar_monitoramento():
+        from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
+
+        invalidate_monitoramento_conferencia_cache(motivo=motivo, nf_id=nf_id, setor=setor)
+
+    transaction.on_commit(_invalidar_monitoramento)
 
 
 def _validar_setor_nf(nf, usuario):
@@ -279,13 +284,23 @@ def avaliar_liberacao_conferencia(nf):
     }
 
 
-def listar_nfs_disponiveis(usuario=None, *, somente_leitura=False):
+def listar_nfs_disponiveis(
+    usuario=None,
+    *,
+    somente_leitura=False,
+    usar_cache=True,
+    data_inicio=None,
+    data_fim=None,
+):
     if usuario is not None and not _usuario_pode_ver_todos_setores(usuario) and not _setores_usuario(usuario):
         return []
-    cache_key = _cache_key_nfs_disponiveis(usuario)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
+    if usar_cache:
+        cache_key = _cache_key_nfs_disponiveis(usuario)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            if data_inicio is None and data_fim is None:
+                return cached
+            return _filtrar_nfs_por_periodo_lista(cached, data_inicio, data_fim)
     tarefa_itens_prefetch = Prefetch(
         'itens',
         queryset=TarefaItem.objects.select_related('tarefa').only(
@@ -364,6 +379,18 @@ def listar_nfs_disponiveis(usuario=None, *, somente_leitura=False):
         .filter(status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA, ativa=True)
         .order_by('-data_emissao')
     )
+    if data_inicio is not None:
+        nfs = nfs.filter(
+            Q(created_at__date__gte=data_inicio)
+            | Q(updated_at__date__gte=data_inicio)
+            | Q(data_emissao__date__gte=data_inicio)
+        )
+    if data_fim is not None:
+        nfs = nfs.filter(
+            Q(created_at__date__lte=data_fim)
+            | Q(updated_at__date__lte=data_fim)
+            | Q(data_emissao__date__lte=data_fim)
+        )
 
     disponiveis = []
     for nf in nfs:
@@ -473,8 +500,51 @@ def listar_nfs_disponiveis(usuario=None, *, somente_leitura=False):
             }
         )
     disponiveis.sort(key=lambda nf: (0 if nf['balcao'] else 1, -nf['updated_ts']))
-    cache.set(cache_key, disponiveis, CONFERENCIA_LIST_CACHE_TTL)
+    if usar_cache:
+        cache.set(_cache_key_nfs_disponiveis(usuario), disponiveis, CONFERENCIA_LIST_CACHE_TTL)
     return disponiveis
+
+
+def _filtrar_nfs_por_periodo_lista(nfs, data_inicio, data_fim):
+    if data_inicio is None and data_fim is None:
+        return nfs
+    filtradas = []
+    for nf in nfs:
+        referencia = nf.get('data_referencia')
+        if not referencia:
+            filtradas.append(nf)
+            continue
+        try:
+            data_ref = date.fromisoformat(str(referencia))
+        except ValueError:
+            filtradas.append(nf)
+            continue
+        if data_inicio is not None and data_ref < data_inicio:
+            continue
+        if data_fim is not None and data_ref > data_fim:
+            continue
+        filtradas.append(nf)
+    return filtradas
+
+
+def obter_proxima_nf_conferencia(usuario, *, excluir_nf_id=None):
+    from apps.core.operacional_periodo import periodo_operacional_padrao
+
+    data_inicio, data_fim = periodo_operacional_padrao()
+    nfs = listar_nfs_disponiveis(
+        usuario,
+        somente_leitura=True,
+        usar_cache=False,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+    )
+    for nf in nfs:
+        if excluir_nf_id and nf['id'] == excluir_nf_id:
+            continue
+        if nf.get('bloqueado'):
+            continue
+        return {'id': nf['id']}
+    return None
 
 
 def _itens_pendentes_conferencia(produto_ids_usuario, conferencia_em_fluxo_obj=None, produto_ids_finalizados=None):
@@ -633,12 +703,6 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                 tarefa=conferencia.nf.tarefas.first(),
                 timestamp=timezone.now(),
             )
-        _invalidate_conferencia_operacional_cache(
-            motivo='bipagem_conferencia',
-            nf_id=conferencia.nf_id,
-            setor=','.join(sorted({_setor_operacional_produto(item.produto) for item in conferencia.itens.all()})),
-        )
-
         itens_restantes = []
         for item_pendente in itens_pendentes:
             if item_pendente.id == item.id:
@@ -657,8 +721,15 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
         else:
             conferencia_resultado = _dados_conferencia(conferencia)
 
+        if not finalizado:
+            _invalidate_conferencia_operacional_cache(
+                motivo='bipagem_conferencia',
+                nf_id=conferencia.nf_id,
+                setor=_setor_operacional_produto(item.produto),
+            )
+
         item_atual = _dados_item(item)
-        return {
+        resposta = {
             'status': 'ok',
             'item_atual': item_atual,
             'item_id': item_atual['item_id'],
@@ -672,6 +743,11 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
             'finalizado': finalizado,
             'conferencia': conferencia_resultado,
         }
+        if finalizado:
+            from apps.core.operacional_transicao import anexar_transicao_conferencia
+
+            anexar_transicao_conferencia(resposta, usuario, nf_id_atual=conferencia.nf_id)
+        return resposta
     finally:
         elapsed_ms = (time.perf_counter() - inicio) * 1000
         slow_threshold = float(getattr(settings, 'BIPAGEM_SLOW_LOG_MS', 150))
@@ -758,12 +834,17 @@ def finalizar_conferencia(conferencia_id, usuario):
             tarefa=conferencia.nf.tarefas.first(),
             timestamp=timezone.now(),
         )
+    nf_id = conferencia.nf_id
+    setor = ','.join(sorted({_setor_operacional_produto(item.produto) for item in itens}))
     _invalidate_conferencia_operacional_cache(
         motivo='finalizacao_conferencia',
-        nf_id=conferencia.nf_id,
-        setor=','.join(sorted({_setor_operacional_produto(item.produto) for item in itens})),
+        nf_id=nf_id,
+        setor=setor,
     )
-    return _dados_conferencia(conferencia)
+    dados = _dados_conferencia(conferencia)
+    from apps.core.operacional_transicao import anexar_transicao_conferencia
+
+    return anexar_transicao_conferencia(dados, usuario, nf_id_atual=nf_id)
 
 
 def _obter_conferencia_em_andamento(conferencia_id, usuario):

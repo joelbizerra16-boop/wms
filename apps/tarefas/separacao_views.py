@@ -9,7 +9,9 @@ from apps.tarefas.services.separacao_service import (
     finalizar_tarefa,
     iniciar_tarefa,
     listar_tarefas_disponiveis,
+    obter_proxima_tarefa_separacao,
 )
+from apps.core.operacional_transicao import url_exec_separacao, url_lista_separacao
 from apps.usuarios.access import PerfilPermitido
 from apps.usuarios.models import Usuario
 
@@ -54,6 +56,31 @@ class BiparTarefaSeparacaoAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(resultado, status=status.HTTP_200_OK)
+
+
+class ProximaTarefaSeparacaoAPIView(APIView):
+    permission_classes = [IsAuthenticated, PerfilPermitido]
+    allowed_profiles = (Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
+
+    def get(self, request):
+        excluir = request.query_params.get('excluir_tarefa_id')
+        proxima = obter_proxima_tarefa_separacao(
+            request.user,
+            excluir_tarefa_id=int(excluir) if excluir else None,
+        )
+        if proxima:
+            return Response(
+                {
+                    'tem_proxima': True,
+                    'proxima_tarefa_id': proxima['id'],
+                    'redirect_url': url_exec_separacao(proxima['id']),
+                },
+                status=status.HTTP_200_OK,
+            )
+        return Response(
+            {'tem_proxima': False, 'proxima_tarefa_id': None, 'redirect_url': url_lista_separacao()},
+            status=status.HTTP_200_OK,
+        )
 
 
 class FinalizarTarefaSeparacaoAPIView(APIView):

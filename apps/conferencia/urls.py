@@ -5,6 +5,7 @@ from apps.conferencia.views import (
 	FinalizarConferenciaAPIView,
 	IniciarConferenciaAPIView,
 	NFsDisponiveisAPIView,
+	ProximaNFConferenciaAPIView,
 	RegistrarDivergenciaAPIView,
 )
 
@@ -15,4 +16,5 @@ urlpatterns = [
 	path('bipar/', BiparConferenciaAPIView.as_view(), name='conferencia-bipar'),
 	path('divergencia/', RegistrarDivergenciaAPIView.as_view(), name='conferencia-divergencia'),
 	path('finalizar/', FinalizarConferenciaAPIView.as_view(), name='conferencia-finalizar'),
+	path('proxima/', ProximaNFConferenciaAPIView.as_view(), name='conferencia-proxima'),
 ]

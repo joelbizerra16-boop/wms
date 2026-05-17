@@ -343,7 +343,7 @@
             <div class="feedback error">{{ conferencia_bloqueio_motivo|default:'Conferência bloqueada aguardando separação.' }}</div>
         {% elif not conferencia_ativa %}
             <section class="accept-panel">
-                <form method="post" action="{% url 'aceitar_conferencia' nf.id %}">
+                <form method="post" id="form-aceitar-conferencia" action="{% url 'aceitar_conferencia' nf.id %}">
                     {% csrf_token %}
                     <button class="accept-btn" type="submit">Aceitar conferência</button>
                 </form>
@@ -415,6 +415,21 @@
         const pollingIntervalMs = 10000;
         let pollingHandle = null;
         let pollingInFlight = false;
+        let redirecionandoConclusao = false;
+        const listaConferenciaUrl = "{% url 'web-conferencia-lista' %}";
+
+        function navegarAposConclusao(data) {
+            if (redirecionandoConclusao) return;
+            redirecionandoConclusao = true;
+            const destino = (data && data.redirect_url) ? data.redirect_url : listaConferenciaUrl;
+            stopPolling();
+            if (codigoInput) {
+                codigoInput.disabled = true;
+                codigoInput.placeholder = 'Conferencia finalizada';
+            }
+            if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
+            window.location.replace(destino);
+        }
 
         function getCookie(name) {
             const value = `; ${document.cookie}`;
@@ -575,11 +590,8 @@
                 codigoInput.value = '';
                 setFeedback('Leitura registrada com sucesso.', 'ok');
                 if (data.finalizado) {
-                    if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
-                    stopPolling();
-                    setTimeout(function () {
-                        window.location.href = "{% url 'web-dashboard-conferencia' %}";
-                    }, 800);
+                    setFeedback(data.tem_proxima ? 'Próxima NF...' : 'Conferência concluída.', 'ok');
+                    navegarAposConclusao(data);
                     return;
                 }
                 await refreshNFStatus();
@@ -672,6 +684,44 @@
     {% else %}
     <script>
     (function () {
+        const nfId = {{ nf.id }};
+        const formAceitar = document.getElementById('form-aceitar-conferencia');
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+        if (formAceitar) {
+            formAceitar.addEventListener('submit', async function (event) {
+                event.preventDefault();
+                const submitButton = formAceitar.querySelector('button[type="submit"]');
+                if (submitButton) {
+                    submitButton.disabled = true;
+                    submitButton.textContent = 'Aceitando...';
+                }
+                try {
+                    const response = await fetch('/api/conferencia/iniciar/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCookie('csrftoken'),
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        body: JSON.stringify({ nf_id: nfId }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.erro || 'Não foi possível aceitar a conferência.');
+                    window.location.replace(window.location.pathname);
+                } catch (error) {
+                    alert(error.message);
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                        submitButton.textContent = 'Aceitar conferência';
+                    }
+                }
+            });
+        }
         const progressFillEl = document.getElementById('progress-fill');
         const progressPercentEl = document.getElementById('progress-percent');
         const esperado = Number({{ totais_nf.esperado|default:0 }});

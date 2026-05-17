@@ -358,6 +358,17 @@
         const progressPercentEl = document.getElementById('progress-percent');
         const progressFillEl = document.getElementById('progress-fill');
         let redirecionandoConclusao = false;
+        const listaSeparacaoUrl = "{% url 'web-separacao-lista' %}";
+
+        function navegarAposConclusao(data) {
+            if (redirecionandoConclusao) return;
+            redirecionandoConclusao = true;
+            const destino = (data && data.redirect_url) ? data.redirect_url : listaSeparacaoUrl;
+            stopPolling();
+            bloquearBipagem();
+            if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
+            window.location.replace(destino);
+        }
         let scannerBuffer = '';
         let scannerTimer = null;
         let focusTimer = null;
@@ -474,12 +485,9 @@
                 if (!response.ok) throw new Error(data.mensagem || data.erro || 'Falha na bipagem.');
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
 
-                if (tarefaConcluida(data.status_tarefa)) {
-                    setFeedback('Separação concluída com sucesso.', 'ok');
-                    if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
-                    bloquearBipagem();
-                    redirecionandoConclusao = true;
-                    setTimeout(function () { window.location.href = "{% url 'web-separacao-lista' %}"; }, 800);
+                if (tarefaConcluida(data.status_tarefa) || data.finalizado) {
+                    setFeedback(data.tem_proxima ? 'Próxima tarefa...' : 'Separação concluída.', 'ok');
+                    navegarAposConclusao(data);
                     return;
                 }
 
@@ -614,15 +622,38 @@
         window.addEventListener('pagehide', stopPolling);
         window.addEventListener('beforeunload', stopPolling);
 
+        async function aceitarTarefa(event) {
+            event.preventDefault();
+            const submitButton = event.target.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Aceitando...';
+            }
+            try {
+                const response = await fetch('/api/separacao/iniciar/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify({ tarefa_id: tarefaId }),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.erro || 'Não foi possível aceitar a tarefa.');
+                window.location.replace(window.location.pathname);
+            } catch (error) {
+                setFeedback(error.message, 'erro');
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Aceitar separação';
+                }
+            }
+        }
+
         postForms.forEach(function (postForm) {
             if (postForm.id === 'bipagem-separacao-form') return;
-            postForm.addEventListener('submit', function () {
-                const submitButton = postForm.querySelector('button[type="submit"]');
-                if (!submitButton || submitButton.disabled) return;
-                submitButton.disabled = true;
-                submitButton.dataset.originalText = submitButton.textContent || '';
-                submitButton.textContent = 'Processando...';
-            });
+            postForm.addEventListener('submit', aceitarTarefa);
         });
 
         updateProgress({{ resumo_tarefa.separado|default:0 }}, {{ resumo_tarefa.total|default:0 }});

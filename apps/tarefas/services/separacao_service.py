@@ -159,33 +159,74 @@ def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None)
             tarefa.id,
         ),
     )
-    return [
-        {
-            'id': tarefa.id,
-            'nf_id': tarefa.nf_id,
-            'nf_numero': _nf_tarefa_resumo(tarefa),
-            'tipo': tarefa.tipo,
-            'status': tarefa.status,
-            'rota': f'Balcao - {tarefa.rota.nome}' if _tarefa_balcao(tarefa) else tarefa.rota.nome,
-            'setor': tarefa.setor,
-            'segmento': _segmento_tarefa(tarefa),
-            'operacao': 'NF' if tarefa.tipo == Tarefa.Tipo.FILTRO else 'ROTA',
-            'usuario_id': tarefa.usuario_em_execucao_id or tarefa.usuario_id,
-            'usuario_nome': (
-                tarefa.usuario_em_execucao.nome
-                if tarefa.usuario_em_execucao_id and tarefa.usuario_em_execucao
-                else (tarefa.usuario.nome if tarefa.usuario_id and tarefa.usuario else '')
-            ),
-            'bloqueado': bool(
-                usuario is not None
-                and (tarefa.usuario_em_execucao_id or tarefa.usuario_id)
-                and (tarefa.usuario_em_execucao_id or tarefa.usuario_id) != usuario.id
-            ),
-            'em_uso_por_mim': bool(usuario is not None and (tarefa.usuario_em_execucao_id or tarefa.usuario_id) == usuario.id),
-            'balcao': _tarefa_balcao(tarefa),
-        }
-        for tarefa in tarefas_ordenadas
-    ]
+    return [_serializar_tarefa_lista(tarefa, usuario) for tarefa in tarefas_ordenadas]
+
+
+def _serializar_tarefa_lista(tarefa, usuario=None):
+    return {
+        'id': tarefa.id,
+        'nf_id': tarefa.nf_id,
+        'nf_numero': _nf_tarefa_resumo(tarefa),
+        'tipo': tarefa.tipo,
+        'status': tarefa.status,
+        'rota': f'Balcao - {tarefa.rota.nome}' if _tarefa_balcao(tarefa) else tarefa.rota.nome,
+        'setor': tarefa.setor,
+        'segmento': _segmento_tarefa(tarefa),
+        'operacao': 'NF' if tarefa.tipo == Tarefa.Tipo.FILTRO else 'ROTA',
+        'usuario_id': tarefa.usuario_em_execucao_id or tarefa.usuario_id,
+        'usuario_nome': (
+            tarefa.usuario_em_execucao.nome
+            if tarefa.usuario_em_execucao_id and tarefa.usuario_em_execucao
+            else (tarefa.usuario.nome if tarefa.usuario_id and tarefa.usuario else '')
+        ),
+        'bloqueado': bool(
+            usuario is not None
+            and (tarefa.usuario_em_execucao_id or tarefa.usuario_id)
+            and (tarefa.usuario_em_execucao_id or tarefa.usuario_id) != usuario.id
+        ),
+        'em_uso_por_mim': bool(usuario is not None and (tarefa.usuario_em_execucao_id or tarefa.usuario_id) == usuario.id),
+        'balcao': _tarefa_balcao(tarefa),
+    }
+
+
+def obter_proxima_tarefa_separacao(usuario, *, excluir_tarefa_id=None):
+    """Próxima tarefa ativa no período operacional (consulta leve, sem histórico)."""
+    from apps.core.operacional_periodo import periodo_operacional_padrao
+
+    data_inicio, data_fim = periodo_operacional_padrao()
+    queryset = (
+        Tarefa.objects.filter(ativo=True)
+        .filter(status__in=STATUS_TAREFA_DISPONIVEL)
+        .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal='CANCELADA'))
+        .filter(Q(created_at__date__gte=data_inicio) | Q(updated_at__date__gte=data_inicio))
+        .filter(Q(created_at__date__lte=data_fim) | Q(updated_at__date__lte=data_fim))
+    )
+    queryset = _filtrar_tarefas_por_setor(queryset, usuario)
+    if excluir_tarefa_id:
+        queryset = queryset.exclude(id=excluir_tarefa_id)
+    candidatas = list(
+        queryset.only('id', 'status', 'setor', 'tipo', 'nf_id', 'rota_id', 'usuario_id', 'usuario_em_execucao_id')
+        .select_related('nf', 'rota')
+        .order_by('-id')[:80]
+    )
+    disponiveis = []
+    for tarefa in candidatas:
+        if tarefa.status == Tarefa.Status.EM_EXECUCAO:
+            responsavel_id = tarefa.usuario_em_execucao_id or tarefa.usuario_id
+            if responsavel_id and responsavel_id != getattr(usuario, 'id', None):
+                continue
+        disponiveis.append(tarefa)
+    if not disponiveis:
+        return None
+    disponiveis.sort(
+        key=lambda tarefa: (
+            0 if (_tarefa_balcao(tarefa) and tarefa.status == Tarefa.Status.ABERTO) else 1,
+            0 if tarefa.status == Tarefa.Status.ABERTO else 1,
+            tarefa.id,
+        )
+    )
+    escolhida = disponiveis[0]
+    return {'id': escolhida.id}
 
 
 def status_item_tarefa(tarefa_status, quantidade_separada, quantidade_total, possui_restricao=False):
@@ -487,7 +528,7 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
         proximo_item = itens_restantes[0] if itens_restantes else None
         finalizado = proximo_item is None or tarefa.status in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}
         _invalidate_dashboards_operacionais(motivo='bipagem_separacao')
-        return {
+        resposta = {
             'status': 'ok',
             'tarefa_id': tarefa.id,
             'produto': item.produto.cod_prod,
@@ -503,6 +544,11 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
             'proximo_item': _dados_item_operacional_tarefa(proximo_item),
             'finalizado': finalizado,
         }
+        if finalizado or tarefa.status in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}:
+            from apps.core.operacional_transicao import anexar_transicao_separacao
+
+            anexar_transicao_separacao(resposta, usuario, tarefa_id_atual=tarefa.id)
+        return resposta
     finally:
         elapsed_ms = (time.perf_counter() - inicio) * 1000
         slow_threshold = float(getattr(settings, 'BIPAGEM_SLOW_LOG_MS', 150))
@@ -616,20 +662,29 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
                 from apps.conferencia.services.conferencia_service import invalidate_nfs_disponiveis_cache
                 from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
 
+                nf_id_filtros = tarefa_local.nf_id
                 invalidate_nfs_disponiveis_cache(
                     motivo='finalizacao_separacao_filtros',
-                    nf_id=tarefa_local.nf_id,
+                    nf_id=nf_id_filtros,
                     setor=Setor.Codigo.FILTROS,
                 )
-                invalidate_monitoramento_conferencia_cache(
-                    motivo='finalizacao_separacao_filtros',
-                    nf_id=tarefa_local.nf_id,
-                    setor=Setor.Codigo.FILTROS,
-                )
+
+                def _invalidar_monitoramento_filtros(nf_id=nf_id_filtros):
+                    invalidate_monitoramento_conferencia_cache(
+                        motivo='finalizacao_separacao_filtros',
+                        nf_id=nf_id,
+                        setor=Setor.Codigo.FILTROS,
+                    )
+
+                transaction.on_commit(_invalidar_monitoramento_filtros)
             return tarefa_local
 
     tarefa = _executar_com_retry_sqlite_lock(_executar)
-    return _dados_tarefa(tarefa)
+    _invalidate_dashboards_operacionais(motivo='finalizacao_separacao')
+    dados = _dados_tarefa(tarefa)
+    from apps.core.operacional_transicao import anexar_transicao_separacao
+
+    return anexar_transicao_separacao(dados, usuario, tarefa_id_atual=tarefa.id)
 
 
 def _validar_nf_cancelada(tarefa, usuario, acao):
@@ -651,15 +706,23 @@ def _filtrar_tarefas_por_setor(queryset, usuario):
 
 def _invalidate_dashboards_operacionais(*, motivo=''):
     try:
-        from apps.core.views_dashboard import invalidate_dashboard_separacao_cache
         from apps.conferencia.services.conferencia_service import invalidate_nfs_disponiveis_cache
-        from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
 
-        invalidate_dashboard_separacao_cache(motivo=motivo)
         invalidate_nfs_disponiveis_cache(motivo=motivo)
-        invalidate_monitoramento_conferencia_cache(motivo=motivo)
     except Exception as exc:
-        logger.warning('Falha ao invalidar cache operacional: %s', exc)
+        logger.warning('Falha ao invalidar fila de conferencia: %s', exc)
+
+    def _invalidar_painel():
+        try:
+            from apps.core.views_dashboard import invalidate_dashboard_separacao_cache
+            from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
+
+            invalidate_dashboard_separacao_cache(motivo=motivo)
+            invalidate_monitoramento_conferencia_cache(motivo=motivo)
+        except Exception as exc:
+            logger.warning('Falha ao invalidar cache operacional: %s', exc)
+
+    transaction.on_commit(_invalidar_painel)
 
 
 def _validar_setor_tarefa(tarefa, usuario):
