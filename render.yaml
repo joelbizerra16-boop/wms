@@ -3,7 +3,7 @@ services:
     name: wms
     env: python
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
-    preDeployCommand: python manage.py create_render_superuser
+    preDeployCommand: python manage.py create_render_superuser && python manage.py clearsessions
     startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --worker-class gthread --workers 4 --threads 8 --timeout 120 --keep-alive 5
     envVars:
       - key: DJANGO_SETTINGS_MODULE
@@ -13,7 +13,7 @@ services:
       - key: ALLOWED_HOSTS
         value: .onrender.com
       - key: CSRF_TRUSTED_ORIGINS
-        value: https://.onrender.com
+        value: https://wms-okv1.onrender.com,https://.onrender.com
       - key: DATABASE_URL
         sync: false
       - key: SECRET_KEY

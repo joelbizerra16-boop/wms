@@ -366,3 +366,47 @@ class PaginacaoUsuariosWebTests(TestCase):
         self.assertEqual(len(response_pagina_1.context['usuarios']), 20)
         self.assertContains(response_pagina_1, 'Página 1 de 2')
         self.assertEqual(len(response_pagina_2.context['usuarios']), 5)
+
+
+@override_settings(
+    ROOT_URLCONF='config.urls',
+    ALLOWED_HOSTS=['wms-okv1.onrender.com', 'testserver'],
+    CSRF_TRUSTED_ORIGINS=['https://wms-okv1.onrender.com', 'https://.onrender.com'],
+)
+class LoginCSRFTests(TestCase):
+    def setUp(self):
+        self.client = Client(enforce_csrf_checks=True)
+        self.usuario = Usuario.objects.create_user(
+            username='login_csrf',
+            nome='Login CSRF',
+            perfil=Usuario.Perfil.SEPARADOR,
+            setores=[Setor.Codigo.LUBRIFICANTE],
+            password='123456',
+            is_active=True,
+        )
+
+    def test_login_com_csrf_valido(self):
+        self.client.get('/login/', HTTP_HOST='wms-okv1.onrender.com', secure=True)
+        token = self.client.cookies['csrftoken'].value
+        response = self.client.post(
+            '/login/',
+            {
+                'username': 'login_csrf',
+                'password': '123456',
+                'csrfmiddlewaretoken': token,
+            },
+            HTTP_HOST='wms-okv1.onrender.com',
+            secure=True,
+            HTTP_REFERER='https://wms-okv1.onrender.com/login/',
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_login_sem_csrf_mostra_mensagem_amigavel(self):
+        response = self.client.post(
+            '/login/',
+            {'username': 'login_csrf', 'password': '123456'},
+            HTTP_HOST='wms-okv1.onrender.com',
+            secure=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Sessão expirada')

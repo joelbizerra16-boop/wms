@@ -173,6 +173,15 @@ LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/home/'
 LOGOUT_REDIRECT_URL = '/login/'
 
+SESSION_COOKIE_SAMESITE = config('SESSION_COOKIE_SAMESITE', default='Lax')
+CSRF_COOKIE_SAMESITE = config('CSRF_COOKIE_SAMESITE', default='Lax')
+CSRF_COOKIE_HTTPONLY = False
+CSRF_USE_SESSIONS = False
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_AGE = config('SESSION_COOKIE_AGE', default=60 * 60 * 12, cast=int)
+CSRF_COOKIE_AGE = config('CSRF_COOKIE_AGE', default=60 * 60 * 12, cast=int)
+CSRF_FAILURE_VIEW = 'apps.usuarios.views.csrf_failure'
+
 SWAGGER_SETTINGS = {
     'USE_SESSION_AUTH': False,
     'SECURITY_DEFINITIONS': {

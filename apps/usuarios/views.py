@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.forms import AuthenticationForm
@@ -7,7 +9,7 @@ from django.contrib import messages
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse
 from rest_framework import viewsets
@@ -21,13 +23,59 @@ from apps.usuarios.access import get_post_login_redirect_url
 from apps.usuarios.serializers import UsuarioSerializer
 
 
+logger = logging.getLogger(__name__)
+
+MENSAGEM_CSRF_EXPIRADO = 'Sessão expirada. Recarregue a página e tente novamente.'
+
+
+def csrf_failure(request, reason=''):
+    logger.warning(
+        'CSRF_FAILURE path=%s reason=%s cookie=%s session=%s origin=%s referer=%s',
+        request.path,
+        reason,
+        bool(request.COOKIES.get('csrftoken')),
+        getattr(request.session, 'session_key', None),
+        request.META.get('HTTP_ORIGIN', ''),
+        request.META.get('HTTP_REFERER', ''),
+    )
+    if request.path.startswith('/login'):
+        return render(
+            request,
+            'login.html',
+            {
+                'erro': MENSAGEM_CSRF_EXPIRADO,
+                'form': AuthenticationForm(request),
+            },
+            status=200,
+        )
+    return render(
+        request,
+        'csrf_failure.html',
+        {'mensagem': MENSAGEM_CSRF_EXPIRADO},
+        status=200,
+    )
+
+
+@ensure_csrf_cookie
+@never_cache
+@csrf_protect
 def login_view(request):
     erro = None
     if request.method == 'POST':
+        logger.warning(
+            'LOGIN_CSRF_DEBUG cookie=%s session=%s post_token=%s origin=%s referer=%s ua=%s',
+            bool(request.COOKIES.get('csrftoken')),
+            getattr(request.session, 'session_key', None),
+            bool(request.POST.get('csrfmiddlewaretoken')),
+            request.META.get('HTTP_ORIGIN', ''),
+            request.META.get('HTTP_REFERER', ''),
+            (request.META.get('HTTP_USER_AGENT', '') or '')[:120],
+        )
         form = AuthenticationForm(request, data=request.POST)
         if form.is_valid():
             user = form.get_user()
             login(request, user)
+            request.session.cycle_key()
             UserActivityLog.objects.create(usuario=user, tipo=UserActivityLog.Tipo.LOGIN, timestamp=timezone.now())
             return redirect(get_post_login_redirect_url(user))
 

@@ -114,16 +114,31 @@
         <div class="erro">{{ erro }}</div>
         {% endif %}
 
-        <form method="post">
+        <form method="post" id="login-form" action="{% url 'login' %}">
             {% csrf_token %}
             <label for="username">Usuário</label>
-            <input id="username" name="username" type="text" autocomplete="username" value="{{ form.username.value|default:'' }}" required>
+            <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" value="{{ form.username.value|default:'' }}" required>
 
             <label for="password">Senha</label>
             <input id="password" name="password" type="password" autocomplete="current-password" required>
 
-            <button type="submit">Login</button>
+            <button type="submit" id="login-submit">Login</button>
         </form>
     </main>
+    <script>
+    (function () {
+        const form = document.getElementById('login-form');
+        const submitBtn = document.getElementById('login-submit');
+        if (!form || !submitBtn) return;
+        form.addEventListener('submit', function (event) {
+            if (submitBtn.disabled) {
+                event.preventDefault();
+                return;
+            }
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Entrando...';
+        });
+    })();
+    </script>
 </body>
 </html>

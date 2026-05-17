@@ -14,11 +14,12 @@ ALLOWED_HOSTS = config(
 	cast=Csv(),
 )
 DATABASE_URL = config('DATABASE_URL')
-CSRF_TRUSTED_ORIGINS = config(
+_csrf_origins = config(
 	'CSRF_TRUSTED_ORIGINS',
-	default='https://.onrender.com',
+	default='https://wms-okv1.onrender.com,https://.onrender.com',
 	cast=Csv(),
 )
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(_csrf_origins))
 
 parsed_database_url = urlparse(DATABASE_URL)
 database_host = parsed_database_url.hostname or ''
@@ -72,6 +73,9 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+USE_X_FORWARDED_HOST = True
 SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=3600, cast=int)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
@@ -120,6 +124,16 @@ LOGGING = {
 			'apps.nf': {
 				'handlers': ['console'],
 				'level': LOG_LEVEL,
+				'propagate': False,
+			},
+			'apps.usuarios': {
+				'handlers': ['console'],
+				'level': LOG_LEVEL,
+				'propagate': False,
+			},
+			'django.security.csrf': {
+				'handlers': ['console'],
+				'level': 'WARNING',
 				'propagate': False,
 			},
 	},
