@@ -29,32 +29,44 @@ class SeparacaoError(Exception):
     pass
 
 
+def _select_for_update_kwargs(*, nowait=True, skip_locked=False):
+    """Lock apenas na tabela principal (sem OUTER JOIN no PostgreSQL)."""
+    kwargs = {}
+    if skip_locked:
+        kwargs['skip_locked'] = True
+    if connection.vendor == 'postgresql':
+        if nowait:
+            kwargs['nowait'] = True
+        kwargs['of'] = ('self',)
+    elif nowait:
+        kwargs['nowait'] = True
+    return kwargs
+
+
 def _tarefa_lock_queryset():
-    lock_kwargs = {'nowait': True} if connection.vendor == 'postgresql' else {}
-    return (
-        Tarefa.objects.select_for_update(**lock_kwargs)
-        .select_related('nf', 'rota')
-        .only(
-            'id',
-            'status',
-            'setor',
-            'tipo',
-            'nf_id',
-            'rota_id',
-            'usuario_id',
-            'usuario_em_execucao_id',
-            'nf__id',
-            'nf__numero',
-            'nf__status_fiscal',
-            'nf__balcao',
-            'rota__id',
-            'rota__nome',
-        )
-    )
+    return Tarefa.objects.select_for_update(**_select_for_update_kwargs())
 
 
 def _itens_pendentes_lock_queryset():
-    return TarefaItem.objects.select_for_update(skip_locked=True).select_related('produto')
+    return TarefaItem.objects.select_for_update(
+        **_select_for_update_kwargs(skip_locked=True),
+    ).select_related('produto')
+
+
+def _identificador_tarefa_log(tarefa):
+    from apps.nf.models import NotaFiscal
+    from apps.rotas.models import Rota
+
+    if tarefa.nf_id:
+        numero = getattr(getattr(tarefa, 'nf', None), 'numero', None)
+        if numero is None:
+            numero = NotaFiscal.objects.filter(id=tarefa.nf_id).values_list('numero', flat=True).first()
+        return f'NF {numero}'
+    nome = getattr(getattr(tarefa, 'rota', None), 'nome', None)
+    if nome is None:
+        nome = Rota.objects.filter(id=tarefa.rota_id).values_list('nome', flat=True).first()
+    return f'rota {nome}'
+
 
 def _obter_tarefa_ou_erro(queryset, tarefa_id):
     tarefa = queryset.filter(id=tarefa_id).first()
@@ -476,7 +488,7 @@ def iniciar_tarefa(tarefa_id, usuario):
                 tarefa.usuario_em_execucao = usuario
                 tarefa.data_inicio = timezone.now()
                 tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
-                identificador = f'NF {tarefa.nf.numero}' if tarefa.nf_id else f'rota {tarefa.rota.nome}'
+                identificador = _identificador_tarefa_log(tarefa)
                 _registrar_log_seguro(usuario, 'INICIO SEPARACAO', f'Tarefa {tarefa.id} iniciada para {identificador}.')
                 _registrar_atividade_segura(usuario, UserActivityLog.Tipo.TAREFA_INICIO, tarefa, timezone.now())
                 return tarefa
@@ -513,9 +525,9 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
 
                 with metricas.fase('query'):
                     itens_pendentes = list(
-                        TarefaItem.objects.select_for_update(skip_locked=True)
+                        _itens_pendentes_lock_queryset()
                         .filter(tarefa_id=tarefa_id, quantidade_separada__lt=F('quantidade_total'))
-                        .select_related('produto', 'nf')
+                        .select_related('produto')
                         .only(
                             'id',
                             'tarefa_id',
@@ -530,10 +542,8 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                             'produto__codigo',
                             'produto__setor',
                             'produto__categoria',
-                            'nf__id',
-                            'nf__numero',
                         )
-                        .order_by('nf__data_emissao', 'nf__numero', 'created_at')
+                        .order_by('nf_id', 'created_at')
                     )
                     if not itens_pendentes:
                         raise SeparacaoError('Tarefa sem itens pendentes para bipagem')
@@ -676,12 +686,7 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
         )
     def _executar():
         with transaction.atomic():
-            tarefa_local = (
-                Tarefa.objects.select_for_update()
-                .select_related('rota')
-                .prefetch_related('itens__nf')
-                .get(id=tarefa_id)
-            )
+            tarefa_local = Tarefa.objects.select_for_update(**_select_for_update_kwargs()).get(id=tarefa_id)
             _validar_nf_cancelada(tarefa_local, usuario, 'SEPARACAO BLOQUEADA')
             _validar_setor_tarefa(tarefa_local, usuario)
             _validar_execucao_tarefa(tarefa_local, usuario)
@@ -701,7 +706,7 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
                 tarefa_local.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
             else:
                 tarefa_local.save(update_fields=['status', 'updated_at'])
-            for item_local in tarefa_local.itens.select_for_update().all():
+            for item_local in TarefaItem.objects.select_for_update(**_select_for_update_kwargs()).filter(tarefa_id=tarefa_id):
                 possui_restricao = status_final in {Tarefa.Status.FECHADO_COM_RESTRICAO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO} and item_local.quantidade_separada < item_local.quantidade_total
                 if item_local.possui_restricao != possui_restricao:
                     item_local.possui_restricao = possui_restricao
@@ -755,8 +760,22 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
 
 
 def _validar_nf_cancelada(tarefa, usuario, acao):
-    if tarefa.nf and tarefa.nf.status_fiscal == 'CANCELADA':
-        Log.objects.create(usuario=usuario, acao=acao, detalhe=f'NF {tarefa.nf.numero} bloqueada. Motivo: NF CANCELADA.')
+    if not tarefa.nf_id:
+        return
+    from apps.nf.models import NotaFiscal
+
+    nf = getattr(tarefa, 'nf', None)
+    if nf is not None and getattr(nf, 'status_fiscal', None):
+        status_fiscal = nf.status_fiscal
+        numero_nf = nf.numero
+    else:
+        dados_nf = NotaFiscal.objects.filter(id=tarefa.nf_id).values('status_fiscal', 'numero').first()
+        if not dados_nf:
+            return
+        status_fiscal = dados_nf['status_fiscal']
+        numero_nf = dados_nf['numero']
+    if status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
+        Log.objects.create(usuario=usuario, acao=acao, detalhe=f'NF {numero_nf} bloqueada. Motivo: NF CANCELADA.')
         raise SeparacaoError(NF_CANCELADA_ERRO)
 
 
@@ -912,7 +931,7 @@ def liberar_execucao_tarefa(tarefa_id, usuario):
         raise SeparacaoError(TAREFA_EM_EXECUCAO_ERRO)
     def _executar():
         with transaction.atomic():
-            tarefa_local = Tarefa.objects.select_for_update().select_related('rota').get(id=tarefa_id)
+            tarefa_local = Tarefa.objects.select_for_update(**_select_for_update_kwargs()).get(id=tarefa_id)
             _validar_setor_tarefa(tarefa_local, usuario)
             usuario_execucao_local_id = tarefa_local.usuario_em_execucao_id or tarefa_local.usuario_id
             if tarefa_local.status != Tarefa.Status.EM_EXECUCAO:

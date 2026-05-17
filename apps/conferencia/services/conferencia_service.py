@@ -654,22 +654,16 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
             nonlocal nf_id, nf_numero, produto_cod, finalizado, conferido, esperado, setor_cache
             with transaction.atomic():
                 with metricas.fase('lock'):
-                    lock_kwargs = {'nowait': True} if connection.vendor == 'postgresql' else {}
-                    conferencia_local = (
-                        Conferencia.objects.select_for_update(**lock_kwargs)
-                        .select_related('nf')
-                        .only(
-                            'id',
-                            'status',
-                            'conferente_id',
-                            'nf_id',
-                            'nf__id',
-                            'nf__numero',
-                            'nf__status_fiscal',
-                        )
-                        .get(id=conferencia_id)
-                    )
-                    if conferencia_local.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
+                    lock_kwargs = {}
+                    if connection.vendor == 'postgresql':
+                        lock_kwargs = {'nowait': True, 'of': ('self',)}
+                    else:
+                        lock_kwargs = {'nowait': True}
+                    conferencia_local = Conferencia.objects.select_for_update(**lock_kwargs).get(id=conferencia_id)
+                    status_fiscal_nf = NotaFiscal.objects.filter(id=conferencia_local.nf_id).values_list(
+                        'status_fiscal', flat=True
+                    ).first()
+                    if status_fiscal_nf == NotaFiscal.StatusFiscal.CANCELADA:
                         raise ConferenciaError(NF_CANCELADA_ERRO)
                     if conferencia_local.status not in {
                         Conferencia.Status.EM_CONFERENCIA,
@@ -680,8 +674,11 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         raise ConferenciaError('Conferencia vinculada a outro usuario.')
 
                 with metricas.fase('query'):
+                    item_lock_kwargs = {'skip_locked': True}
+                    if connection.vendor == 'postgresql':
+                        item_lock_kwargs.update(nowait=True, of=('self',))
                     itens_pendentes = list(
-                        ConferenciaItem.objects.select_for_update(skip_locked=True)
+                        ConferenciaItem.objects.select_for_update(**item_lock_kwargs)
                         .filter(
                             conferencia_id=conferencia_id,
                             status=ConferenciaItem.Status.AGUARDANDO,

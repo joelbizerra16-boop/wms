@@ -46,8 +46,11 @@ def validar_produto(codigo_lido, item_id, usuario, item_model, tipo_validacao, *
     if item_travado is not None:
         item = item_travado
     else:
+        lock_kwargs = {}
+        if connection.vendor == 'postgresql':
+            lock_kwargs = {'of': ('self',)}
         item = (
-            item_model.objects.select_for_update()
+            item_model.objects.select_for_update(**lock_kwargs)
             .select_related('produto')
             .get(id=item_id)
         )
