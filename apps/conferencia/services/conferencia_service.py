@@ -676,7 +676,7 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                 with metricas.fase('query'):
                     item_lock_kwargs = {'skip_locked': True}
                     if connection.vendor == 'postgresql':
-                        item_lock_kwargs.update(nowait=True, of=('self',))
+                        item_lock_kwargs['of'] = ('self',)
                     itens_pendentes = list(
                         ConferenciaItem.objects.select_for_update(**item_lock_kwargs)
                         .filter(

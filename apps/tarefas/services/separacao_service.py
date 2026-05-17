@@ -34,12 +34,10 @@ def _select_for_update_kwargs(*, nowait=True, skip_locked=False):
     kwargs = {}
     if skip_locked:
         kwargs['skip_locked'] = True
-    if connection.vendor == 'postgresql':
-        if nowait:
-            kwargs['nowait'] = True
-        kwargs['of'] = ('self',)
     elif nowait:
         kwargs['nowait'] = True
+    if connection.vendor == 'postgresql':
+        kwargs['of'] = ('self',)
     return kwargs
 
 
