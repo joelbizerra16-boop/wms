@@ -75,8 +75,9 @@
     </div>
     <div class="scan-confirm-bar__actions">
         <a href="{% url 'web-fila-entradas-nf' %}" class="btn btn-light">Ver fila completa</a>
-        <form method="post" action="{% url 'web-confirmar-scan-entradas' %}">
+        <form method="post" action="{% url 'web-confirmar-scan-entradas' %}" id="confirm-scan-form">
             {% csrf_token %}
+            <input type="hidden" name="balcao" id="confirm-balcao-field" value="">
             <button type="submit" class="btn-primary">Confirmar e Enviar para Separação</button>
         </form>
     </div>
@@ -166,11 +167,25 @@
         sessionStorage.setItem(BALCAO_STORAGE_KEY, pedidoBalcaoAtivo() ? '1' : '0');
     }
 
+    function sincronizarCampoConfirmacao() {
+        const field = document.getElementById('confirm-balcao-field');
+        if (field) field.value = pedidoBalcaoAtivo() ? '1' : '';
+    }
+
     restaurarEstadoBalcao();
+    sincronizarCampoConfirmacao();
     if (balcaoToggle) {
         balcaoToggle.addEventListener('change', function () {
             persistirEstadoBalcao();
+            sincronizarCampoConfirmacao();
             scanner.focus();
+        });
+    }
+
+    const confirmForm = document.getElementById('confirm-scan-form');
+    if (confirmForm) {
+        confirmForm.addEventListener('submit', function () {
+            sincronizarCampoConfirmacao();
         });
     }
 

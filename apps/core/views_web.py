@@ -242,6 +242,37 @@ def _set_scan_ids_session(request, ids):
     set_scan_entrada_ids(request.user.id, ids)
 
 
+def _pedido_balcao_flag(valor):
+    return valor in {True, 1, '1', 'on', 'true', 'True'}
+
+
+def _pedido_balcao_da_requisicao(request, payload=None):
+    if payload is not None and 'balcao' in payload:
+        return _pedido_balcao_flag(payload.get('balcao'))
+    if request.method == 'POST':
+        return _pedido_balcao_flag(request.POST.get('balcao'))
+    return bool(request.session.get('scan_pedido_balcao', False))
+
+
+def _aplicar_pedido_balcao_entradas_scan(ids):
+    """Mesma marcação de tipo usada na importação XML antes de liberar/processar."""
+    if not ids:
+        return
+    EntradaNF.objects.filter(
+        id__in=ids,
+        status=EntradaNF.Status.AGUARDANDO,
+    ).exclude(tipo=EntradaNF.Tipo.BALCAO).update(
+        tipo=EntradaNF.Tipo.BALCAO,
+        updated_at=timezone.now(),
+    )
+
+
+def _marcar_entrada_scan_balcao(entrada, balcao):
+    if balcao and entrada.tipo != EntradaNF.Tipo.BALCAO:
+        entrada.tipo = EntradaNF.Tipo.BALCAO
+        entrada.save(update_fields=['tipo', 'updated_at'])
+
+
 def _usuario_pode_gerir_separacao(user):
     """Somente superuser pode inspecionar qualquer tarefa sem filtro por setor."""
     return bool(getattr(user, 'is_superuser', False))
@@ -566,7 +597,7 @@ def importar_xml_web(request):
     resultados = None
 
     if request.method == 'POST':
-        balcao = request.POST.get('balcao') in {'1', 'on', 'true', 'True'}
+        balcao = _pedido_balcao_da_requisicao(request)
         tipo_entrada = EntradaNF.Tipo.BALCAO if balcao else EntradaNF.Tipo.NORMAL
         xml_files = request.FILES.getlist('xml_files')
         logger.info('Importacao XML recebeu %s arquivo(s).', len(xml_files))
@@ -837,7 +868,7 @@ def scan_nf_api(request):
     if not codigo:
         return JsonResponse({'ok': False, 'erro': 'Informe um código para leitura.'}, status=400)
 
-    balcao = payload.get('balcao') in {True, 1, '1', 'on', 'true', 'True'}
+    balcao = _pedido_balcao_da_requisicao(request, payload=payload)
     request.session['scan_pedido_balcao'] = balcao
     request.session.modified = True
 
@@ -890,11 +921,11 @@ def scan_nf_api(request):
         )
 
     ids = _scan_ids_session(request)
-    if balcao and entrada.tipo != EntradaNF.Tipo.BALCAO:
-        entrada.tipo = EntradaNF.Tipo.BALCAO
-        entrada.save(update_fields=['tipo', 'updated_at'])
+    _marcar_entrada_scan_balcao(entrada, balcao)
 
     if entrada.id in ids:
+        if balcao:
+            _marcar_entrada_scan_balcao(entrada, True)
         return JsonResponse(
             {
                 'ok': True,
@@ -1063,8 +1094,20 @@ def confirmar_scan_entradas_web(request):
     if request.method != 'POST':
         return redirect('web-ativacao-scan-nf')
 
+    balcao = _pedido_balcao_da_requisicao(request)
+    request.session['scan_pedido_balcao'] = balcao
+    request.session.modified = True
+
     ids = _scan_ids_session(request)
-    logger.info('CONFIRMAR_SCAN_START user_id=%s total_ids=%s ids=%s', getattr(request.user, 'id', None), len(ids), ids[:20])
+    logger.info(
+        'CONFIRMAR_SCAN_START user_id=%s total_ids=%s balcao=%s ids=%s',
+        getattr(request.user, 'id', None),
+        len(ids),
+        balcao,
+        ids[:20],
+    )
+    if balcao:
+        _aplicar_pedido_balcao_entradas_scan(ids)
     if not ids:
         messages.warning(request, 'Nenhuma NF escaneada para confirmar.')
         return redirect('web-ativacao-scan-nf')

@@ -10,7 +10,9 @@ class HealthCheckTests(SimpleTestCase):
 
 
 from datetime import timedelta
+import gzip
 import io
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -2562,3 +2564,90 @@ class LimpezaImportacaoWebContinuationTests(LimpezaImportacaoWebTests):
 
 		self.assertEqual(response.status_code, 302)
 		self.assertEqual(EntradaNF.objects.count(), 1)
+
+
+@override_settings(ROOT_URLCONF='config.urls', SCAN_CONFIRM_ASYNC_MIN_ITEMS=999)
+class AtivacaoScanBalcaoTests(TestCase):
+	def setUp(self):
+		self.client = Client()
+		self.gestor = Usuario.objects.create_user(
+			username='gestor_scan_balcao',
+			nome='Gestor Scan Balcao',
+			perfil=Usuario.Perfil.GESTOR,
+			setores=[Setor.Codigo.NAO_ENCONTRADO],
+			password='123456',
+			is_active=True,
+		)
+		self.chave_nf = '35111111111111111111550010000000011000000010'
+		xml_path = Path(__file__).resolve().parents[2] / 'xmls' / 'xml_autorizado.xml'
+		self.xml_bytes = xml_path.read_bytes()
+
+	def _criar_entrada_aguardando(self, *, tipo=EntradaNF.Tipo.NORMAL):
+		arquivo = SimpleUploadedFile('nf_scan.xml', self.xml_bytes, content_type='text/xml')
+		return EntradaNF.objects.create(
+			chave_nf=self.chave_nf,
+			numero_nf='0010',
+			xml=arquivo,
+			xml_backup_gzip=gzip.compress(self.xml_bytes),
+			status=EntradaNF.Status.AGUARDANDO,
+			tipo=tipo,
+		)
+
+	def test_confirmar_scan_com_pedido_balcao_propaga_para_importador(self):
+		entrada = self._criar_entrada_aguardando()
+		self.client.login(username='gestor_scan_balcao', password='123456')
+
+		self.client.post(
+			'/api/scan-nf/',
+			data=json.dumps({'codigo': self.chave_nf, 'balcao': True}),
+			content_type='application/json',
+		)
+
+		with patch('apps.core.views_web.importar_xml_nfe') as importar_mock:
+			importar_mock.return_value = {'status': 'sucesso', 'mensagem': 'NF importada'}
+			response = self.client.post('/importar/ativacao-scan/confirmar/', {'balcao': '1'})
+
+		self.assertEqual(response.status_code, 302)
+		entrada.refresh_from_db()
+		self.assertEqual(entrada.tipo, EntradaNF.Tipo.BALCAO)
+		importar_mock.assert_called_once()
+		self.assertTrue(importar_mock.call_args.kwargs.get('balcao'))
+
+	def test_confirmar_scan_sem_pedido_balcao_nao_marca_entrada(self):
+		entrada = self._criar_entrada_aguardando()
+		self.client.login(username='gestor_scan_balcao', password='123456')
+
+		self.client.post(
+			'/api/scan-nf/',
+			data=json.dumps({'codigo': self.chave_nf, 'balcao': False}),
+			content_type='application/json',
+		)
+
+		with patch('apps.core.views_web.importar_xml_nfe') as importar_mock:
+			importar_mock.return_value = {'status': 'sucesso', 'mensagem': 'NF importada'}
+			response = self.client.post('/importar/ativacao-scan/confirmar/', {})
+
+		self.assertEqual(response.status_code, 302)
+		entrada.refresh_from_db()
+		self.assertEqual(entrada.tipo, EntradaNF.Tipo.NORMAL)
+		importar_mock.assert_called_once()
+		self.assertFalse(importar_mock.call_args.kwargs.get('balcao'))
+
+	def test_confirmar_scan_aplica_balcao_em_lote_mesmo_sem_rebipar(self):
+		entrada = self._criar_entrada_aguardando()
+		self.client.login(username='gestor_scan_balcao', password='123456')
+
+		self.client.post(
+			'/api/scan-nf/',
+			data=json.dumps({'codigo': self.chave_nf, 'balcao': False}),
+			content_type='application/json',
+		)
+
+		with patch('apps.core.views_web.importar_xml_nfe') as importar_mock:
+			importar_mock.return_value = {'status': 'sucesso', 'mensagem': 'NF importada'}
+			response = self.client.post('/importar/ativacao-scan/confirmar/', {'balcao': '1'})
+
+		self.assertEqual(response.status_code, 302)
+		entrada.refresh_from_db()
+		self.assertEqual(entrada.tipo, EntradaNF.Tipo.BALCAO)
+		self.assertTrue(importar_mock.call_args.kwargs.get('balcao'))
