@@ -180,7 +180,7 @@ CSRF_USE_SESSIONS = False
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_AGE = config('SESSION_COOKIE_AGE', default=60 * 60 * 12, cast=int)
 CSRF_COOKIE_AGE = config('CSRF_COOKIE_AGE', default=60 * 60 * 12, cast=int)
-CSRF_FAILURE_VIEW = 'apps.usuarios.views.csrf_failure'
+CSRF_FAILURE_VIEW = 'apps.core.operacional_api.csrf_failure_json_ou_html'
 
 SWAGGER_SETTINGS = {
     'USE_SESSION_AUTH': False,

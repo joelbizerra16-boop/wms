@@ -44,6 +44,14 @@ def setores_usuario_operacional(usuario):
 
 
 def usuario_tem_setor_vinculado(usuario):
+    from apps.usuarios.models import Usuario
+
+    if usuario is None:
+        return False
+    if getattr(usuario, 'is_superuser', False):
+        return True
+    if getattr(usuario, 'perfil', None) == Usuario.Perfil.GESTOR:
+        return True
     setores = setores_usuario_operacional(usuario)
     if setores is None:
         return True

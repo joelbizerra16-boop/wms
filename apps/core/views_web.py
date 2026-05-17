@@ -19,6 +19,7 @@ import json
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.csrf import ensure_csrf_cookie
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1240,6 +1241,7 @@ def separacao_lista_web(request):
 
 
 @require_profiles(Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
+@ensure_csrf_cookie
 def separacao_exec_web(request, tarefa_id):
     try:
         tarefa = _obter_tarefa_permitida(request, tarefa_id)
@@ -1380,6 +1382,7 @@ def conferencia_lista_web(request):
 
 
 @require_profiles(Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
+@ensure_csrf_cookie
 def conferencia_exec_web(request, nf_id):
     nf, conferencia, conferencia_ativa = _obter_conferencia_contexto(nf_id, request.user)
 

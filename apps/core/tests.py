@@ -2673,6 +2673,26 @@ class OperacionalTransicaoTests(SimpleTestCase):
 		self.assertIsNone(payload['proxima_nf_id'])
 
 
+class OperacionalAPIJsonTests(TestCase):
+	def test_csrf_failure_em_api_retorna_json(self):
+		import json
+
+		from django.test import RequestFactory
+
+		from apps.core.operacional_api import csrf_failure_json_ou_html
+
+		request = RequestFactory().post(
+			'/api/separacao/iniciar/',
+			HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+		)
+		response = csrf_failure_json_ou_html(request, 'test')
+		self.assertEqual(response.status_code, 403)
+		self.assertIn('application/json', response['Content-Type'])
+		payload = json.loads(response.content.decode())
+		self.assertFalse(payload['success'])
+		self.assertTrue(payload.get('csrf_failed'))
+
+
 class OperacionalTransicaoTests(SimpleTestCase):
 	def test_anexar_transicao_separacao_redireciona_para_lista(self):
 		from apps.core.operacional_transicao import anexar_transicao_separacao, url_lista_separacao

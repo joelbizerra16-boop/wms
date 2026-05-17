@@ -1,7 +1,9 @@
+import logging
+
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from apps.core.operacional_api import OperacionalAPIView
 
 from apps.conferencia.serializers import (
     BiparConferenciaSerializer,
@@ -21,8 +23,10 @@ from apps.core.operacional_transicao import url_lista_conferencia
 from apps.usuarios.access import PerfilPermitido
 from apps.usuarios.models import Usuario
 
+logger = logging.getLogger(__name__)
 
-class NFsDisponiveisAPIView(APIView):
+
+class NFsDisponiveisAPIView(OperacionalAPIView):
     permission_classes = [IsAuthenticated, PerfilPermitido]
     allowed_profiles = (Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 
@@ -30,21 +34,26 @@ class NFsDisponiveisAPIView(APIView):
         return Response(listar_nfs_disponiveis(request.user), status=status.HTTP_200_OK)
 
 
-class IniciarConferenciaAPIView(APIView):
+class IniciarConferenciaAPIView(OperacionalAPIView):
     permission_classes = [IsAuthenticated, PerfilPermitido]
     allowed_profiles = (Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 
     def post(self, request):
         serializer = IniciarConferenciaSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        logger.info(
+            'ACEITAR_CONFERENCIA_REQUEST user_id=%s nf_id=%s',
+            getattr(request.user, 'id', None),
+            serializer.validated_data.get('nf_id'),
+        )
         try:
             resultado = iniciar_conferencia(serializer.validated_data['nf_id'], request.user)
         except ConferenciaError as exc:
-            return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            raise
         return Response(resultado, status=status.HTTP_200_OK)
 
 
-class BiparConferenciaAPIView(APIView):
+class BiparConferenciaAPIView(OperacionalAPIView):
     permission_classes = [IsAuthenticated, PerfilPermitido]
     allowed_profiles = (Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 
@@ -58,14 +67,11 @@ class BiparConferenciaAPIView(APIView):
                 request.user,
             )
         except ConferenciaError as exc:
-            return Response(
-                {'status': 'erro', 'mensagem': str(exc), 'erro': str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise
         return Response(resultado, status=status.HTTP_200_OK)
 
 
-class RegistrarDivergenciaAPIView(APIView):
+class RegistrarDivergenciaAPIView(OperacionalAPIView):
     permission_classes = [IsAuthenticated, PerfilPermitido]
     allowed_profiles = (Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 
@@ -84,7 +90,7 @@ class RegistrarDivergenciaAPIView(APIView):
         return Response(resultado, status=status.HTTP_200_OK)
 
 
-class ProximaNFConferenciaAPIView(APIView):
+class ProximaNFConferenciaAPIView(OperacionalAPIView):
     permission_classes = [IsAuthenticated, PerfilPermitido]
     allowed_profiles = (Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 
@@ -99,7 +105,7 @@ class ProximaNFConferenciaAPIView(APIView):
         )
 
 
-class FinalizarConferenciaAPIView(APIView):
+class FinalizarConferenciaAPIView(OperacionalAPIView):
     permission_classes = [IsAuthenticated, PerfilPermitido]
     allowed_profiles = (Usuario.Perfil.CONFERENTE, Usuario.Perfil.GESTOR)
 

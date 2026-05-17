@@ -19,7 +19,7 @@ from apps.core.services.produto_validacao_service import (
 from apps.nf.services.status_service import sincronizar_status_operacional_nfs
 from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa, TarefaItem
-from apps.usuarios.models import Setor, UsuarioSessao
+from apps.usuarios.models import Setor, Usuario, UsuarioSessao
 
 
 logger = logging.getLogger(__name__)
@@ -779,6 +779,8 @@ def _invalidate_dashboards_operacionais(*, motivo=''):
 
 def _validar_setor_tarefa(tarefa, usuario):
     if _usuario_pode_ver_todos_setores(usuario):
+        return
+    if getattr(usuario, 'perfil', None) == Usuario.Perfil.GESTOR:
         return
     setores_usuario = _setores_usuario(usuario)
     if not setores_usuario:
