@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from django.contrib import messages
+from django.db import connection
 from django.db.models import Prefetch, Q
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
@@ -32,6 +33,7 @@ from apps.core.services.minuta_service import (
     montar_preview_importacao_minuta,
     obter_cards_minuta,
 )
+from apps.core.db_fixes import diagnosticar_schema_minuta, mensagem_schema_minuta_inconsistente
 from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem, nota_fiscal_bairro_valor
 from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, open_entrada_xml
 from apps.usuarios.access import build_access_context, require_profiles
@@ -1078,22 +1080,32 @@ def minuta(request):
         resumo = preview.get('resumo') or resumo_vazio
         minuta_inconsistencias = get_minuta_inconsistencias(linhas)
     else:
-        tabela_context = contexto_minuta_tabela(request, filtros)
-        linhas = tabela_context.get('linhas') or []
-        if linhas:
-            cards_payload = obter_cards_minuta(
-                romaneio=filtros.get('romaneio', ''),
-                status=filtros.get('status', ''),
-                busca=filtros.get('busca', ''),
-                data_inicio=filtros.get('date_from'),
-                data_fim=filtros.get('date_to'),
-            )
-            resumo = cards_payload.get('resumo') or resumo_vazio
-            minuta_inconsistencias = cards_payload.get('minuta_inconsistencias') or inconsistencias_vazio
-            defer_load = False
-        else:
+        diagnostico = diagnosticar_schema_minuta(connection)
+        if not diagnostico['resultado_validacao']:
+            mensagem_schema = mensagem_schema_minuta_inconsistente(diagnostico)
+            logger.error('MINUTA_SCHEMA_INVALID %s', mensagem_schema)
+            tabela_context = contexto_minuta_tabela(request, filtros)
+            linhas = []
             resumo = resumo_vazio
             minuta_inconsistencias = inconsistencias_vazio
+            defer_load = False
+        else:
+            tabela_context = contexto_minuta_tabela(request, filtros)
+            linhas = tabela_context.get('linhas') or []
+            if linhas:
+                cards_payload = obter_cards_minuta(
+                    romaneio=filtros.get('romaneio', ''),
+                    status=filtros.get('status', ''),
+                    busca=filtros.get('busca', ''),
+                    data_inicio=filtros.get('date_from'),
+                    data_fim=filtros.get('date_to'),
+                )
+                resumo = cards_payload.get('resumo') or resumo_vazio
+                minuta_inconsistencias = cards_payload.get('minuta_inconsistencias') or inconsistencias_vazio
+                defer_load = False
+            else:
+                resumo = resumo_vazio
+                minuta_inconsistencias = inconsistencias_vazio
 
     context = {
         'usuario': request.user,
@@ -1168,6 +1180,12 @@ def minuta_pdf(request):
 
     if not gerar_carregamento and not gerar_entrega:
         return _resposta_erro_minuta_pdf('Selecione pelo menos um tipo de minuta para gerar o PDF.')
+
+    diagnostico = diagnosticar_schema_minuta(connection)
+    if not diagnostico['resultado_validacao']:
+        mensagem = mensagem_schema_minuta_inconsistente(diagnostico)
+        logger.error('MINUTA_SCHEMA_INVALID %s', mensagem)
+        return _resposta_erro_minuta_pdf(mensagem, status=503)
 
     queryset = consultar_minuta_itens_queryset(
         romaneio=filtros['romaneio'],

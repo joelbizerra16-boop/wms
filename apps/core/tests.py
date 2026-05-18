@@ -320,6 +320,25 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, 'Carregando listagem de minutas', html=False)
 		self.assertNotContains(response, 'setInterval', html=False)
 
+	@patch('apps.core.views.diagnosticar_schema_minuta')
+	@patch('apps.core.views_minuta.diagnostico_schema_minuta')
+	def test_minuta_nao_quebra_quando_schema_esta_inconsistente(self, diagnostico_partial_mock, diagnostico_view_mock):
+		diagnostico = {
+			'resultado_validacao': False,
+			'erro': '',
+			'tabelas_faltantes': [],
+			'colunas_faltantes': {'core_minutaromaneio': ['status_expedicao']},
+		}
+		diagnostico_view_mock.return_value = diagnostico
+		diagnostico_partial_mock.return_value = diagnostico
+
+		response = self.client.get('/minuta/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Schema da minuta inconsistente')
+		self.assertFalse(response.context['defer_load'])
+		self.assertTrue(response.context['schema_inconsistente'])
+
 
 @override_settings(ROOT_URLCONF='config.urls')
 class MinutaImportacaoTests(TestCase):
@@ -1959,6 +1978,20 @@ class MinutaPersistenciaTests(TestCase):
 		self.assertEqual(payload['vinculo']['motorista'], 'JOAO')
 		self.assertTrue(payload['vinculo']['pdf_gerado'])
 
+	@patch('apps.core.views.diagnosticar_schema_minuta')
+	def test_pdf_minuta_retorna_503_quando_schema_esta_inconsistente(self, diagnostico_mock):
+		diagnostico_mock.return_value = {
+			'resultado_validacao': False,
+			'erro': '',
+			'tabelas_faltantes': [],
+			'colunas_faltantes': {'core_minutaromaneio': ['status_expedicao']},
+		}
+
+		response = self.client.get('/minuta/pdf/')
+
+		self.assertEqual(response.status_code, 503)
+		self.assertIn(b'Schema da minuta inconsistente', response.content)
+
 	def test_api_lista_limita_abertura_padrao_em_50_registros(self):
 		romaneio = MinutaRomaneio.objects.create(
 			codigo_romaneio='5083001',
@@ -1979,6 +2012,20 @@ class MinutaPersistenciaTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertEqual(len(response.context['linhas']), limite_operacional_minuta())
 		self.assertTrue(response.context['has_next'])
+
+	@patch('apps.core.views_minuta.diagnostico_schema_minuta')
+	def test_api_lista_retorna_aviso_quando_schema_esta_inconsistente(self, diagnostico_mock):
+		diagnostico_mock.return_value = {
+			'resultado_validacao': False,
+			'erro': '',
+			'tabelas_faltantes': [],
+			'colunas_faltantes': {'core_minutaromaneio': ['status_expedicao']},
+		}
+
+		response = self.client.get('/api/minuta/lista/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Schema da minuta inconsistente')
 
 	def test_api_lista_limita_busca_historica_em_30_registros(self):
 		lote = self._uuid.uuid4()

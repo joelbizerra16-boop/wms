@@ -14,6 +14,7 @@ from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.utils import timezone
 from openpyxl import load_workbook
 
+from apps.core.db_fixes import diagnosticar_schema_minuta, mensagem_schema_minuta_inconsistente
 from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
 from apps.nf.models import EntradaNF, NotaFiscal, nota_fiscal_bairro_valor
 from apps.nf.services.importador_xml import ImportacaoXMLError, analisar_xml_nfe
@@ -33,6 +34,21 @@ MINUTA_RETENCAO_DIAS = 10
 MINUTA_CACHE_VERSION_KEY = 'minuta:cache:version'
 MINUTA_ABERTURA_LIMITE = 50
 MINUTA_BUSCA_LIMITE = 30
+
+
+def _log_tempo_minuta(evento, total_ms, **campos):
+    payload = ' '.join(f'{chave}={valor}' for chave, valor in campos.items())
+    mensagem = f'{evento} total_ms={total_ms}'
+    if payload:
+        mensagem = f'{mensagem} {payload}'
+    if total_ms >= 500:
+        logger.error(mensagem)
+    elif total_ms >= 300:
+        logger.warning(mensagem)
+    elif total_ms >= 150:
+        logger.warning(mensagem)
+    else:
+        logger.info(mensagem)
 
 
 def invalidar_cache_minuta():
@@ -90,8 +106,13 @@ def serializar_vinculo_nf_item(item):
 
 
 def buscar_vinculo_nf_historico(numero_nota, *, excluir_romaneio_codigo=None):
+    inicio = time.perf_counter()
     numero = _texto_limpo(numero_nota)
     if not numero:
+        return None
+    diagnostico = _diagnostico_tabelas_minuta()
+    if not diagnostico['resultado_validacao']:
+        logger.error('MINUTA_SCHEMA_INVALID %s', _mensagem_erro_estrutura_minuta(diagnostico))
         return None
     queryset = (
         MinutaRomaneioItem.objects.select_related(
@@ -104,7 +125,10 @@ def buscar_vinculo_nf_historico(numero_nota, *, excluir_romaneio_codigo=None):
     )
     if excluir_romaneio_codigo:
         queryset = queryset.exclude(romaneio__codigo_romaneio=excluir_romaneio_codigo)
-    return queryset.first()
+    item = queryset.first()
+    total_ms = round((time.perf_counter() - inicio) * 1000, 2)
+    _log_tempo_minuta('MINUTA_HISTORICO_MS', total_ms, numero=numero, encontrado=bool(item))
+    return item
 
 
 def registrar_minuta_pdf_gerada(itens, usuario, *, carregamento=True, entrega=False):
@@ -170,48 +194,21 @@ class MinutaImportacaoError(Exception):
 
 
 def _diagnostico_tabelas_minuta():
-    tabelas_esperadas = {'core_minutaromaneio', 'core_minutaromaneioitem'}
-    diagnostico = {
-        'schema_detectado': connection.vendor,
-        'alias': connection.alias,
-        'tabelas_encontradas': [],
-        'tabelas_faltantes': [],
-        'erro': '',
-        'resultado_validacao': False,
-    }
-    try:
-        tabelas = set(connection.introspection.table_names())
-    except (OperationalError, ProgrammingError) as exc:
-        diagnostico['erro'] = str(exc)
-        logger.exception('DEBUG MINUTA: falha ao consultar table_names() da conexao atual.')
-        return diagnostico
-
-    diagnostico['tabelas_encontradas'] = sorted(tabelas.intersection(tabelas_esperadas))
-    diagnostico['tabelas_faltantes'] = sorted(tabelas_esperadas - tabelas)
-    diagnostico['resultado_validacao'] = not diagnostico['tabelas_faltantes']
+    diagnostico = diagnosticar_schema_minuta(connection)
     logger.info(
-        'DEBUG MINUTA: schema_detectado=%s alias=%s tabelas_encontradas=%s tabelas_faltantes=%s validacao=%s',
+        'MINUTA_SCHEMA_CHECK schema_detectado=%s alias=%s tabelas_encontradas=%s tabelas_faltantes=%s colunas_faltantes=%s validacao=%s',
         diagnostico['schema_detectado'],
         diagnostico['alias'],
-        diagnostico['tabelas_encontradas'],
-        diagnostico['tabelas_faltantes'],
+        diagnostico.get('tabelas_encontradas', []),
+        diagnostico.get('tabelas_faltantes', []),
+        diagnostico.get('colunas_faltantes', {}),
         diagnostico['resultado_validacao'],
     )
     return diagnostico
 
 
 def _mensagem_erro_estrutura_minuta(diagnostico):
-    if diagnostico.get('erro'):
-        return (
-            'ERRO REAL MINUTA: falha ao validar estrutura no banco. '
-            f"schema={diagnostico.get('schema_detectado')} alias={diagnostico.get('alias')} erro={diagnostico.get('erro')}"
-        )
-    return (
-        'ERRO REAL MINUTA: validação da estrutura retornou falso. '
-        f"schema={diagnostico.get('schema_detectado')} alias={diagnostico.get('alias')} "
-        f"tabelas_encontradas={diagnostico.get('tabelas_encontradas')} "
-        f"tabelas_faltantes={diagnostico.get('tabelas_faltantes')}"
-    )
+    return mensagem_schema_minuta_inconsistente(diagnostico)
 
 
 def get_minuta_inconsistencias(linhas):
@@ -1024,16 +1021,35 @@ def _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim):
 
 def obter_cards_minuta(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
     inicio = time.perf_counter()
+    diagnostico = _diagnostico_tabelas_minuta()
+    if not diagnostico['resultado_validacao']:
+        mensagem = _mensagem_erro_estrutura_minuta(diagnostico)
+        logger.error('MINUTA_SCHEMA_INVALID %s', mensagem)
+        payload = {
+            'resumo': {
+                'romaneios': 0,
+                'itens': 0,
+                'erros': 1,
+                'duplicados': 0,
+                'bloqueadas': 0,
+                'nfs_nao_localizadas': 0,
+                'xml_erros': 0,
+                'inconsistencias': 0,
+                'total_problemas': 0,
+                'atualizacao': 'Manual',
+            },
+            'minuta_inconsistencias': get_minuta_inconsistencias([]),
+            'schema_inconsistente': True,
+            'schema_mensagem': mensagem,
+        }
+        total_ms = round((time.perf_counter() - inicio) * 1000, 2)
+        _log_tempo_minuta('MINUTA_QUERY_MS', total_ms, etapa='cards_schema_guard', busca=busca or romaneio or '')
+        return payload
     cache_key = _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim)
     cached = cache.get(cache_key)
     if cached is not None:
         total_ms = round((time.perf_counter() - inicio) * 1000, 2)
-        logger.warning(
-            'MINUTA_QUERY_MS etapa=cards_cache total_ms=%s registros=%s busca=%s',
-            total_ms,
-            cached['resumo'].get('itens', 0),
-            busca or romaneio or '',
-        )
+        _log_tempo_minuta('MINUTA_QUERY_MS', total_ms, etapa='cards_cache', registros=cached['resumo'].get('itens', 0), busca=busca or romaneio or '')
         return cached
 
     queryset = _queryset_base_minuta(
@@ -1093,12 +1109,7 @@ def obter_cards_minuta(romaneio='', status='', busca='', data_inicio=None, data_
     payload = {'resumo': resumo, 'minuta_inconsistencias': inconsistencias}
     cache.set(cache_key, payload, MINUTA_CARDS_CACHE_TTL)
     total_ms = round((time.perf_counter() - inicio) * 1000, 2)
-    logger.warning(
-        'MINUTA_QUERY_MS etapa=cards total_ms=%s registros=%s busca=%s',
-        total_ms,
-        itens,
-        busca or romaneio or '',
-    )
+    _log_tempo_minuta('MINUTA_QUERY_MS', total_ms, etapa='cards', registros=itens, busca=busca or romaneio or '')
     return payload
 
 

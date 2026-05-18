@@ -1,25 +1,14 @@
 from django.core.management.base import BaseCommand
 from django.db import connection
 
-from apps.core.db_fixes import aplicar_correcoes_criticas
+from apps.core.db_fixes import diagnosticar_schema_minuta, mensagem_schema_minuta_inconsistente
 
 
 class Command(BaseCommand):
-    help = 'Diagnostica a estrutura fisica da minuta no banco atual e pode aplicar o auto-fix.'
-
-    def add_arguments(self, parser):
-        parser.add_argument(
-            '--repair',
-            action='store_true',
-            help='Aplica as correcoes automaticas de schema antes de reexecutar o diagnostico.',
-        )
+    help = 'Diagnostica a estrutura fisica da minuta no banco atual sem alterar o schema.'
 
     def handle(self, *args, **options):
-        self._emitir_diagnostico('ANTES DO REPAIR')
-        if options.get('repair'):
-            corrigiu = aplicar_correcoes_criticas(connection)
-            self.stdout.write(self.style.WARNING(f'Repair executado: {corrigiu}'))
-            self._emitir_diagnostico('DEPOIS DO REPAIR')
+        self._emitir_diagnostico('DIAGNOSTICO')
 
     def _emitir_diagnostico(self, titulo):
         settings_dict = connection.settings_dict
@@ -48,7 +37,9 @@ class Command(BaseCommand):
                       '0001_minuta_models',
                       '0002_minutaromaneioitem_bairro',
                       '0003_minutaromaneio_importacao_lote',
-                      '0004_backfill_minuta_importacao_lote_legado'
+                                            '0004_backfill_minuta_importacao_lote_legado',
+                                            '0005_minuta_expedicao_persistencia',
+                                            '0006_minutaromaneio_tipo_minuta_idx'
                   )
                 ORDER BY name
                 """
@@ -90,3 +81,8 @@ class Command(BaseCommand):
             )
             colunas_item = [linha[0] for linha in cursor.fetchall()]
             self.stdout.write(f'colunas_core_minutaromaneioitem={colunas_item}')
+
+        diagnostico = diagnosticar_schema_minuta(connection)
+        self.stdout.write(f"schema_minuta_ok={diagnostico['resultado_validacao']}")
+        if not diagnostico['resultado_validacao']:
+            self.stdout.write(self.style.ERROR(mensagem_schema_minuta_inconsistente(diagnostico)))

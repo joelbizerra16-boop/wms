@@ -1,12 +1,12 @@
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
 
-from apps.core.db_fixes import garantir_coluna_bairro, garantir_estrutura_minuta, invalidar_cache_schema_fix
-from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
+from apps.core.db_fixes import diagnosticar_schema_minuta, invalidar_cache_schema_fix, mensagem_schema_minuta_inconsistente
 
 
-class GarantirColunaBairroTests(SimpleTestCase):
+class DiagnosticarSchemaMinutaTests(SimpleTestCase):
     def setUp(self):
         invalidar_cache_schema_fix()
         self.connection = MagicMock()
@@ -14,108 +14,42 @@ class GarantirColunaBairroTests(SimpleTestCase):
         self.connection.alias = 'default'
         self.cursor = MagicMock()
         self.connection.cursor.return_value.__enter__.return_value = self.cursor
+        self.connection.introspection = MagicMock()
 
-    def test_nao_faz_nada_fora_do_postgresql(self):
-        self.connection.vendor = 'sqlite'
+    def test_detecta_schema_consistente(self):
+        self.connection.introspection.table_names.return_value = ['core_minutaromaneio', 'core_minutaromaneioitem']
+        self.connection.introspection.get_table_description.side_effect = [
+            [SimpleNamespace(name='id'), SimpleNamespace(name='created_at'), SimpleNamespace(name='updated_at'), SimpleNamespace(name='codigo_romaneio'), SimpleNamespace(name='importacao_lote'), SimpleNamespace(name='data_saida'), SimpleNamespace(name='placa'), SimpleNamespace(name='motorista'), SimpleNamespace(name='usuario_importacao_id'), SimpleNamespace(name='pdf_gerado_em'), SimpleNamespace(name='pdf_gerado_por_id'), SimpleNamespace(name='tipo_minuta'), SimpleNamespace(name='hash_operacional'), SimpleNamespace(name='status_expedicao')],
+            [SimpleNamespace(name='id'), SimpleNamespace(name='created_at'), SimpleNamespace(name='updated_at'), SimpleNamespace(name='romaneio_id'), SimpleNamespace(name='nf_id'), SimpleNamespace(name='numero_nota'), SimpleNamespace(name='fantasia'), SimpleNamespace(name='razao_social'), SimpleNamespace(name='bairro'), SimpleNamespace(name='status'), SimpleNamespace(name='duplicado'), SimpleNamespace(name='duplicidade_romaneio_codigo'), SimpleNamespace(name='duplicidade_data_saida'), SimpleNamespace(name='duplicidade_motorista'), SimpleNamespace(name='duplicidade_usuario'), SimpleNamespace(name='peso_kg'), SimpleNamespace(name='valor_total')],
+        ]
 
-        resultado = garantir_coluna_bairro(self.connection)
+        diagnostico = diagnosticar_schema_minuta(self.connection)
 
-        self.assertFalse(resultado)
-        self.connection.cursor.assert_not_called()
+        self.assertTrue(diagnostico['resultado_validacao'])
+        self.assertEqual(diagnostico['tabelas_faltantes'], [])
+        self.assertEqual(diagnostico['colunas_faltantes'], {})
 
-    def test_nao_altera_quando_tabela_nao_existe(self):
-        self.cursor.fetchone.return_value = None
+    def test_detecta_colunas_faltantes(self):
+        self.connection.introspection.table_names.return_value = ['core_minutaromaneio', 'core_minutaromaneioitem']
+        self.connection.introspection.get_table_description.side_effect = [
+            [SimpleNamespace(name='id'), SimpleNamespace(name='codigo_romaneio')],
+            [SimpleNamespace(name='id'), SimpleNamespace(name='romaneio_id')],
+        ]
 
-        resultado = garantir_coluna_bairro(self.connection)
+        diagnostico = diagnosticar_schema_minuta(self.connection)
 
-        self.assertFalse(resultado)
-        self.assertEqual(self.cursor.execute.call_count, 1)
+        self.assertFalse(diagnostico['resultado_validacao'])
+        self.assertIn('core_minutaromaneio', diagnostico['colunas_faltantes'])
+        self.assertIn('status_expedicao', diagnostico['colunas_faltantes']['core_minutaromaneio'])
 
-    @patch('apps.core.db_fixes._invalidar_cache_colunas_nota_fiscal')
-    def test_cria_coluna_e_indice_quando_bairro_nao_existe(self, invalidar_cache_mock):
-        self.cursor.fetchone.side_effect = [object(), None]
-
-        resultado = garantir_coluna_bairro(self.connection)
-
-        self.assertTrue(resultado)
-        comandos = [call.args[0] for call in self.cursor.execute.call_args_list]
-        self.assertTrue(any('ALTER TABLE "nf_notafiscal" ADD COLUMN IF NOT EXISTS "bairro" VARCHAR(100)' in comando for comando in comandos))
-        self.assertTrue(any('CREATE INDEX IF NOT EXISTS "nf_bairro_idx" ON "nf_notafiscal" ("bairro")' in comando for comando in comandos))
-        invalidar_cache_mock.assert_called_once()
-
-    def test_nao_repete_fix_quando_coluna_ja_existe(self):
-        self.cursor.fetchone.side_effect = [object(), object()]
-
-        primeiro_resultado = garantir_coluna_bairro(self.connection)
-        segundo_resultado = garantir_coluna_bairro(self.connection)
-
-        self.assertTrue(primeiro_resultado)
-        self.assertFalse(segundo_resultado)
-        self.assertEqual(self.connection.cursor.call_count, 1)
-
-
-class GarantirEstruturaMinutaTests(SimpleTestCase):
-    def setUp(self):
-        invalidar_cache_schema_fix()
-        self.connection = MagicMock()
-        self.connection.vendor = 'postgresql'
-        self.connection.alias = 'default'
-        self.cursor = MagicMock()
-        self.connection.cursor.return_value.__enter__.return_value = self.cursor
-        self.schema_editor = MagicMock()
-        self.connection.schema_editor.return_value.__enter__.return_value = self.schema_editor
-
-    def test_nao_faz_nada_fora_do_postgresql(self):
-        self.connection.vendor = 'sqlite'
-
-        resultado = garantir_estrutura_minuta(self.connection)
-
-        self.assertFalse(resultado)
-        self.connection.cursor.assert_not_called()
-        self.connection.schema_editor.assert_not_called()
-
-    @patch('apps.core.db_fixes._tabela_existe')
-    @patch('apps.core.db_fixes._coluna_existe', return_value=True)
-    def test_cria_tabelas_minuta_quando_ausentes(self, _coluna_existe_mock, tabela_existe_mock):
-        tabela_existe_mock.side_effect = [False, False] + [True] * 20
-        self.cursor.fetchall.return_value = []
-
-        resultado = garantir_estrutura_minuta(self.connection)
-
-        self.assertTrue(resultado)
-        self.schema_editor.create_model.assert_any_call(MinutaRomaneio)
-        self.schema_editor.create_model.assert_any_call(MinutaRomaneioItem)
-
-    @patch('apps.core.db_fixes._tabela_existe', return_value=True)
-    @patch('apps.core.db_fixes._coluna_existe')
-    def test_adiciona_colunas_legadas_quando_tabelas_ja_existem(self, coluna_existe_mock, _tabela_existe_mock):
-        coluna_existe_mock.side_effect = lambda cursor, table_name, column_name: (table_name, column_name) not in {
-            ('core_minutaromaneio', 'importacao_lote'),
-            ('core_minutaromaneioitem', 'bairro'),
+    def test_mensagem_informa_migrate_quando_schema_inconsistente(self):
+        diagnostico = {
+            'erro': '',
+            'tabelas_faltantes': [],
+            'colunas_faltantes': {'core_minutaromaneio': ['status_expedicao']},
         }
-        self.cursor.fetchall.return_value = [(1,), (2,)]
 
-        resultado = garantir_estrutura_minuta(self.connection)
+        mensagem = mensagem_schema_minuta_inconsistente(diagnostico)
 
-        self.assertTrue(resultado)
-        comandos = [call.args[0] for call in self.cursor.execute.call_args_list]
-        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "importacao_lote" UUID' in comando for comando in comandos))
-        self.assertTrue(any('ALTER TABLE "core_minutaromaneioitem" ADD COLUMN IF NOT EXISTS "bairro" VARCHAR(100)' in comando for comando in comandos))
-        self.cursor.executemany.assert_called_once()
-
-    @patch('apps.core.db_fixes._tabela_existe', return_value=True)
-    @patch('apps.core.db_fixes._coluna_existe')
-    def test_adiciona_colunas_persistencia_pdf_quando_ausentes(self, coluna_existe_mock, _tabela_existe_mock):
-        colunas_ausentes = {'pdf_gerado_em', 'pdf_gerado_por_id', 'tipo_minuta', 'hash_operacional', 'status_expedicao'}
-        coluna_existe_mock.side_effect = lambda cursor, table_name, column_name: column_name not in colunas_ausentes
-        self.cursor.fetchall.return_value = []
-
-        resultado = garantir_estrutura_minuta(self.connection)
-
-        self.assertTrue(resultado)
-        comandos = [call.args[0] for call in self.cursor.execute.call_args_list]
-        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "pdf_gerado_em" TIMESTAMPTZ NULL' in comando for comando in comandos))
-        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "pdf_gerado_por_id" BIGINT NULL' in comando for comando in comandos))
-        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "tipo_minuta" VARCHAR(40)' in comando for comando in comandos))
-        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "hash_operacional" VARCHAR(64)' in comando for comando in comandos))
-        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "status_expedicao" VARCHAR(20)' in comando for comando in comandos))
+        self.assertIn('python manage.py migrate', mensagem)
+        self.assertIn('0005_minuta_expedicao_persistencia', mensagem)

@@ -5,6 +5,11 @@
             <p class="muted" style="margin: 4px 0 0;">Importação e rastreabilidade baseadas em NF, com destaque automático para duplicidades operacionais.</p>
         </div>
     </div>
+    {% if schema_inconsistente %}
+    <div class="empty-state" style="margin-top: 12px; text-align: left;">
+        {{ schema_mensagem }}
+    </div>
+    {% endif %}
     <div class="table-wrap">
         <table>
             <thead>

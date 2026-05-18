@@ -47,6 +47,12 @@
     </div>
 </div>
 
+{% if schema_inconsistente %}
+<div class="card card--soft" style="border-left: 4px solid #dc2626; margin-top: 16px;">
+    <div class="empty-state" style="text-align: left;">{{ schema_mensagem }}</div>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="minuta-toolbar">
         <form method="post" enctype="multipart/form-data" class="minuta-upload-form">
@@ -83,9 +89,9 @@
                             data-base-href="{% url 'web-minuta-pdf' %}?romaneio={{ filtros.romaneio|urlencode }}&status={{ filtros.status|urlencode }}&busca={{ filtros.busca|urlencode }}&data_inicial={{ filtros.date_from|urlencode }}&data_final={{ filtros.date_to|urlencode }}"
                             data-confirmar-alertas="0"
                             data-inconsistencias="{{ minuta_inconsistencias_json|escapejs }}"
-                            class="btn btn-light minuta-pdf-button{% if defer_load or not resumo.itens %} is-disabled{% endif %}"
+                            class="btn btn-light minuta-pdf-button{% if defer_load or not resumo.itens or schema_inconsistente %} is-disabled{% endif %}"
                             data-minuta-pdf-trigger
-                            aria-disabled="{% if defer_load or not resumo.itens %}true{% else %}false{% endif %}"
+                            aria-disabled="{% if defer_load or not resumo.itens or schema_inconsistente %}true{% else %}false{% endif %}"
                             target="_blank"
                             rel="noopener"
                         >
