@@ -108,10 +108,16 @@ def _nf_pertence_a_setores_usuario(nf, usuario):
     if not setores_usuario:
         return False
     setores_nf = {
-        _normalizar_setor_operacional(tarefa.setor)
-        for tarefa in _tarefas_relacionadas_nf(nf)
-        if _normalizar_setor_operacional(tarefa.setor)
+        _setor_item_nf(item_nf)
+        for item_nf in _itens_nf_relacionados(nf)
+        if _setor_item_nf(item_nf)
     }
+    if not setores_nf:
+        setores_nf = {
+            _normalizar_setor_operacional(tarefa.setor)
+            for tarefa in _tarefas_relacionadas_nf(nf)
+            if _normalizar_setor_operacional(tarefa.setor)
+        }
     if not setores_nf:
         return False
     return bool(setores_nf.intersection(setores_usuario))
@@ -258,52 +264,74 @@ def _resumo_separacao_nf(nf):
     if itens_prefetch is not None:
         total_itens = len(itens_prefetch)
         if total_itens == 0:
-            return {'status_separacao': 'PENDENTE', 'itens_pendentes': 0, 'itens_separados': 0, 'total_itens': 0}
+            return {'status_separacao': 'PENDENTE', 'itens_pendentes': 0, 'itens_separados': 0, 'total_itens': 0, 'separado_em': None}
         itens_pendentes = sum(1 for item in itens_prefetch if item.quantidade_separada < item.quantidade_total)
         itens_separados = max(total_itens - itens_pendentes, 0)
         status_separacao = 'SEPARADO' if itens_pendentes == 0 else 'PENDENTE'
+        datas_bipagem = [getattr(item, 'data_bipagem', None) for item in itens_prefetch if getattr(item, 'data_bipagem', None)]
         return {
             'status_separacao': status_separacao,
             'itens_pendentes': itens_pendentes,
             'itens_separados': itens_separados,
             'total_itens': total_itens,
+            'separado_em': max(datas_bipagem) if datas_bipagem else None,
         }
 
     itens_qs = _itens_separacao_nf_qs(nf)
-    total_itens = itens_qs.count()
+    itens_sql = str(itens_qs.query)
+    itens_db = list(
+        itens_qs.values(
+            'id',
+            'quantidade_total',
+            'quantidade_separada',
+            'data_bipagem',
+        )
+    )
+    total_itens = len(itens_db)
     if total_itens == 0:
-        return {'status_separacao': 'PENDENTE', 'itens_pendentes': 0, 'itens_separados': 0, 'total_itens': 0}
+        logger.info(
+            'CONFERENCIA_LIBERACAO_QUERY nf_id=%s origem=db itens_ids=%s quantidades=%s sql=%s',
+            getattr(nf, 'id', None),
+            [],
+            [],
+            itens_sql,
+        )
+        return {'status_separacao': 'PENDENTE', 'itens_pendentes': 0, 'itens_separados': 0, 'total_itens': 0, 'separado_em': None}
 
-    itens_pendentes = itens_qs.filter(quantidade_separada__lt=F('quantidade_total')).count()
+    itens_pendentes = sum(1 for item in itens_db if item['quantidade_separada'] < item['quantidade_total'])
     itens_separados = max(total_itens - itens_pendentes, 0)
     status_separacao = 'SEPARADO' if itens_pendentes == 0 else 'PENDENTE'
+    datas_bipagem = [item['data_bipagem'] for item in itens_db if item['data_bipagem']]
+    logger.info(
+        'CONFERENCIA_LIBERACAO_QUERY nf_id=%s origem=db itens_ids=%s quantidades=%s sql=%s',
+        getattr(nf, 'id', None),
+        [item['id'] for item in itens_db],
+        [
+            {
+                'id': item['id'],
+                'quantidade_total': str(item['quantidade_total']),
+                'quantidade_separada': str(item['quantidade_separada']),
+            }
+            for item in itens_db
+        ],
+        itens_sql,
+    )
     return {
         'status_separacao': status_separacao,
         'itens_pendentes': itens_pendentes,
         'itens_separados': itens_separados,
         'total_itens': total_itens,
+        'separado_em': max(datas_bipagem) if datas_bipagem else None,
     }
 
 
 def _separado_em_nf(nf):
-    itens_prefetch = _itens_separacao_prefetch_nf(nf)
-    if itens_prefetch is not None:
-        datas = [getattr(item, 'data_bipagem', None) for item in itens_prefetch if getattr(item, 'data_bipagem', None)]
-        return max(datas) if datas else None
-
-    item = (
-        _itens_separacao_nf_qs(nf)
-        .exclude(data_bipagem__isnull=True)
-        .order_by('-data_bipagem')
-        .values('data_bipagem')
-        .first()
-    )
-    return item['data_bipagem'] if item else None
+    return _resumo_separacao_nf(nf).get('separado_em')
 
 
 def pedido_esta_liberado_para_conferencia(nf):
     resumo = _resumo_separacao_nf(nf)
-    separado_em = _separado_em_nf(nf)
+    separado_em = resumo.get('separado_em')
     liberado = resumo['status_separacao'] == 'SEPARADO'
     resultado = {
         'liberado': liberado,

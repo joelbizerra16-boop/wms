@@ -339,6 +339,48 @@ class ConferenciaAPITests(TestCase):
         self.assertEqual(response_inicio.status_code, 400)
         self.assertEqual(self._message(response_inicio), 'Pedido ainda não foi separado')
 
+    def test_iniciar_conferencia_nao_regrede_quando_separacao_veio_de_tarefa_rota(self):
+        nf_rota = NotaFiscal.objects.create(
+            chave_nfe='35111111111111111111550010000000011000000991',
+            numero='991',
+            cliente=self.cliente,
+            rota=self.rota,
+            status=NotaFiscal.Status.NORMAL,
+            data_emissao='2026-04-23T10:00:00-03:00',
+            status_fiscal=NotaFiscal.StatusFiscal.AUTORIZADA,
+            bloqueada=False,
+            ativa=True,
+        )
+        produto_rota = Produto.objects.create(
+            cod_prod='PRD991',
+            descricao='Produto Rota',
+            cod_ean='7890991',
+            categoria=Produto.Categoria.FILTROS,
+        )
+        NotaFiscalItem.objects.create(nf=nf_rota, produto=produto_rota, quantidade='1.00')
+        tarefa_rota = Tarefa.objects.create(
+            nf=None,
+            tipo=Tarefa.Tipo.ROTA,
+            setor=Setor.Codigo.FILTROS,
+            rota=self.rota,
+            status=Tarefa.Status.CONCLUIDO,
+        )
+        TarefaItem.objects.create(
+            tarefa=tarefa_rota,
+            nf=nf_rota,
+            produto=produto_rota,
+            quantidade_total='1.00',
+            quantidade_separada='1.00',
+        )
+
+        validacao = pedido_esta_liberado_para_conferencia(NotaFiscal.objects.get(id=nf_rota.id))
+        response = self.client.post('/api/conferencia/iniciar/', {'nf_id': nf_rota.id}, format='json')
+
+        self.assertTrue(validacao['liberado'])
+        self.assertEqual(validacao['total_itens'], 1)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._body(response)['status'], Conferencia.Status.EM_CONFERENCIA)
+
     def test_conferencia_liberada_permita_finalizar_com_pendencia(self):
         conferencia = Conferencia.objects.create(
             nf=self.nf,

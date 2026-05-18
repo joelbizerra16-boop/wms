@@ -11,19 +11,27 @@ def _itens_separacao_prefetch_nf(nf):
     itens_relacionados = {}
 
     tarefas = cache.get('tarefas')
+    tarefas_com_itens_prefetch = False
     if tarefas is not None:
+        tarefas_com_itens_prefetch = all('itens' in getattr(tarefa, '_prefetched_objects_cache', {}) for tarefa in tarefas)
         for tarefa in tarefas:
             for item in getattr(tarefa, '_prefetched_objects_cache', {}).get('itens', []):
                 itens_relacionados[item.id] = item
 
     itens_tarefa = cache.get('itens_tarefa')
+    itens_tarefa_prefetch = 'itens_tarefa' in cache
     if itens_tarefa is not None:
         for item in itens_tarefa:
             itens_relacionados[item.id] = item
 
     if itens_relacionados:
         return list(itens_relacionados.values())
-    if tarefas is not None or itens_tarefa is not None:
+
+    # So e seguro assumir "sem itens" quando o relacionamento direto de itens_tarefa
+    # tambem foi prefetechado. Caso contrario, uma NF pode ter apenas itens vindos de
+    # tarefas de rota (tarefa.nf nulo e TarefaItem.nf preenchido) e o cache parcial
+    # faria a conferencia regredir indevidamente para PENDENTE.
+    if itens_tarefa_prefetch and (tarefas is None or tarefas_com_itens_prefetch):
         return []
     return None
 
