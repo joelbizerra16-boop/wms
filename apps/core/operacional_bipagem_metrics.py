@@ -29,12 +29,13 @@ class BipagemMetrics:
         query_ms = self._fases.get('query', 0.0)
         save_ms = self._fases.get('save', 0.0)
         serialize_ms = self._fases.get('serialize', 0.0)
+        batch_ms = self._fases.get('batch', 0.0)
         side_effects_ms = self._fases.get('side_effects', 0.0)
         cache_ms = self._fases.get('cache', 0.0)
         response_ms = self._fases.get('response', 0.0)
         logger.info(
             'BIPAGEM_TOTAL_MS modulo=%s entidade_id=%s user_id=%s total_ms=%.2f '
-            'lock_ms=%.2f query_ms=%.2f save_ms=%.2f serialize_ms=%.2f side_effects_ms=%.2f cache_ms=%.2f response_ms=%.2f %s',
+            'lock_ms=%.2f query_ms=%.2f save_ms=%.2f serialize_ms=%.2f batch_ms=%.2f side_effects_ms=%.2f cache_ms=%.2f response_ms=%.2f %s',
             self.modulo,
             self.entidade_id,
             self.usuario_id,
@@ -43,6 +44,7 @@ class BipagemMetrics:
             query_ms,
             save_ms,
             serialize_ms,
+            batch_ms,
             side_effects_ms,
             cache_ms,
             response_ms,
@@ -53,7 +55,7 @@ class BipagemMetrics:
         slow = float(getattr(settings, 'BIPAGEM_SLOW_LOG_MS', 150))
         if total_ms >= slow:
             logger.warning(
-                'BIPAGEM_LENTA modulo=%s entidade_id=%s user_id=%s total_ms=%.2f lock_ms=%.2f query_ms=%.2f save_ms=%.2f serialize_ms=%.2f side_effects_ms=%.2f cache_ms=%.2f',
+                'BIPAGEM_LENTA modulo=%s entidade_id=%s user_id=%s total_ms=%.2f lock_ms=%.2f query_ms=%.2f save_ms=%.2f serialize_ms=%.2f batch_ms=%.2f side_effects_ms=%.2f cache_ms=%.2f',
                 self.modulo,
                 self.entidade_id,
                 self.usuario_id,
@@ -62,6 +64,7 @@ class BipagemMetrics:
                 query_ms,
                 save_ms,
                 serialize_ms,
+                batch_ms,
                 side_effects_ms,
                 cache_ms,
             )
