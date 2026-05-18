@@ -2,9 +2,11 @@ services:
   - type: web
     name: wms
     env: python
-    buildCommand: bash scripts/render_build.sh
-    preDeployCommand: bash scripts/render_predeploy.sh
-    startCommand: bash scripts/render_start.sh
+    # Comandos inline: Render Dashboard costuma ignorar render.yaml se o servico nao for Blueprint.
+    # Se o deploy falhar, copie estes 3 comandos em Settings > Build & Deploy.
+    buildCommand: pip install -r requirements.txt && DJANGO_SETTINGS_MODULE=config.settings.build python manage.py collectstatic --noinput
+    preDeployCommand: python manage.py reconcile_minuta_schema && python manage.py bootstrap_core_migrations && python manage.py migrate --noinput && python manage.py create_render_superuser && python manage.py clearsessions
+    startCommand: python manage.py reconcile_minuta_schema && gunicorn config.wsgi:application --worker-class gthread --workers 4 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
     envVars:
       - key: ENVIRONMENT
         value: production

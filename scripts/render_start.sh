@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Start Render — reconcile rapido + Gunicorn.
 set -euo pipefail
+cd "$(dirname "$0")/.."
 export DJANGO_SETTINGS_MODULE=config.settings.prod
 python manage.py reconcile_minuta_schema
 exec gunicorn config.wsgi:application \
