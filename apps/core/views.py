@@ -30,6 +30,7 @@ from apps.core.services.minuta_service import (
     confirmar_importacao_minuta,
     get_minuta_inconsistencias,
     montar_preview_importacao_minuta,
+    obter_cards_minuta,
 )
 from apps.nf.models import EntradaNF, NotaFiscal, NotaFiscalItem, nota_fiscal_bairro_valor
 from apps.nf.services.xml_storage_service import XMLStorageUnavailableError, open_entrada_xml
@@ -1045,6 +1046,7 @@ def minuta(request):
 
     from apps.core.views_minuta import (
         _minuta_ajax_partial,
+        contexto_minuta_tabela,
         render_minuta_tabela_partial,
         resolver_filtros_minuta_request,
     )
@@ -1069,15 +1071,29 @@ def minuta(request):
     }
     inconsistencias_vazio = get_minuta_inconsistencias([])
     defer_load = preview is None
+    tabela_context = {}
 
     if preview:
         linhas = preview.get('linhas') or []
         resumo = preview.get('resumo') or resumo_vazio
         minuta_inconsistencias = get_minuta_inconsistencias(linhas)
     else:
-        linhas = []
-        resumo = resumo_vazio
-        minuta_inconsistencias = inconsistencias_vazio
+        tabela_context = contexto_minuta_tabela(request, filtros)
+        linhas = tabela_context.get('linhas') or []
+        if linhas:
+            cards_payload = obter_cards_minuta(
+                romaneio=filtros.get('romaneio', ''),
+                status=filtros.get('status', ''),
+                busca=filtros.get('busca', ''),
+                data_inicio=filtros.get('date_from'),
+                data_fim=filtros.get('date_to'),
+            )
+            resumo = cards_payload.get('resumo') or resumo_vazio
+            minuta_inconsistencias = cards_payload.get('minuta_inconsistencias') or inconsistencias_vazio
+            defer_load = False
+        else:
+            resumo = resumo_vazio
+            minuta_inconsistencias = inconsistencias_vazio
 
     context = {
         'usuario': request.user,
@@ -1108,6 +1124,7 @@ def minuta(request):
             'NF VINCULADA',
         ],
     }
+    context.update(tabela_context)
     context.update(build_access_context(request.user))
     return render(request, 'minuta.html', context)
 

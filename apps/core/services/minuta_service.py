@@ -4,12 +4,13 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import logging
 import re
+import time
 import unicodedata
 import uuid
 
 from django.core.cache import cache
 from django.db import connection, OperationalError, ProgrammingError, transaction
-from django.db.models import Q
+from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.utils import timezone
 from openpyxl import load_workbook
 
@@ -30,6 +31,8 @@ MINUTA_STATUS_DUPLICADA = {'DUPLICADA', 'DUPLI'}
 MINUTA_CARDS_CACHE_TTL = 10
 MINUTA_RETENCAO_DIAS = 10
 MINUTA_CACHE_VERSION_KEY = 'minuta:cache:version'
+MINUTA_ABERTURA_LIMITE = 50
+MINUTA_BUSCA_LIMITE = 30
 
 
 def invalidar_cache_minuta():
@@ -43,8 +46,22 @@ def retencao_cutoff_date():
     return timezone.localdate() - timedelta(days=MINUTA_RETENCAO_DIAS)
 
 
+def _inicio_dia_local(valor):
+    if valor is None:
+        return None
+    if isinstance(valor, str):
+        valor = _parse_data(valor)
+    if valor is None:
+        return None
+    return timezone.make_aware(datetime.combine(valor, datetime.min.time()), timezone.get_current_timezone())
+
+
 def consulta_minuta_historica_ativa(romaneio='', busca=''):
     return bool((romaneio or '').strip() or (busca or '').strip())
+
+
+def limite_operacional_minuta(romaneio='', busca=''):
+    return MINUTA_BUSCA_LIMITE if consulta_minuta_historica_ativa(romaneio, busca) else MINUTA_ABERTURA_LIMITE
 
 
 def _nome_usuario_minuta(usuario):
@@ -850,46 +867,88 @@ def _obter_lote_minuta_ativo():
         return None
 
 
+def _queryset_base_minuta(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
+    historico = consulta_minuta_historica_ativa(romaneio, busca)
+    if isinstance(data_inicio, str):
+        data_inicio = _parse_data(data_inicio)
+    if isinstance(data_fim, str):
+        data_fim = _parse_data(data_fim)
+    queryset = MinutaRomaneioItem.objects.select_related(
+        'romaneio',
+        'nf',
+        'nf__cliente',
+    ).only(
+        'id',
+        'numero_nota',
+        'status',
+        'duplicado',
+        'duplicidade_romaneio_codigo',
+        'duplicidade_data_saida',
+        'duplicidade_motorista',
+        'duplicidade_usuario',
+        'fantasia',
+        'razao_social',
+        'bairro',
+        'peso_kg',
+        'valor_total',
+        'nf_id',
+        'nf__bairro',
+        'nf__cliente__nome',
+        'romaneio_id',
+        'romaneio__codigo_romaneio',
+        'romaneio__created_at',
+        'romaneio__data_saida',
+        'romaneio__motorista',
+        'romaneio__placa',
+        'romaneio__pdf_gerado_em',
+        'romaneio__status_expedicao',
+        'romaneio__importacao_lote',
+    )
+    queryset = queryset.filter(romaneio__created_at__gte=_inicio_dia_local(retencao_cutoff_date()))
+
+    if historico:
+        if data_inicio is not None:
+            queryset = queryset.filter(romaneio__created_at__gte=_inicio_dia_local(data_inicio))
+        if data_fim is not None:
+            queryset = queryset.filter(romaneio__created_at__lt=_inicio_dia_local(data_fim + timedelta(days=1)))
+    else:
+        lote_ativo = _obter_lote_minuta_ativo()
+        if lote_ativo:
+            queryset = queryset.filter(romaneio__importacao_lote=lote_ativo)
+        else:
+            queryset = queryset.none()
+        if data_inicio is not None:
+            queryset = queryset.filter(romaneio__created_at__gte=_inicio_dia_local(data_inicio))
+        if data_fim is not None:
+            queryset = queryset.filter(romaneio__created_at__lt=_inicio_dia_local(data_fim + timedelta(days=1)))
+
+    if romaneio:
+        queryset = queryset.filter(romaneio__codigo_romaneio__icontains=romaneio)
+    if status:
+        queryset = queryset.filter(status=status)
+    if busca:
+        queryset = queryset.filter(
+            Q(numero_nota__icontains=busca)
+            | Q(fantasia__icontains=busca)
+            | Q(razao_social__icontains=busca)
+            | Q(romaneio__placa__icontains=busca)
+            | Q(romaneio__motorista__icontains=busca)
+            | Q(romaneio__codigo_romaneio__icontains=busca)
+            | Q(status__icontains=busca)
+        )
+    return queryset
+
+
 def consultar_minuta_itens_queryset(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
     try:
-        historico = consulta_minuta_historica_ativa(romaneio, busca)
-        queryset = MinutaRomaneioItem.objects.select_related(
-            'romaneio',
-            'nf',
-            'nf__rota',
-            'romaneio__usuario_importacao',
-            'romaneio__pdf_gerado_por',
+        queryset = _queryset_base_minuta(
+            romaneio=romaneio,
+            status=status,
+            busca=busca,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
         )
-        queryset = queryset.filter(romaneio__created_at__date__gte=retencao_cutoff_date())
-
-        if historico:
-            pass
-        else:
-            lote_ativo = _obter_lote_minuta_ativo()
-            if lote_ativo:
-                queryset = queryset.filter(romaneio__importacao_lote=lote_ativo)
-            else:
-                queryset = queryset.none()
-            if data_inicio is not None:
-                queryset = queryset.filter(romaneio__created_at__date__gte=data_inicio)
-            if data_fim is not None:
-                queryset = queryset.filter(romaneio__created_at__date__lte=data_fim)
-        if romaneio:
-            queryset = queryset.filter(romaneio__codigo_romaneio__icontains=romaneio)
-        if status:
-            queryset = queryset.filter(status=status)
-        if busca:
-            queryset = queryset.filter(
-                Q(numero_nota__icontains=busca)
-                | Q(fantasia__icontains=busca)
-                | Q(razao_social__icontains=busca)
-                | Q(romaneio__placa__icontains=busca)
-                | Q(romaneio__motorista__icontains=busca)
-                | Q(romaneio__codigo_romaneio__icontains=busca)
-                | Q(status__icontains=busca)
-            )
-
-        return queryset.order_by('-romaneio__data_saida', 'romaneio__codigo_romaneio', 'numero_nota')
+        return queryset.order_by('-romaneio__data_saida', '-id')
     except (ProgrammingError, OperationalError):
         logger.exception('ERRO REAL MINUTA: falha ao consultar itens da minuta.')
         return MinutaRomaneioItem.objects.none()
@@ -964,37 +1023,63 @@ def _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim):
 
 
 def obter_cards_minuta(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
+    inicio = time.perf_counter()
     cache_key = _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim)
     cached = cache.get(cache_key)
     if cached is not None:
+        total_ms = round((time.perf_counter() - inicio) * 1000, 2)
+        logger.warning(
+            'MINUTA_QUERY_MS etapa=cards_cache total_ms=%s registros=%s busca=%s',
+            total_ms,
+            cached['resumo'].get('itens', 0),
+            busca or romaneio or '',
+        )
         return cached
 
-    queryset = consultar_minuta_itens_queryset(
+    queryset = _queryset_base_minuta(
         romaneio=romaneio,
         status=status,
         busca=busca,
         data_inicio=data_inicio,
         data_fim=data_fim,
     )
-    linhas_leves = list(queryset.values('status', 'duplicado'))
-    inconsistencias = get_minuta_inconsistencias(linhas_leves)
-    itens = len(linhas_leves)
-    duplicados = sum(1 for linha in linhas_leves if linha.get('duplicado'))
-    romaneios = queryset.values('romaneio_id').distinct().count() if itens else 0
-    status_bloqueados = {
-        'NF CANCELADA',
-        'NF DENEGADA',
-        'NF INCONSISTENTE',
-        'NF BLOQUEADA',
-        'NF INATIVA',
-        'NF COM PROBLEMA',
-        'XML INVALIDO',
-        'NF NÃO LOCALIZADA',
+    agregados = queryset.aggregate(
+        itens=Count('id'),
+        romaneios=Count('romaneio_id', distinct=True),
+        duplicados=Sum(Case(When(duplicado=True, then=1), default=0, output_field=IntegerField())),
+        nfs_nao_localizadas=Sum(Case(When(status__in=MINUTA_STATUS_NAO_LOCALIZADA, then=1), default=0, output_field=IntegerField())),
+        xml_erros=Sum(Case(When(status__in=MINUTA_STATUS_XML_ERRO, then=1), default=0, output_field=IntegerField())),
+        canceladas=Sum(Case(When(status__in=MINUTA_STATUS_CANCELADA, then=1), default=0, output_field=IntegerField())),
+        inconsistencias=Sum(Case(When(status__in=MINUTA_STATUS_INCONSISTENTE, then=1), default=0, output_field=IntegerField())),
+        status_vazios=Sum(
+            Case(
+                When(Q(status__isnull=True) | Q(status=''), then=1),
+                default=0,
+                output_field=IntegerField(),
+            )
+        ),
+    )
+    itens = agregados.get('itens') or 0
+    duplicados = agregados.get('duplicados') or 0
+    inconsistencias = {
+        'nfs_nao_localizadas': agregados.get('nfs_nao_localizadas') or 0,
+        'xml_erros': agregados.get('xml_erros') or 0,
+        'duplicidades': duplicados,
+        'canceladas': agregados.get('canceladas') or 0,
+        'status_vazios': agregados.get('status_vazios') or 0,
+        'inconsistencias': agregados.get('inconsistencias') or 0,
     }
-    bloqueadas = sum(1 for linha in linhas_leves if (linha.get('status') or '').strip() in status_bloqueados)
+    inconsistencias['total_problemas'] = sum(inconsistencias.values())
+    inconsistencias['possui_alertas'] = inconsistencias['total_problemas'] > 0
+    bloqueadas = (
+        inconsistencias['nfs_nao_localizadas']
+        + inconsistencias['xml_erros']
+        + inconsistencias['canceladas']
+        + inconsistencias['inconsistencias']
+    )
 
     resumo = {
-        'romaneios': romaneios,
+        'romaneios': agregados.get('romaneios') or 0,
         'itens': itens,
         'erros': 0,
         'duplicados': duplicados,
@@ -1007,6 +1092,13 @@ def obter_cards_minuta(romaneio='', status='', busca='', data_inicio=None, data_
     }
     payload = {'resumo': resumo, 'minuta_inconsistencias': inconsistencias}
     cache.set(cache_key, payload, MINUTA_CARDS_CACHE_TTL)
+    total_ms = round((time.perf_counter() - inicio) * 1000, 2)
+    logger.warning(
+        'MINUTA_QUERY_MS etapa=cards total_ms=%s registros=%s busca=%s',
+        total_ms,
+        itens,
+        busca or romaneio or '',
+    )
     return payload
 
 

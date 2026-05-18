@@ -32,6 +32,7 @@ from apps.core.services.minuta_service import (
     MinutaImportacaoError,
     buscar_vinculo_nf_historico,
     consultar_minuta_itens_queryset,
+	limite_operacional_minuta,
     limpar_minutas_antigas,
     listar_minuta_itens,
     registrar_minuta_pdf_gerada,
@@ -1957,6 +1958,49 @@ class MinutaPersistenciaTests(TestCase):
 		self.assertEqual(payload['vinculo']['romaneio'], '5081791')
 		self.assertEqual(payload['vinculo']['motorista'], 'JOAO')
 		self.assertTrue(payload['vinculo']['pdf_gerado'])
+
+	def test_api_lista_limita_abertura_padrao_em_50_registros(self):
+		romaneio = MinutaRomaneio.objects.create(
+			codigo_romaneio='5083001',
+			importacao_lote=self._uuid.uuid4(),
+			data_saida=timezone.localdate(),
+			motorista='JOAO',
+			usuario_importacao=self.usuario,
+		)
+		for indice in range(55):
+			MinutaRomaneioItem.objects.create(
+				romaneio=romaneio,
+				numero_nota=f'1417{indice:03d}',
+				status='LIBERADA',
+			)
+
+		response = self.client.get('/api/minuta/lista/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(len(response.context['linhas']), limite_operacional_minuta())
+		self.assertTrue(response.context['has_next'])
+
+	def test_api_lista_limita_busca_historica_em_30_registros(self):
+		lote = self._uuid.uuid4()
+		romaneio = MinutaRomaneio.objects.create(
+			codigo_romaneio='BUSCA-30',
+			importacao_lote=lote,
+			data_saida=timezone.localdate(),
+			motorista='MARIA',
+			usuario_importacao=self.usuario,
+		)
+		for indice in range(35):
+			MinutaRomaneioItem.objects.create(
+				romaneio=romaneio,
+				numero_nota=f'1416{indice:03d}',
+				status='LIBERADA',
+			)
+
+		response = self.client.get('/api/minuta/lista/', {'busca': '1416'})
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(len(response.context['linhas']), limite_operacional_minuta(busca='1416'))
+		self.assertTrue(response.context['has_next'])
 
 	def test_importacao_nao_remove_romaneio_com_pdf_gerado(self):
 		romaneio_pdf = MinutaRomaneio.objects.create(

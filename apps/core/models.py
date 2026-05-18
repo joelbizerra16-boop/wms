@@ -53,7 +53,7 @@ class MinutaRomaneio(BaseModel):
 		blank=True,
 		verbose_name='usuario que gerou o pdf',
 	)
-	tipo_minuta = models.CharField(max_length=40, blank=True, default='', verbose_name='tipo da minuta')
+	tipo_minuta = models.CharField(max_length=40, blank=True, default='', db_index=True, verbose_name='tipo da minuta')
 	hash_operacional = models.CharField(max_length=64, blank=True, default='', db_index=True, verbose_name='hash operacional')
 	status_expedicao = models.CharField(
 		max_length=20,
