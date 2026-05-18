@@ -16,6 +16,7 @@ CORE_MINUTA_MIGRATIONS = [
     '0004_backfill_minuta_importacao_lote_legado',
     '0005_minuta_expedicao_persistencia',
     '0006_minutaromaneio_tipo_minuta_idx',
+    '0007_reconcile_minuta_schema_postgresql',
 ]
 
 COLUNAS_CRITICAS_ROMANEIO = [
@@ -87,8 +88,11 @@ class Command(BaseCommand):
                 self.stdout.write(f'  {status} {nome}')
 
             migration_0005_aplicada = '0005_minuta_expedicao_persistencia' in migrations_aplicadas
+            migration_0007_aplicada = '0007_reconcile_minuta_schema_postgresql' in migrations_aplicadas
             self.stdout.write(f'migration_0005_status={"[X]" if migration_0005_aplicada else "[ ]"}')
             self.stdout.write(f'migration_0005_registro_django_migrations={migration_0005_aplicada}')
+            self.stdout.write(f'migration_0007_status={"[X]" if migration_0007_aplicada else "[ ]"}')
+            self.stdout.write(f'migration_0007_registro_django_migrations={migration_0007_aplicada}')
 
             cursor.execute(
                 """

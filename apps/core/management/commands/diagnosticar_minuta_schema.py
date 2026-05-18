@@ -39,7 +39,8 @@ class Command(BaseCommand):
                       '0003_minutaromaneio_importacao_lote',
                                             '0004_backfill_minuta_importacao_lote_legado',
                                             '0005_minuta_expedicao_persistencia',
-                                            '0006_minutaromaneio_tipo_minuta_idx'
+                                            '0006_minutaromaneio_tipo_minuta_idx',
+                                            '0007_reconcile_minuta_schema_postgresql'
                   )
                 ORDER BY name
                 """

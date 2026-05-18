@@ -101,8 +101,8 @@ def diagnosticar_schema_minuta(connection):
 def mensagem_schema_minuta_inconsistente(diagnostico):
     if diagnostico.get('erro'):
         return (
-            'Schema da minuta inconsistente. Execute python manage.py migrate e valide a migration '
-            '0005_minuta_expedicao_persistencia.'
+            'Schema da minuta inconsistente. Execute python manage.py migrate e valide as migrations '
+            '0005_minuta_expedicao_persistencia e 0007_reconcile_minuta_schema_postgresql.'
         )
     detalhes = []
     if diagnostico.get('tabelas_faltantes'):
@@ -111,6 +111,6 @@ def mensagem_schema_minuta_inconsistente(diagnostico):
         detalhes.append(f"colunas_faltantes={diagnostico.get('colunas_faltantes')}")
     sufixo = f" ({'; '.join(detalhes)})" if detalhes else ''
     return (
-        'Schema da minuta inconsistente. Execute python manage.py migrate e valide a migration '
-        f'0005_minuta_expedicao_persistencia.{sufixo}'
+        'Schema da minuta inconsistente. Execute python manage.py migrate e valide as migrations '
+        f'0005_minuta_expedicao_persistencia e 0007_reconcile_minuta_schema_postgresql.{sufixo}'
     )

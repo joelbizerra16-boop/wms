@@ -53,3 +53,4 @@ class DiagnosticarSchemaMinutaTests(SimpleTestCase):
 
         self.assertIn('python manage.py migrate', mensagem)
         self.assertIn('0005_minuta_expedicao_persistencia', mensagem)
+        self.assertIn('0007_reconcile_minuta_schema_postgresql', mensagem)
