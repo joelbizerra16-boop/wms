@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -16,6 +17,7 @@ from apps.usuarios.models import Setor, Usuario
 @override_settings(ROOT_URLCONF='config.urls')
 class ConferenciaAPITests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = APIClient()
         self.usuario = Usuario.objects.create_user(
             username='conferente',

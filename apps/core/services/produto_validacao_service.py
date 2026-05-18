@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from django.db import OperationalError, connection
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.logs.models import Log
@@ -36,6 +37,20 @@ def selecionar_item_por_codigo_lido(codigo_lido, itens, *, fallback=None):
         if produto and _codigo_corresponde_identificador(codigo_normalizado, _identificadores_produto(produto)):
             return item
     return fallback
+
+
+def filtrar_queryset_por_codigo_produto(queryset, codigo_lido, *, prefixo_produto='produto__'):
+    codigo_normalizado = _normalizar_codigo(codigo_lido)
+    variantes = _codigo_variantes(codigo_normalizado)
+    if not variantes:
+        return queryset.none(), codigo_normalizado
+
+    filtro = Q()
+    for variante in variantes:
+        filtro |= Q(**{f'{prefixo_produto}cod_ean': variante})
+        filtro |= Q(**{f'{prefixo_produto}cod_prod': variante})
+        filtro |= Q(**{f'{prefixo_produto}codigo': variante})
+    return queryset.filter(filtro), codigo_normalizado
 
 
 def validar_produto(codigo_lido, item_id, usuario, item_model, tipo_validacao, *, item_travado=None):

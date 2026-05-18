@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from apps.logs.models import Log, UserActivityLog
 from apps.core.services.produto_validacao_service import (
+    filtrar_queryset_por_codigo_produto,
     ProdutoValidacaoError,
     selecionar_item_por_codigo_lido,
     validar_produto,
@@ -529,7 +530,7 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         raise SeparacaoError('Tarefa já concluída.')
 
                 with metricas.fase('query'):
-                    itens_pendentes = list(
+                    itens_pendentes_qs = (
                         _itens_pendentes_lock_queryset()
                         .filter(tarefa_id=tarefa_id, quantidade_separada__lt=F('quantidade_total'))
                         .select_related('produto')
@@ -550,10 +551,12 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         )
                         .order_by('nf_id', 'created_at')
                     )
-                    if not itens_pendentes:
+                    itens_candidatos_qs, _ = filtrar_queryset_por_codigo_produto(itens_pendentes_qs, codigo)
+                    item_esperado = itens_candidatos_qs.first()
+                    if item_esperado is None:
+                        item_esperado = itens_pendentes_qs.first()
+                    if item_esperado is None:
                         raise SeparacaoError('Tarefa sem itens pendentes para bipagem')
-
-                    item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
                     try:
                         validacao = validar_produto(
                             codigo_lido=codigo,
@@ -591,31 +594,30 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                     )
                     item_local.quantidade_separada = nova_separada
 
-                itens_restantes = []
-                for item_pendente in itens_pendentes:
-                    if item_pendente.id == item_local.id:
-                        if not completo:
-                            itens_restantes.append(item_local)
-                        continue
-                    itens_restantes.append(item_pendente)
-
-                finalizado_local = not itens_restantes
+                finalizado_local = False
+                if completo:
+                    finalizado_local = not TarefaItem.objects.filter(
+                        tarefa_id=tarefa_id,
+                        quantidade_separada__lt=F('quantidade_total'),
+                    ).exclude(pk=item_local.pk).exists()
                 nf_ids = []
                 if tarefa_local.nf_id:
                     nf_ids.append(tarefa_local.nf_id)
                 if item_local.nf_id and item_local.nf_id not in nf_ids:
                     nf_ids.append(item_local.nf_id)
 
-                agendar_logs_bipagem_separacao(
-                    usuario_id=usuario.id,
-                    tarefa_id=tarefa_local.id,
-                    produto_cod=item_local.produto.cod_prod,
-                    finalizacao_automatica=finalizado_local,
-                )
-                if finalizado_local:
-                    agendar_conclusao_automatica_separacao(tarefa_id=tarefa_local.id, usuario_id=usuario.id)
-                else:
-                    agendar_nf_ids_separacao(nf_ids)
+                with metricas.fase('side_effects'):
+                    agendar_logs_bipagem_separacao(
+                        usuario_id=usuario.id,
+                        tarefa_id=tarefa_local.id,
+                        produto_cod=item_local.produto.cod_prod,
+                        finalizacao_automatica=finalizado_local,
+                    )
+                    if finalizado_local:
+                        agendar_conclusao_automatica_separacao(tarefa_id=tarefa_local.id, usuario_id=usuario.id)
+                        agendar_invalidacao_operacional(motivo='bipagem_separacao_finalizada')
+                    else:
+                        agendar_nf_ids_separacao(nf_ids)
 
                 return tarefa_local, item_local, finalizado_local
 
@@ -625,21 +627,22 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
             status_tarefa = tarefa.status
             if finalizado:
                 status_tarefa = Tarefa.Status.CONCLUIDO
-                agendar_invalidacao_operacional(motivo='bipagem_separacao_finalizada')
-            resposta = {
-                'status': 'ok',
-                'esperado': float(item.quantidade_total),
-                'separado': float(item.quantidade_separada),
-                'status_tarefa': status_tarefa,
-                'finalizado': finalizado,
-                'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
-                'cor': 'verde',
-                'som': 'beep-curto',
-            }
+            with metricas.fase('serialize'):
+                resposta = {
+                    'status': 'ok',
+                    'esperado': float(item.quantidade_total),
+                    'separado': float(item.quantidade_separada),
+                    'status_tarefa': status_tarefa,
+                    'finalizado': finalizado,
+                    'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
+                    'cor': 'verde',
+                    'som': 'beep-curto',
+                }
             if finalizado:
-                from apps.core.operacional_transicao import anexar_transicao_separacao
+                with metricas.fase('cache'):
+                    from apps.core.operacional_transicao import anexar_transicao_separacao
 
-                anexar_transicao_separacao(resposta, usuario, tarefa_id_atual=tarefa.id)
+                    anexar_transicao_separacao(resposta, usuario, tarefa_id_atual=tarefa.id)
             resultado = resposta
         return resultado
     finally:

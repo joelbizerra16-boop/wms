@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.db import connection
 from django.test import Client, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
@@ -15,6 +16,7 @@ from apps.usuarios.models import Setor, Usuario
 @override_settings(ROOT_URLCONF='config.urls')
 class ConferenciaWebTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = Client()
         self.usuario = Usuario.objects.create_user(
             username='conferente_web',

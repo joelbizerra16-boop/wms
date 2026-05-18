@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.core.services.produto_validacao_service import (
+    filtrar_queryset_por_codigo_produto,
     ProdutoValidacaoError,
     selecionar_item_por_codigo_lido,
     validar_produto,
@@ -780,12 +781,13 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
         nf_numero = ''
         produto_cod = ''
         finalizado = False
+        status_final = None
         conferido = Decimal('0')
         esperado = Decimal('0')
         setor_cache = ''
 
         def _executar():
-            nonlocal nf_id, nf_numero, produto_cod, finalizado, conferido, esperado, setor_cache
+            nonlocal nf_id, nf_numero, produto_cod, finalizado, status_final, conferido, esperado, setor_cache
             with transaction.atomic():
                 with metricas.fase('lock'):
                     lock_kwargs = {}
@@ -793,10 +795,22 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         lock_kwargs = {'nowait': True, 'of': ('self',)}
                     else:
                         lock_kwargs = {'nowait': True}
-                    conferencia_local = Conferencia.objects.select_for_update(**lock_kwargs).get(id=conferencia_id)
-                    status_fiscal_nf = NotaFiscal.objects.filter(id=conferencia_local.nf_id).values_list(
-                        'status_fiscal', flat=True
-                    ).first()
+                    conferencia_local = (
+                        Conferencia.objects.select_for_update(**lock_kwargs)
+                        .select_related('nf')
+                        .only(
+                            'id',
+                            'status',
+                            'conferente_id',
+                            'nf_id',
+                            'nf__id',
+                            'nf__numero',
+                            'nf__status',
+                            'nf__status_fiscal',
+                        )
+                        .get(id=conferencia_id)
+                    )
+                    status_fiscal_nf = conferencia_local.nf.status_fiscal
                     if status_fiscal_nf == NotaFiscal.StatusFiscal.CANCELADA:
                         raise ConferenciaError(NF_CANCELADA_ERRO)
                     if conferencia_local.status not in {
@@ -811,7 +825,7 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                     item_lock_kwargs = {'skip_locked': True}
                     if connection.vendor == 'postgresql':
                         item_lock_kwargs['of'] = ('self',)
-                    itens_pendentes = list(
+                    itens_pendentes_qs = (
                         ConferenciaItem.objects.select_for_update(**item_lock_kwargs)
                         .filter(
                             conferencia_id=conferencia_id,
@@ -834,10 +848,12 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         )
                         .order_by('id')
                     )
-                    if not itens_pendentes:
+                    itens_candidatos_qs, _ = filtrar_queryset_por_codigo_produto(itens_pendentes_qs, codigo)
+                    item_esperado = itens_candidatos_qs.first()
+                    if item_esperado is None:
+                        item_esperado = itens_pendentes_qs.first()
+                    if item_esperado is None:
                         raise ConferenciaError('Não existem itens pendentes para bipagem.')
-
-                    item_esperado = selecionar_item_por_codigo_lido(codigo, itens_pendentes, fallback=itens_pendentes[0])
                     try:
                         validacao = validar_produto(
                             codigo_lido=codigo,
@@ -876,32 +892,60 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                     item_local.qtd_conferida = nova_conferida
                     item_local.status = novo_status
 
-                itens_restantes = []
-                for item_pendente in itens_pendentes:
-                    if item_pendente.id == item_local.id:
-                        if not completo:
-                            itens_restantes.append(item_local)
-                        continue
-                    itens_restantes.append(item_pendente)
-
-                finalizado = not itens_restantes
+                finalizado = False
+                if completo:
+                    finalizado = not ConferenciaItem.objects.filter(
+                        conferencia_id=conferencia_id,
+                        status=ConferenciaItem.Status.AGUARDANDO,
+                        qtd_conferida__lt=F('qtd_esperada'),
+                    ).exclude(pk=item_local.pk).exists()
                 nf_id = conferencia_local.nf_id
-                nf_numero = (
-                    NotaFiscal.objects.filter(id=nf_id).values_list('numero', flat=True).first() or ''
-                )
+                nf_numero = conferencia_local.nf.numero or ''
                 produto_cod = item_local.produto.cod_prod
                 conferido = nova_conferida
                 esperado = item_local.qtd_esperada
                 setor_cache = _setor_operacional_produto(item_local.produto)
 
-                agendar_logs_bipagem_conferencia(
-                    usuario_id=usuario.id,
-                    nf_numero=nf_numero,
-                    produto_cod=produto_cod,
-                    tarefa_id=None,
-                )
-                if not finalizado:
-                    agendar_atualizar_status_nf(nf_id)
+                with metricas.fase('side_effects'):
+                    agendar_logs_bipagem_conferencia(
+                        usuario_id=usuario.id,
+                        nf_numero=nf_numero,
+                        produto_cod=produto_cod,
+                        tarefa_id=None,
+                    )
+                    if finalizado:
+                        conferencia_liberada = (
+                            conferencia_local.status == Conferencia.Status.LIBERADO_COM_RESTRICAO
+                            or conferencia_local.nf.status == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
+                        )
+                        possui_divergencia = ConferenciaItem.objects.filter(
+                            conferencia_id=conferencia_id,
+                            status=ConferenciaItem.Status.DIVERGENCIA,
+                        ).exists()
+                        status_final = (
+                            Conferencia.Status.CONCLUIDO_COM_RESTRICAO
+                            if conferencia_liberada
+                            else (Conferencia.Status.DIVERGENCIA if possui_divergencia else Conferencia.Status.OK)
+                        )
+                        agora_finalizacao = timezone.now()
+                        Conferencia.objects.filter(pk=conferencia_id).update(status=status_final, updated_at=agora_finalizacao)
+                        if conferencia_liberada:
+                            detalhe = f'Conferencia da NF {nf_numero} finalizada com restricao liberada.'
+                        elif possui_divergencia:
+                            detalhe = f'Conferencia da NF {nf_numero} finalizada com divergencia.'
+                        else:
+                            detalhe = f'Conferencia da NF {nf_numero} finalizada com sucesso.'
+                        _agendar_finalizacao_conferencia_segura(
+                            conferencia_id=conferencia_id,
+                            nf_id=nf_id,
+                            usuario_id=usuario.id,
+                            possui_divergencia=possui_divergencia,
+                            conferencia_liberada=conferencia_liberada,
+                            detalhe_log=detalhe,
+                            setor_cache=setor_cache,
+                        )
+                    else:
+                        agendar_atualizar_status_nf(nf_id)
 
         try:
             _executar()
@@ -911,17 +955,28 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
             raise
 
         with metricas.fase('response'):
-            from apps.core.operacional_transicao import url_lista_conferencia
-
-            resposta = {
-                'status': 'ok',
-                'esperado': float(esperado),
-                'conferido': float(conferido),
-                'finalizado': finalizado,
-            }
+            with metricas.fase('serialize'):
+                resposta = {
+                    'status': 'ok',
+                    'esperado': float(esperado),
+                    'conferido': float(conferido),
+                    'finalizado': finalizado,
+                }
             if finalizado:
-                payload_final = finalizar_conferencia(conferencia_id, usuario, resposta_minima=True)
-                resposta.update(payload_final)
+                with metricas.fase('cache'):
+                    from apps.core.operacional_transicao import anexar_transicao_conferencia
+
+                    payload_final = anexar_transicao_conferencia({}, usuario, nf_id_atual=nf_id)
+                    resposta.update(
+                        {
+                            'ok': True,
+                            'finalizado': True,
+                            'status_final': status_final,
+                            'redirect_url': payload_final['redirect_url'],
+                            'proxima_nf_id': payload_final['proxima_nf_id'],
+                            'tem_proxima': payload_final['tem_proxima'],
+                        }
+                    )
             return resposta
     finally:
         total_ms = round((time.perf_counter() - inicio_bipagem) * 1000, 2)
