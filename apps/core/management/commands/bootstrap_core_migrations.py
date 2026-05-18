@@ -1,130 +1,51 @@
-"""
-Marca migrations do app core como aplicadas quando o schema legado ja existe no PostgreSQL.
-
-Evita: ProgrammingError: relation "core_minutaromaneio" already exists
-em deploys brownfield (Supabase com tabelas criadas antes do django_migrations).
-"""
-
 from django.core.management.base import BaseCommand
-from django.db import connection
-from django.db.migrations.recorder import MigrationRecorder
 
-
-CORE_APP = 'core'
-
-# Ordem obrigatoria — somente migrations que podem conflitar com schema existente.
-MIGRATIONS_BOOTSTRAP = (
-    '0001_minuta_models',
-    '0002_minutaromaneioitem_bairro',
-    '0003_minutaromaneio_importacao_lote',
-    '0004_backfill_minuta_importacao_lote_legado',
-    '0005_minuta_expedicao_persistencia',
-    '0006_minutaromaneio_tipo_minuta_idx',
+from apps.core.core_migration_sync import (
+    diagnosticar_divergencia_migrations_core,
+    sincronizar_historico_migrations_core,
 )
-
-
-def _tabela_existe(cursor, nome_tabela):
-    cursor.execute(
-        """
-        SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.tables
-            WHERE table_schema = current_schema()
-              AND table_name = %s
-        )
-        """,
-        [nome_tabela],
-    )
-    return bool(cursor.fetchone()[0])
-
-
-def _coluna_existe(cursor, nome_tabela, nome_coluna):
-    cursor.execute(
-        """
-        SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = current_schema()
-              AND table_name = %s
-              AND column_name = %s
-        )
-        """,
-        [nome_tabela, nome_coluna],
-    )
-    return bool(cursor.fetchone()[0])
-
-
-def _migrations_core_aplicadas(connection):
-    recorder = MigrationRecorder(connection)
-    return {nome for app, nome in recorder.applied_migrations() if app == CORE_APP}
-
-
-def _registrar_fake(connection, nome_migration):
-    MigrationRecorder(connection).record_applied(CORE_APP, nome_migration)
-
-
-def _avaliar_migrations_para_fake(cursor):
-    """Retorna set de migrations seguras para fake dado o schema atual."""
-    fakes = set()
-    if not _tabela_existe(cursor, 'core_minutaromaneio'):
-        return fakes
-
-    fakes.add('0001_minuta_models')
-
-    if _tabela_existe(cursor, 'core_minutaromaneioitem'):
-        fakes.add('0002_minutaromaneioitem_bairro')
-
-    if _coluna_existe(cursor, 'core_minutaromaneio', 'importacao_lote'):
-        fakes.update(
-            {
-                '0003_minutaromaneio_importacao_lote',
-                '0004_backfill_minuta_importacao_lote_legado',
-            }
-        )
-
-    colunas_expedicao = (
-        'hash_operacional',
-        'status_expedicao',
-        'tipo_minuta',
-        'pdf_gerado_em',
-    )
-    if all(_coluna_existe(cursor, 'core_minutaromaneio', coluna) for coluna in colunas_expedicao):
-        fakes.update(
-            {
-                '0005_minuta_expedicao_persistencia',
-                '0006_minutaromaneio_tipo_minuta_idx',
-            }
-        )
-
-    return fakes
+from django.db import connection
 
 
 class Command(BaseCommand):
-    help = 'Registra migrations core ja materializadas no banco legado (antes do migrate).'
+    help = 'Sincroniza django_migrations do app core com tabelas/colunas ja existentes (brownfield).'
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--dry-run',
+            action='store_true',
+            help='Apenas diagnostica; nao grava em django_migrations.',
+        )
 
     def handle(self, *args, **options):
         if connection.vendor != 'postgresql':
             self.stdout.write(self.style.WARNING('bootstrap_core_migrations: ignorado (nao e PostgreSQL).'))
             return
 
-        aplicadas = _migrations_core_aplicadas(connection)
-        with connection.cursor() as cursor:
-            candidatas = _avaliar_migrations_para_fake(cursor)
+        diagnostico = diagnosticar_divergencia_migrations_core(connection)
+        self.stdout.write(f"vendor={diagnostico['vendor']}")
+        self.stdout.write(f"tabela_romaneio_existe={diagnostico['tabela_romaneio_existe']}")
+        self.stdout.write(f"aplicadas={', '.join(diagnostico['aplicadas']) or '-'}")
+        if diagnostico['pendentes_reais']:
+            self.stdout.write(
+                self.style.WARNING(
+                    'pendentes_reais_no_banco=' + ', '.join(diagnostico['pendentes_reais'])
+                )
+            )
+        for mensagem in diagnostico['divergencias']:
+            self.stdout.write(self.style.ERROR(mensagem))
 
-        registradas = []
-        for nome in MIGRATIONS_BOOTSTRAP:
-            if nome not in candidatas:
-                continue
-            if nome in aplicadas:
-                continue
-            _registrar_fake(connection, nome)
-            registradas.append(nome)
+        if options['dry_run']:
+            self.stdout.write(self.style.WARNING('bootstrap_core_migrations: dry-run (nenhum registro gravado).'))
+            return
 
+        registradas = sincronizar_historico_migrations_core(connection)
         if registradas:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'bootstrap_core_migrations: fake aplicado em {", ".join(registradas)}'
+                    'bootstrap_core_migrations: historico sincronizado em '
+                    + ', '.join(registradas)
                 )
             )
         else:
-            self.stdout.write('bootstrap_core_migrations: nada a fazer.')
+            self.stdout.write('bootstrap_core_migrations: historico ja consistente.')

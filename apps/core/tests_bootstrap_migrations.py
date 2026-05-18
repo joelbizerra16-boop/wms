@@ -10,19 +10,22 @@ class BootstrapCoreMigrationsTests(SimpleTestCase):
             conn.vendor = 'sqlite'
             call_command('bootstrap_core_migrations')
 
-    def test_registra_fake_0001_quando_tabela_existe(self):
+    def test_chama_sincronizar_no_postgresql(self):
         with mock.patch('apps.core.management.commands.bootstrap_core_migrations.connection') as conn:
             conn.vendor = 'postgresql'
             with mock.patch(
-                'apps.core.management.commands.bootstrap_core_migrations._migrations_core_aplicadas',
-                return_value=set(),
+                'apps.core.management.commands.bootstrap_core_migrations.diagnosticar_divergencia_migrations_core',
+                return_value={
+                    'vendor': 'postgresql',
+                    'aplicadas': [],
+                    'divergencias': [],
+                    'pendentes_reais': ['0001_minuta_models'],
+                    'tabela_romaneio_existe': True,
+                },
             ):
                 with mock.patch(
-                    'apps.core.management.commands.bootstrap_core_migrations._avaliar_migrations_para_fake',
-                    return_value={'0001_minuta_models'},
-                ):
-                    with mock.patch(
-                        'apps.core.management.commands.bootstrap_core_migrations._registrar_fake',
-                    ) as registrar:
-                        call_command('bootstrap_core_migrations')
-                        registrar.assert_called_once_with(conn, '0001_minuta_models')
+                    'apps.core.management.commands.bootstrap_core_migrations.sincronizar_historico_migrations_core',
+                    return_value=['0001_minuta_models'],
+                ) as sincronizar:
+                    call_command('bootstrap_core_migrations')
+                    sincronizar.assert_called_once_with(conn)

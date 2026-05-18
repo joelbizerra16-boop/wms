@@ -9,15 +9,10 @@ from django.db import OperationalError, connection
 from apps.core.db_fixes import diagnosticar_schema_minuta, mensagem_schema_minuta_inconsistente
 
 
-CORE_MINUTA_MIGRATIONS = [
-    '0001_minuta_models',
-    '0002_minutaromaneioitem_bairro',
-    '0003_minutaromaneio_importacao_lote',
-    '0004_backfill_minuta_importacao_lote_legado',
-    '0005_minuta_expedicao_persistencia',
-    '0006_minutaromaneio_tipo_minuta_idx',
-    '0007_reconcile_minuta_schema_postgresql',
-]
+from apps.core.core_migration_sync import CORE_MIGRATIONS_ORDEM, diagnosticar_divergencia_migrations_core
+
+
+CORE_MINUTA_MIGRATIONS = list(CORE_MIGRATIONS_ORDEM)
 
 COLUNAS_CRITICAS_ROMANEIO = [
     'hash_operacional',
@@ -52,7 +47,7 @@ class Command(BaseCommand):
             self.stdout.write(f'connection_error={exc}')
             self.stdout.write(f'execution_ms={total_ms}')
             self.stdout.write(self.style.WARNING('HEALTHCHECK FINALIZADO'))
-            return
+            raise SystemExit(1)
 
         if connection.vendor != 'postgresql':
             total_ms = round((time.perf_counter() - inicio) * 1000, 2)
@@ -60,7 +55,7 @@ class Command(BaseCommand):
             self.stdout.write('motivo=healthcheck detalhado exige PostgreSQL')
             self.stdout.write(f'execution_ms={total_ms}')
             self.stdout.write(self.style.WARNING('HEALTHCHECK FINALIZADO'))
-            return
+            raise SystemExit(1)
 
         with connection.cursor() as cursor:
             cursor.execute('SELECT current_schema()')
@@ -134,13 +129,27 @@ class Command(BaseCommand):
             self.stdout.write(f"core_minutaromaneio_count={contagens['core_minutaromaneio']}")
             self.stdout.write(f"core_minutaromaneioitem_count={contagens['core_minutaromaneioitem']}")
 
+        divergencia_migrations = diagnosticar_divergencia_migrations_core(connection)
+        self.stdout.write(f"migration_sync_pendentes={divergencia_migrations['pendentes_reais']}")
+        for mensagem in divergencia_migrations['divergencias']:
+            self.stdout.write(self.style.ERROR(f'migration_sync={mensagem}'))
+
         diagnostico = diagnosticar_schema_minuta(connection)
-        if diagnostico['resultado_validacao']:
+        schema_ok = diagnostico['resultado_validacao'] and not divergencia_migrations['pendentes_reais']
+        if schema_ok:
             self.stdout.write(self.style.SUCCESS('SCHEMA_OK'))
         else:
             self.stdout.write(self.style.ERROR('SCHEMA_INVALIDO'))
-            self.stdout.write(mensagem_schema_minuta_inconsistente(diagnostico))
+            if not diagnostico['resultado_validacao']:
+                self.stdout.write(mensagem_schema_minuta_inconsistente(diagnostico))
+            if divergencia_migrations['pendentes_reais']:
+                self.stdout.write(
+                    'Execute: python manage.py reconcile_minuta_schema && '
+                    'python manage.py bootstrap_core_migrations && python manage.py migrate'
+                )
 
         total_ms = round((time.perf_counter() - inicio) * 1000, 2)
         self.stdout.write(f'execution_ms={total_ms}')
         self.stdout.write(self.style.SUCCESS('HEALTHCHECK FINALIZADO'))
+        if not schema_ok:
+            raise SystemExit(1)
