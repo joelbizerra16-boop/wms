@@ -141,3 +141,73 @@ def agendar_nf_ids_separacao(nf_ids):
         sincronizar_status_operacional_nfs(list(NotaFiscal.objects.filter(id__in=ids)))
 
     transaction.on_commit(_sincronizar)
+
+
+def agendar_finalizacao_conferencia(
+    *,
+    conferencia_id,
+    nf_id,
+    usuario_id,
+    possui_divergencia,
+    conferencia_liberada,
+    detalhe_log,
+    setor_cache='',
+):
+    """Sync NF, logs, retorno separação e caches após commit da finalização."""
+
+    def _executar():
+        logger.info(
+            'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_START conferencia_id=%s nf_id=%s fallback=%s',
+            conferencia_id,
+            nf_id,
+            False,
+        )
+        try:
+            from django.utils import timezone
+
+            from apps.conferencia.models import Conferencia
+            from apps.conferencia.services.conferencia_service import _gerar_retorno_para_separacao
+            from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
+            from apps.core.views_dashboard import invalidate_dashboard_separacao_cache
+            from apps.logs.models import Log, UserActivityLog
+            from apps.nf.models import NotaFiscal
+            from apps.nf.services.status_service import sincronizar_status_operacional_nf
+            from apps.tarefas.models import Tarefa
+
+            conferencia = Conferencia.objects.select_related('nf', 'nf__rota').prefetch_related('itens__produto').get(id=conferencia_id)
+            nf = NotaFiscal.objects.filter(id=nf_id).first() or conferencia.nf
+            if nf:
+                sincronizar_status_operacional_nf(nf)
+
+            if possui_divergencia and not conferencia_liberada:
+                _gerar_retorno_para_separacao(conferencia)
+
+            Log.objects.create(usuario_id=usuario_id, acao='FINALIZACAO CONFERENCIA', detalhe=detalhe_log)
+            tarefa_id = Tarefa.objects.filter(nf_id=nf_id).values_list('id', flat=True).first()
+            UserActivityLog.objects.create(
+                usuario_id=usuario_id,
+                tipo=UserActivityLog.Tipo.TAREFA_FIM,
+                tarefa_id=tarefa_id,
+                timestamp=timezone.now(),
+            )
+
+            from apps.conferencia.services.conferencia_service import invalidate_nfs_disponiveis_cache
+
+            invalidate_nfs_disponiveis_cache(motivo='finalizacao_conferencia', nf_id=nf_id, setor=setor_cache)
+            invalidate_dashboard_separacao_cache(motivo='finalizacao_conferencia')
+            invalidate_monitoramento_conferencia_cache(motivo='finalizacao_conferencia', nf_id=nf_id, setor=setor_cache)
+            logger.info(
+                'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_DONE conferencia_id=%s nf_id=%s fallback=%s',
+                conferencia_id,
+                nf_id,
+                False,
+            )
+        except Exception:
+            logger.exception(
+                'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_ERROR conferencia_id=%s nf_id=%s fallback=%s',
+                conferencia_id,
+                nf_id,
+                False,
+            )
+
+    transaction.on_commit(_executar)

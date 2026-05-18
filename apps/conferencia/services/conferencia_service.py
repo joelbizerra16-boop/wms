@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from importlib import import_module
 import logging
 import time
 
@@ -525,11 +526,17 @@ def listar_nfs_disponiveis(
         conferencia_em_fluxo_obj = conferencia_ativa_usuario or conferencia_ativa_outro or _conferencia_mais_recente(
             [conferencia for conferencia in conferencias_relacionadas if conferencia.status in STATUS_CONFERENCIA_EM_FLUXO]
         )
+        conferencia_em_fluxo = bool(
+            conferencia_em_fluxo_obj is not None and conferencia_em_fluxo_obj.status in STATUS_CONFERENCIA_EM_FLUXO
+        )
 
         status_separacao = validacao_fluxo['status_separacao']
         possui_liberacao_restricao = (
             nf.status == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
             or any(conferencia.status == Conferencia.Status.LIBERADO_COM_RESTRICAO for conferencia in conferencias_relacionadas)
+        )
+        conferencia_liberada_lista = bool(
+            validacao_fluxo['liberado'] or possui_liberacao_restricao or conferencia_em_fluxo
         )
         produto_ids_finalizados = _produto_ids_reservados(conferencias_relacionadas, STATUS_CONFERENCIA_FINALIZADA)
         itens_pendentes_conferencia = _itens_pendentes_conferencia(
@@ -545,15 +552,25 @@ def listar_nfs_disponiveis(
             NotaFiscal.Status.BLOQUEADA_COM_RESTRICAO,
         }
         fluxo_direto_balcao = bool(nf.balcao)
-        # Conferencia so lista pedido totalmente separado.
-        if not validacao_fluxo['liberado']:
+        if not conferencia_liberada_lista:
+            logger.info(
+                'CONFERENCIA_LISTAGEM_REMOVIDA nf_id=%s motivo=separacao_nao_liberada status_nf=%s conferencia_em_fluxo=%s',
+                nf.id,
+                nf.status,
+                conferencia_em_fluxo,
+            )
             continue
         if itens_pendentes_conferencia <= 0 and conferencia_em_fluxo_obj is None:
+            logger.info(
+                'CONFERENCIA_LISTAGEM_REMOVIDA nf_id=%s motivo=sem_itens_pendentes status_nf=%s',
+                nf.id,
+                nf.status,
+            )
             continue
         if not (
             status_elegivel
             and (
-                validacao_fluxo['liberado']
+                conferencia_liberada_lista
                 or possui_liberacao_restricao
                 or conferencia_em_fluxo_obj is not None
                 or fluxo_direto_balcao
@@ -574,9 +591,9 @@ def listar_nfs_disponiveis(
                 'cliente': nf.cliente.nome,
                 'rota': f'Balcao - {nf.rota.nome}' if nf.balcao else nf.rota.nome,
                 'status_fiscal': nf.status_fiscal,
-                'status': nf.status,
+                'status': NotaFiscal.Status.EM_CONFERENCIA if conferencia_em_fluxo else nf.status,
                 'status_separacao': status_separacao,
-                'conferencia_liberada': validacao_fluxo['liberado'],
+                'conferencia_liberada': conferencia_liberada_lista,
                 'conferencia_bloqueio_motivo': validacao_fluxo['motivo'],
                 'balcao': nf.balcao,
                 'updated_ts': nf.updated_at.timestamp(),
@@ -951,8 +968,105 @@ def registrar_divergencia(item_id, motivo, observacao, usuario):
     return _dados_item(item)
 
 
+def _agendar_finalizacao_conferencia_fallback(
+    *,
+    conferencia_id,
+    nf_id,
+    usuario_id,
+    possui_divergencia,
+    conferencia_liberada,
+    detalhe_log,
+    setor_cache='',
+):
+    def _executar():
+        logger.info(
+            'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_START conferencia_id=%s nf_id=%s fallback=%s',
+            conferencia_id,
+            nf_id,
+            True,
+        )
+        try:
+            from django.utils import timezone
+
+            from apps.core.services.visibilidade_operacional_service import invalidate_monitoramento_conferencia_cache
+            from apps.core.views_dashboard import invalidate_dashboard_separacao_cache
+
+            conferencia = (
+                Conferencia.objects.select_related('nf', 'nf__rota')
+                .prefetch_related('itens__produto')
+                .get(id=conferencia_id)
+            )
+            nf = conferencia.nf
+            if nf is not None:
+                sincronizar_status_operacional_nf(nf)
+
+            if possui_divergencia and not conferencia_liberada:
+                _gerar_retorno_para_separacao(conferencia)
+
+            Log.objects.create(usuario_id=usuario_id, acao='FINALIZACAO CONFERENCIA', detalhe=detalhe_log)
+            tarefa_id = Tarefa.objects.filter(nf_id=nf_id).values_list('id', flat=True).first()
+            UserActivityLog.objects.create(
+                usuario_id=usuario_id,
+                tipo=UserActivityLog.Tipo.TAREFA_FIM,
+                tarefa_id=tarefa_id,
+                timestamp=timezone.now(),
+            )
+            invalidate_nfs_disponiveis_cache(motivo='finalizacao_conferencia', nf_id=nf_id, setor=setor_cache)
+            invalidate_dashboard_separacao_cache(motivo='finalizacao_conferencia')
+            invalidate_monitoramento_conferencia_cache(
+                motivo='finalizacao_conferencia',
+                nf_id=nf_id,
+                setor=setor_cache,
+            )
+            logger.info(
+                'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_DONE conferencia_id=%s nf_id=%s fallback=%s',
+                conferencia_id,
+                nf_id,
+                True,
+            )
+        except Exception:
+            logger.exception(
+                'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_ERROR conferencia_id=%s nf_id=%s fallback=%s',
+                conferencia_id,
+                nf_id,
+                True,
+            )
+
+    transaction.on_commit(_executar)
+
+
+def _agendar_finalizacao_conferencia_segura(**kwargs):
+    conferencia_id = kwargs.get('conferencia_id')
+    nf_id = kwargs.get('nf_id')
+    logger.info(
+        'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_SCHEDULE conferencia_id=%s nf_id=%s',
+        conferencia_id,
+        nf_id,
+    )
+    try:
+        modulo = import_module('apps.core.operacional_side_effects')
+        agendador = getattr(modulo, 'agendar_finalizacao_conferencia')
+    except Exception:
+        logger.exception(
+            'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_IMPORT_ERROR conferencia_id=%s nf_id=%s',
+            conferencia_id,
+            nf_id,
+        )
+        _agendar_finalizacao_conferencia_fallback(**kwargs)
+        return
+
+    try:
+        agendador(**kwargs)
+    except Exception:
+        logger.exception(
+            'CONFERENCIA_FINALIZACAO_SIDE_EFFECT_SCHEDULE_ERROR conferencia_id=%s nf_id=%s',
+            conferencia_id,
+            nf_id,
+        )
+        _agendar_finalizacao_conferencia_fallback(**kwargs)
+
+
 def finalizar_conferencia(conferencia_id, usuario, *, resposta_minima=False):
-    from apps.core.operacional_side_effects import agendar_finalizacao_conferencia
     from apps.core.operacional_transicao import anexar_transicao_conferencia
 
     inicio = time.perf_counter()
@@ -971,6 +1085,14 @@ def finalizar_conferencia(conferencia_id, usuario, *, resposta_minima=False):
             'nf__status_fiscal',
         )
         .get(id=conferencia_id)
+    )
+    status_anterior = conferencia.status
+    logger.info(
+        'CONFERENCIA_FINALIZACAO_INICIO conferencia_id=%s nf_id=%s status_atual=%s user_id=%s',
+        conferencia_id,
+        conferencia.nf_id,
+        status_anterior,
+        getattr(usuario, 'id', None),
     )
     if conferencia.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
         _registrar_bloqueio_nf_cancelada(usuario, 'CONFERENCIA BLOQUEADA', conferencia.nf)
@@ -1021,7 +1143,16 @@ def finalizar_conferencia(conferencia_id, usuario, *, resposta_minima=False):
         else:
             detalhe = f'Conferencia da NF {nf_numero} finalizada com sucesso.'
 
-        agendar_finalizacao_conferencia(
+        logger.info(
+            'CONFERENCIA_FINALIZACAO_STATUS conferencia_id=%s nf_id=%s status_antes=%s status_depois=%s possui_divergencia=%s conferencia_liberada=%s',
+            conferencia_id,
+            nf_id,
+            status_anterior,
+            novo_status,
+            possui_divergencia,
+            conferencia_liberada,
+        )
+        _agendar_finalizacao_conferencia_segura(
             conferencia_id=conferencia_id,
             nf_id=nf_id,
             usuario_id=usuario.id,

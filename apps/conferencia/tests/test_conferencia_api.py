@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -410,3 +412,26 @@ class ConferenciaAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         conferencia.refresh_from_db()
         self.assertEqual(conferencia.status, Conferencia.Status.CONCLUIDO_COM_RESTRICAO)
+
+    def test_finalizacao_nao_quebra_quando_import_do_side_effect_falha(self):
+        conferencia = Conferencia.objects.create(
+            nf=self.nf,
+            conferente=self.usuario,
+            status=Conferencia.Status.EM_CONFERENCIA,
+        )
+        ConferenciaItem.objects.create(
+            conferencia=conferencia,
+            produto=self.produto_2,
+            qtd_esperada='1.00',
+            qtd_conferida='1.00',
+            status=ConferenciaItem.Status.OK,
+        )
+
+        with patch('apps.conferencia.services.conferencia_service.import_module', side_effect=ImportError('side effect ausente')):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post('/api/conferencia/finalizar/', {'conferencia_id': conferencia.id}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self._body(response)['finalizado'])
+        self.assertIn('/conferencia/', response.data['redirect'])
+        self.assertEqual(Conferencia.objects.get(id=conferencia.id).status, Conferencia.Status.OK)

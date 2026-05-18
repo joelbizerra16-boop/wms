@@ -244,6 +244,38 @@ class ConferenciaWebTests(TestCase):
         self.assertEqual(response_aceite.status_code, 403)
         self.assertIn('Pedido ainda não foi separado', response_aceite.content.decode('utf-8'))
 
+    def test_nf_em_conferencia_permanece_visivel_para_mesmo_usuario(self):
+        self._iniciar()
+
+        nfs = listar_nfs_disponiveis(self.usuario, usar_cache=False)
+
+        self.assertTrue(any(item['id'] == self.nf.id for item in nfs))
+        nf_payload = next(item for item in nfs if item['id'] == self.nf.id)
+        self.assertEqual(nf_payload['status'], NotaFiscal.Status.EM_CONFERENCIA)
+        self.assertTrue(nf_payload['em_uso_por_mim'])
+        self.assertFalse(nf_payload['bloqueado'])
+        self.assertTrue(nf_payload['conferencia_liberada'])
+
+    def test_nf_em_conferencia_permanece_visivel_e_bloqueada_para_outro_usuario(self):
+        usuario_mesmo_setor = Usuario.objects.create_user(
+            username='conferente_filtros_web_2',
+            nome='Conferente Web 2',
+            perfil=Usuario.Perfil.CONFERENTE,
+            setores=[Setor.Codigo.FILTROS],
+            password='123456',
+            is_active=True,
+        )
+        self._iniciar()
+
+        nfs = listar_nfs_disponiveis(usuario_mesmo_setor, usar_cache=False)
+
+        self.assertTrue(any(item['id'] == self.nf.id for item in nfs))
+        nf_payload = next(item for item in nfs if item['id'] == self.nf.id)
+        self.assertEqual(nf_payload['status'], NotaFiscal.Status.EM_CONFERENCIA)
+        self.assertFalse(nf_payload['em_uso_por_mim'])
+        self.assertTrue(nf_payload['bloqueado'])
+        self.assertEqual(nf_payload['usuario_em_uso'], self.usuario.nome)
+
     def test_usuario_sem_setor_da_nf_recebe_403_na_execucao(self):
         self.client.logout()
         self.client.login(username='conferente_sem_acesso', password='123456')
