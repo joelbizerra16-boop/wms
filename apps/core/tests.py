@@ -487,6 +487,31 @@ class MinutaImportacaoTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'Estrutura da minuta ainda não está sincronizada no banco')
 
+	@patch('apps.core.services.minuta_service._diagnostico_tabelas_minuta')
+	def test_upload_minuta_bloqueia_schema_inconsistente_antes_de_persistir(self, diagnostico_mock):
+		diagnostico_mock.return_value = {
+			'schema_detectado': 'postgresql',
+			'alias': 'default',
+			'tabelas_encontradas': ['core_minutaromaneio', 'core_minutaromaneioitem'],
+			'tabelas_faltantes': [],
+			'colunas_faltantes': {'core_minutaromaneio': ['tipo_minuta']},
+			'erro': '',
+			'resultado_validacao': False,
+		}
+		arquivo = SimpleUploadedFile(
+			'romaneio_schema.xlsx',
+			_build_minuta_workbook([
+				('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
+			]),
+			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
+		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'Schema da minuta inconsistente')
+		self.assertFalse(MinutaRomaneio.objects.filter(codigo_romaneio='5081690').exists())
+
 	@override_settings(
 		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
 		STORAGES={

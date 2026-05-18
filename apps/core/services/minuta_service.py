@@ -753,14 +753,9 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
         raise MinutaImportacaoError('Nenhuma prévia de importação da minuta foi encontrada para confirmação.')
     diagnostico_tabelas = _diagnostico_tabelas_minuta()
     if not diagnostico_tabelas['resultado_validacao']:
-        logger.warning(
-            'DEBUG MINUTA: validacao_estrutura_nao_bloqueante schema=%s alias=%s tabelas_encontradas=%s tabelas_faltantes=%s erro=%s',
-            diagnostico_tabelas.get('schema_detectado'),
-            diagnostico_tabelas.get('alias'),
-            diagnostico_tabelas.get('tabelas_encontradas'),
-            diagnostico_tabelas.get('tabelas_faltantes'),
-            diagnostico_tabelas.get('erro'),
-        )
+        mensagem = _mensagem_erro_estrutura_minuta(diagnostico_tabelas)
+        logger.error('MINUTA_SCHEMA_INVALID %s', mensagem)
+        raise MinutaImportacaoError(mensagem)
     if validar_restricoes:
         _validar_preview_minuta_confirmavel(preview)
 
