@@ -3,6 +3,7 @@ from rest_framework.test import APIClient
 
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
+from apps.conferencia.services.conferencia_service import pedido_esta_liberado_para_conferencia
 from apps.nf.models import NotaFiscal, NotaFiscalItem
 from apps.produtos.models import Produto
 from apps.rotas.models import Rota
@@ -321,6 +322,22 @@ class ConferenciaAPITests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self._message(response), 'NF cancelada não pode ser processada')
+
+    def test_regra_unica_remove_nf_da_lista_e_bloqueia_inicio_quando_separacao_regride(self):
+        self.client.get('/api/conferencia/nfs/')
+        item_filtro = TarefaItem.objects.get(tarefa=self.tarefa_2, produto=self.produto_2)
+        item_filtro.quantidade_separada = '0.00'
+        item_filtro.save(update_fields=['quantidade_separada', 'updated_at'])
+
+        validacao = pedido_esta_liberado_para_conferencia(NotaFiscal.objects.get(id=self.nf.id))
+        response_lista = self.client.get('/api/conferencia/nfs/')
+        response_inicio = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
+
+        self.assertFalse(validacao['liberado'])
+        self.assertEqual(validacao['status_separacao'], 'PENDENTE')
+        self.assertEqual(self._body(response_lista), [])
+        self.assertEqual(response_inicio.status_code, 400)
+        self.assertEqual(self._message(response_inicio), 'Pedido ainda não foi separado')
 
     def test_conferencia_liberada_permita_finalizar_com_pendencia(self):
         conferencia = Conferencia.objects.create(

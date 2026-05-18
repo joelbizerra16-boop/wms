@@ -4,10 +4,10 @@ from django.dispatch import receiver
 
 from apps.conferencia.models import Conferencia
 from apps.nf.models import NotaFiscal, NotaFiscalItem
-from apps.tarefas.models import Tarefa
+from apps.tarefas.models import Tarefa, TarefaItem
 
 
-STRUCTURAL_MODELS = (NotaFiscal, NotaFiscalItem, Tarefa, Conferencia)
+STRUCTURAL_MODELS = (NotaFiscal, NotaFiscalItem, Tarefa, TarefaItem, Conferencia)
 
 
 def _invalidar_fila_conferencia(motivo):
@@ -24,6 +24,7 @@ def _invalidar_fila_conferencia(motivo):
 @receiver(post_save, sender=NotaFiscal)
 @receiver(post_save, sender=NotaFiscalItem)
 @receiver(post_save, sender=Tarefa)
+@receiver(post_save, sender=TarefaItem)
 @receiver(post_save, sender=Conferencia)
 def invalidar_conferencia_apos_save(sender, **kwargs):
     _invalidar_fila_conferencia(f'{sender.__name__.lower()}_save')
@@ -32,6 +33,7 @@ def invalidar_conferencia_apos_save(sender, **kwargs):
 @receiver(post_delete, sender=NotaFiscal)
 @receiver(post_delete, sender=NotaFiscalItem)
 @receiver(post_delete, sender=Tarefa)
+@receiver(post_delete, sender=TarefaItem)
 @receiver(post_delete, sender=Conferencia)
 def invalidar_conferencia_apos_delete(sender, **kwargs):
     _invalidar_fila_conferencia(f'{sender.__name__.lower()}_delete')

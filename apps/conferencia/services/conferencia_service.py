@@ -285,31 +285,53 @@ def _resumo_separacao_nf(nf):
     }
 
 
-def avaliar_liberacao_conferencia(nf):
-    """
-    Regra obrigatória de fluxo:
-    - Conferência só libera quando separação estiver concluída e sem itens pendentes.
-    - Exceção: quando não houver item de separação relacionado para a NF, considera
-      'SEPARADO_COM_RESTRICAO' e permite seguir.
-    """
+def _separado_em_nf(nf):
+    itens_prefetch = _itens_separacao_prefetch_nf(nf)
+    if itens_prefetch is not None:
+        datas = [getattr(item, 'data_bipagem', None) for item in itens_prefetch if getattr(item, 'data_bipagem', None)]
+        return max(datas) if datas else None
+
+    item = (
+        _itens_separacao_nf_qs(nf)
+        .exclude(data_bipagem__isnull=True)
+        .order_by('-data_bipagem')
+        .values('data_bipagem')
+        .first()
+    )
+    return item['data_bipagem'] if item else None
+
+
+def pedido_esta_liberado_para_conferencia(nf):
     resumo = _resumo_separacao_nf(nf)
-    if resumo['status_separacao'] != 'SEPARADO':
-        return {
-            'liberado': False,
-            'motivo': 'Pedido ainda não foi separado',
-            'status_fluxo': 'BLOQUEADO',
-            'itens_pendentes': resumo['itens_pendentes'],
-            'total_itens': resumo['total_itens'],
-            'itens_separados': resumo['itens_separados'],
-        }
-    return {
-        'liberado': True,
-        'motivo': '',
-        'status_fluxo': 'AGUARDANDO',
-        'itens_pendentes': 0,
+    separado_em = _separado_em_nf(nf)
+    liberado = resumo['status_separacao'] == 'SEPARADO'
+    resultado = {
+        'liberado': liberado,
+        'motivo': '' if liberado else 'Pedido ainda não foi separado',
+        'status_fluxo': 'AGUARDANDO' if liberado else 'BLOQUEADO',
+        'status_separacao': resumo['status_separacao'],
+        'separado_em': separado_em.isoformat() if separado_em else None,
+        'itens_pendentes': resumo['itens_pendentes'],
         'total_itens': resumo['total_itens'],
         'itens_separados': resumo['itens_separados'],
     }
+    logger.info(
+        'CONFERENCIA_LIBERACAO_DEBUG nf_id=%s nf_numero=%s status_separacao=%s separado_em=%s itens_separados=%s itens_pendentes=%s total_itens=%s liberado=%s motivo=%s',
+        getattr(nf, 'id', None),
+        getattr(nf, 'numero', ''),
+        resultado['status_separacao'],
+        resultado['separado_em'],
+        resultado['itens_separados'],
+        resultado['itens_pendentes'],
+        resultado['total_itens'],
+        resultado['liberado'],
+        resultado['motivo'],
+    )
+    return resultado
+
+
+def avaliar_liberacao_conferencia(nf):
+    return pedido_esta_liberado_para_conferencia(nf)
 
 
 def listar_nfs_disponiveis(
@@ -351,6 +373,7 @@ def listar_nfs_disponiveis(
             'quantidade_total',
             'quantidade_separada',
             'possui_restricao',
+            'data_bipagem',
             'tarefa__id',
             'tarefa__status',
         ),
@@ -380,6 +403,7 @@ def listar_nfs_disponiveis(
             'quantidade_total',
             'quantidade_separada',
             'possui_restricao',
+            'data_bipagem',
             'tarefa__id',
             'tarefa__status',
         ),
@@ -445,7 +469,7 @@ def listar_nfs_disponiveis(
             if not consistencia['valida']:
                 continue
 
-        validacao_fluxo = avaliar_liberacao_conferencia(nf)
+        validacao_fluxo = pedido_esta_liberado_para_conferencia(nf)
         if not _nf_pertence_a_setores_usuario(nf, usuario):
             continue
 
@@ -474,7 +498,7 @@ def listar_nfs_disponiveis(
             [conferencia for conferencia in conferencias_relacionadas if conferencia.status in STATUS_CONFERENCIA_EM_FLUXO]
         )
 
-        status_separacao = 'SEPARADO' if validacao_fluxo['liberado'] else 'PENDENTE'
+        status_separacao = validacao_fluxo['status_separacao']
         possui_liberacao_restricao = (
             nf.status == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
             or any(conferencia.status == Conferencia.Status.LIBERADO_COM_RESTRICAO for conferencia in conferencias_relacionadas)
@@ -494,14 +518,14 @@ def listar_nfs_disponiveis(
         }
         fluxo_direto_balcao = bool(nf.balcao)
         # Conferencia so lista pedido totalmente separado.
-        if status_separacao != 'SEPARADO':
+        if not validacao_fluxo['liberado']:
             continue
         if itens_pendentes_conferencia <= 0 and conferencia_em_fluxo_obj is None:
             continue
         if not (
             status_elegivel
             and (
-                separacao_concluida_nf(nf)
+                validacao_fluxo['liberado']
                 or possui_liberacao_restricao
                 or conferencia_em_fluxo_obj is not None
                 or fluxo_direto_balcao

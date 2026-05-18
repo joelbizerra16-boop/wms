@@ -231,6 +231,19 @@ class ConferenciaWebTests(TestCase):
         conferencia.refresh_from_db()
         self.assertEqual(conferencia.status, Conferencia.Status.CONCLUIDO_COM_RESTRICAO)
 
+    def test_nf_nao_aparece_na_lista_nem_aceita_quando_separacao_nao_esta_realmente_concluida(self):
+        self.client.get('/conferencia/')
+        item = TarefaItem.objects.get(tarefa=self.tarefa, produto=self.produto)
+        item.quantidade_separada = '0.00'
+        item.save(update_fields=['quantidade_separada', 'updated_at'])
+
+        response_lista = self.client.get('/conferencia/')
+        response_aceite = self.client.post(f'/conferencia/{self.nf.id}/', {'acao': 'iniciar'})
+
+        self.assertNotContains(response_lista, self.nf.numero)
+        self.assertEqual(response_aceite.status_code, 403)
+        self.assertIn('Pedido ainda não foi separado', response_aceite.content.decode('utf-8'))
+
     def test_usuario_sem_setor_da_nf_recebe_403_na_execucao(self):
         self.client.logout()
         self.client.login(username='conferente_sem_acesso', password='123456')
