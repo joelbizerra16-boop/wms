@@ -1,9 +1,9 @@
 from django.db import migrations
 
-from apps.core.db_fixes import aplicar_reconcile_schema_minuta_postgresql
-
 
 def reconciliar_schema_minuta_postgresql(apps, schema_editor):
+    from apps.core.db_fixes import aplicar_reconcile_schema_minuta_postgresql
+
     aplicar_reconcile_schema_minuta_postgresql(schema_editor.connection)
 
 

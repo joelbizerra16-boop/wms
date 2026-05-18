@@ -4,7 +4,7 @@ services:
     env: python
     # Comandos inline: Render Dashboard costuma ignorar render.yaml se o servico nao for Blueprint.
     # Se o deploy falhar, copie estes 3 comandos em Settings > Build & Deploy.
-    buildCommand: pip install -r requirements.txt && DJANGO_SETTINGS_MODULE=config.settings.build python manage.py collectstatic --noinput
+    buildCommand: bash build.sh
     preDeployCommand: python manage.py prepare_production_deploy && python manage.py create_render_superuser && python manage.py clearsessions
     startCommand: python manage.py reconcile_minuta_schema && gunicorn config.wsgi:application --worker-class gthread --workers 4 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
     envVars:
