@@ -73,6 +73,7 @@ class MinutaRomaneio(BaseModel):
 		indexes = [
 			models.Index(fields=['codigo_romaneio', 'data_saida'], name='min_rom_cod_data_ix'),
 			models.Index(fields=['created_at'], name='min_rom_created_ix'),
+			models.Index(fields=['importacao_lote', 'created_at'], name='min_rom_lote_created_ix'),
 			models.Index(fields=['status_expedicao', 'pdf_gerado_em'], name='min_rom_exp_pdf_ix'),
 		]
 

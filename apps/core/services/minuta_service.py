@@ -30,10 +30,13 @@ MINUTA_STATUS_CANCELADA = {'NF CANCELADA', 'CANCELADA'}
 MINUTA_STATUS_INCONSISTENTE = {'NF INCONSISTENTE', 'INCONSISTENTE', 'NF COM PROBLEMA', 'NF DENEGADA', 'NF BLOQUEADA', 'NF INATIVA'}
 MINUTA_STATUS_DUPLICADA = {'DUPLICADA', 'DUPLI'}
 MINUTA_CARDS_CACHE_TTL = 10
+MINUTA_LOTE_ATIVO_CACHE_TTL = 15
 MINUTA_RETENCAO_DIAS = 10
 MINUTA_CACHE_VERSION_KEY = 'minuta:cache:version'
+MINUTA_LOTE_ATIVO_CACHE_PREFIX = 'minuta:lote_ativo'
 MINUTA_ABERTURA_LIMITE = 50
 MINUTA_BUSCA_LIMITE = 30
+MINUTA_LOTE_ATIVO_VAZIO = '__sem_lote__'
 
 
 def _log_tempo_minuta(evento, total_ms, **campos):
@@ -847,9 +850,18 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
     }
 
 
+def _cache_key_lote_minuta_ativo():
+    versao = cache.get(MINUTA_CACHE_VERSION_KEY, 0)
+    return f'{MINUTA_LOTE_ATIVO_CACHE_PREFIX}:{versao}'
+
+
 def _obter_lote_minuta_ativo():
+    cache_key = _cache_key_lote_minuta_ativo()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return None if cached == MINUTA_LOTE_ATIVO_VAZIO else cached
     try:
-        return (
+        lote = (
             MinutaRomaneio.objects.order_by('-created_at', '-id')
             .values_list('importacao_lote', flat=True)
             .first()
@@ -857,6 +869,8 @@ def _obter_lote_minuta_ativo():
     except (ProgrammingError, OperationalError):
         logger.exception('ERRO REAL MINUTA: falha ao obter lote ativo da minuta.')
         return None
+    cache.set(cache_key, lote or MINUTA_LOTE_ATIVO_VAZIO, MINUTA_LOTE_ATIVO_CACHE_TTL)
+    return lote
 
 
 def _queryset_base_minuta(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
@@ -1016,7 +1030,7 @@ def _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim):
 
 def obter_cards_minuta(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
     inicio = time.perf_counter()
-    diagnostico = _diagnostico_tabelas_minuta()
+    diagnostico = diagnosticar_schema_minuta(connection)
     if not diagnostico['resultado_validacao']:
         mensagem = _mensagem_erro_estrutura_minuta(diagnostico)
         logger.error('MINUTA_SCHEMA_INVALID %s', mensagem)
