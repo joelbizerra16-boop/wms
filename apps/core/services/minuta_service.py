@@ -1,7 +1,6 @@
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-import hashlib
 import logging
 import re
 import time
@@ -9,12 +8,11 @@ import unicodedata
 import uuid
 
 from django.core.cache import cache
-from django.db import connection, OperationalError, ProgrammingError, transaction
+from django.db import OperationalError, ProgrammingError, transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.utils import timezone
 from openpyxl import load_workbook
 
-from apps.core.db_fixes import diagnosticar_schema_minuta, mensagem_schema_minuta_inconsistente
 from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
 from apps.nf.models import EntradaNF, NotaFiscal, nota_fiscal_bairro_valor
 from apps.nf.services.importador_xml import ImportacaoXMLError, analisar_xml_nfe
@@ -31,7 +29,6 @@ MINUTA_STATUS_INCONSISTENTE = {'NF INCONSISTENTE', 'INCONSISTENTE', 'NF COM PROB
 MINUTA_STATUS_DUPLICADA = {'DUPLICADA', 'DUPLI'}
 MINUTA_CARDS_CACHE_TTL = 10
 MINUTA_LOTE_ATIVO_CACHE_TTL = 15
-MINUTA_RETENCAO_DIAS = 10
 MINUTA_CACHE_VERSION_KEY = 'minuta:cache:version'
 MINUTA_LOTE_ATIVO_CACHE_PREFIX = 'minuta:lote_ativo'
 MINUTA_ABERTURA_LIMITE = 50
@@ -59,10 +56,6 @@ def invalidar_cache_minuta():
         cache.set(MINUTA_CACHE_VERSION_KEY, cache.get(MINUTA_CACHE_VERSION_KEY, 0) + 1, None)
     except Exception:
         logger.exception('ERRO MINUTA: falha ao invalidar cache da minuta.')
-
-
-def retencao_cutoff_date():
-    return timezone.localdate() - timedelta(days=MINUTA_RETENCAO_DIAS)
 
 
 def _inicio_dia_local(valor):
@@ -113,18 +106,14 @@ def buscar_vinculo_nf_historico(numero_nota, *, excluir_romaneio_codigo=None):
     numero = _texto_limpo(numero_nota)
     if not numero:
         return None
-    diagnostico = _diagnostico_tabelas_minuta()
-    if not diagnostico['resultado_validacao']:
-        logger.error('MINUTA_SCHEMA_INVALID %s', _mensagem_erro_estrutura_minuta(diagnostico))
-        return None
     queryset = (
         MinutaRomaneioItem.objects.select_related(
             'romaneio',
             'romaneio__usuario_importacao',
             'romaneio__pdf_gerado_por',
         )
-        .filter(numero_nota=numero, romaneio__created_at__date__gte=retencao_cutoff_date())
-        .order_by('-romaneio__pdf_gerado_em', '-romaneio__created_at', '-id')
+        .filter(numero_nota=numero)
+        .order_by('-romaneio__created_at', '-id')
     )
     if excluir_romaneio_codigo:
         queryset = queryset.exclude(romaneio__codigo_romaneio=excluir_romaneio_codigo)
@@ -134,84 +123,8 @@ def buscar_vinculo_nf_historico(numero_nota, *, excluir_romaneio_codigo=None):
     return item
 
 
-def registrar_minuta_pdf_gerada(itens, usuario, *, carregamento=True, entrega=False):
-    if not itens:
-        return []
-    tipos = []
-    if carregamento:
-        tipos.append('CARREGAMENTO')
-    if entrega:
-        tipos.append('ENTREGA')
-    tipo_minuta = ','.join(tipos) or 'CARREGAMENTO'
-    agora = timezone.now()
-    romaneios_atualizados = []
-
-    romaneio_ids = {item.romaneio_id for item in itens if getattr(item, 'romaneio_id', None)}
-    if not romaneio_ids:
-        return []
-    with transaction.atomic():
-        queryset_romaneios = MinutaRomaneio.objects.filter(id__in=romaneio_ids)
-        if connection.vendor == 'postgresql':
-            queryset_romaneios = queryset_romaneios.select_for_update()
-        for romaneio in queryset_romaneios:
-            hash_base = f'{romaneio.id}:{agora.isoformat()}:{tipo_minuta}:{romaneio.codigo_romaneio}'
-            romaneio.pdf_gerado_em = agora
-            romaneio.pdf_gerado_por = usuario
-            romaneio.tipo_minuta = tipo_minuta
-            romaneio.hash_operacional = hashlib.sha256(hash_base.encode('utf-8')).hexdigest()[:32]
-            romaneio.status_expedicao = MinutaRomaneio.StatusExpedicao.IMPRESSA
-            romaneio.save(
-                update_fields=[
-                    'pdf_gerado_em',
-                    'pdf_gerado_por',
-                    'tipo_minuta',
-                    'hash_operacional',
-                    'status_expedicao',
-                    'updated_at',
-                ]
-            )
-            romaneios_atualizados.append(romaneio)
-
-    invalidar_cache_minuta()
-    logger.info(
-        'MINUTA_PDF_PERSISTIDA romaneios=%s user_id=%s tipo=%s',
-        len(romaneios_atualizados),
-        getattr(usuario, 'id', None),
-        tipo_minuta,
-    )
-    return romaneios_atualizados
-
-
-def limpar_minutas_antigas(*, dias=None):
-    dias_retencao = dias if dias is not None else MINUTA_RETENCAO_DIAS
-    cutoff = timezone.localdate() - timedelta(days=dias_retencao)
-    queryset = MinutaRomaneio.objects.filter(created_at__date__lt=cutoff)
-    total_romaneios, _ = queryset.delete()
-    invalidar_cache_minuta()
-    logger.info('MINUTA_CLEANUP romaneios_removidos=%s cutoff=%s', total_romaneios, cutoff)
-    return total_romaneios
-
-
 class MinutaImportacaoError(Exception):
     pass
-
-
-def _diagnostico_tabelas_minuta():
-    diagnostico = diagnosticar_schema_minuta(connection)
-    logger.info(
-        'MINUTA_SCHEMA_CHECK schema_detectado=%s alias=%s tabelas_encontradas=%s tabelas_faltantes=%s colunas_faltantes=%s validacao=%s',
-        diagnostico['schema_detectado'],
-        diagnostico['alias'],
-        diagnostico.get('tabelas_encontradas', []),
-        diagnostico.get('tabelas_faltantes', []),
-        diagnostico.get('colunas_faltantes', {}),
-        diagnostico['resultado_validacao'],
-    )
-    return diagnostico
-
-
-def _mensagem_erro_estrutura_minuta(diagnostico):
-    return mensagem_schema_minuta_inconsistente(diagnostico)
 
 
 def get_minuta_inconsistencias(linhas):
@@ -622,24 +535,14 @@ def montar_preview_importacao_minuta(arquivo, usuario):
     )
     logger.info('DEBUG MINUTA: xmls_encontrados=%s', len(xml_por_numero))
 
-    diagnostico_tabelas = _diagnostico_tabelas_minuta()
-    if diagnostico_tabelas['resultado_validacao']:
-        itens_existentes = list(
-            MinutaRomaneioItem.objects.select_related(
-                'romaneio__usuario_importacao',
-                'romaneio__pdf_gerado_por',
-            )
-            .filter(
-                numero_nota__in=numeros_notas,
-                romaneio__created_at__date__gte=retencao_cutoff_date(),
-            )
-            .order_by('numero_nota', '-romaneio__pdf_gerado_em', '-romaneio__data_saida', '-created_at')
+    itens_existentes = list(
+        MinutaRomaneioItem.objects.select_related(
+            'romaneio__usuario_importacao',
+            'romaneio__pdf_gerado_por',
         )
-    else:
-        itens_existentes = []
-        mensagem_estrutura = _mensagem_erro_estrutura_minuta(diagnostico_tabelas)
-        logger.error(mensagem_estrutura)
-        erros.append(f'{mensagem_estrutura}. O preview será exibido sem validar duplicidades históricas.')
+        .filter(numero_nota__in=numeros_notas)
+        .order_by('numero_nota', '-romaneio__created_at', '-created_at')
+    )
     itens_por_nota = defaultdict(list)
     for item in itens_existentes:
         itens_por_nota[item.numero_nota].append(item)
@@ -660,12 +563,10 @@ def montar_preview_importacao_minuta(arquivo, usuario):
         duplicidade = None
         for item_existente in itens_por_nota.get(linha['numero_nota'], []):
             romaneio_existente = item_existente.romaneio
-            mesmo_romaneio = romaneio_existente.codigo_romaneio == linha['codigo_romaneio']
-            if mesmo_romaneio and not romaneio_existente.pdf_gerado_em:
+            if romaneio_existente.codigo_romaneio == linha['codigo_romaneio']:
                 continue
-            if romaneio_existente.pdf_gerado_em or romaneio_existente.codigo_romaneio != linha['codigo_romaneio']:
-                duplicidade = item_existente
-                break
+            duplicidade = item_existente
+            break
 
         status = referencia_nf['status']
         importavel = referencia_nf['importavel']
@@ -754,11 +655,6 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
     logger.info('DEBUG MINUTA: confirmacao_inicio linhas=%s user_id=%s', len(linhas), getattr(usuario, 'id', None))
     if not linhas:
         raise MinutaImportacaoError('Nenhuma prévia de importação da minuta foi encontrada para confirmação.')
-    diagnostico_tabelas = _diagnostico_tabelas_minuta()
-    if not diagnostico_tabelas['resultado_validacao']:
-        mensagem = _mensagem_erro_estrutura_minuta(diagnostico_tabelas)
-        logger.error('MINUTA_SCHEMA_INVALID %s', mensagem)
-        raise MinutaImportacaoError(mensagem)
     if validar_restricoes:
         _validar_preview_minuta_confirmavel(preview)
 
@@ -774,10 +670,7 @@ def confirmar_importacao_minuta(preview, usuario, validar_restricoes=True):
     with transaction.atomic():
         codigos_romaneio = list(linhas_por_romaneio.keys())
         lote_importacao = uuid.uuid4()
-        MinutaRomaneio.objects.filter(
-            codigo_romaneio__in=codigos_romaneio,
-            pdf_gerado_em__isnull=True,
-        ).delete()
+        MinutaRomaneio.objects.filter(codigo_romaneio__in=codigos_romaneio).delete()
 
         for codigo_romaneio, linhas_romaneio in linhas_por_romaneio.items():
             logger.info('DEBUG MINUTA: criando_romaneio codigo=%s itens=%s', codigo_romaneio, len(linhas_romaneio))
@@ -910,8 +803,6 @@ def _queryset_base_minuta(romaneio='', status='', busca='', data_inicio=None, da
         'romaneio__status_expedicao',
         'romaneio__importacao_lote',
     )
-    queryset = queryset.filter(romaneio__created_at__gte=_inicio_dia_local(retencao_cutoff_date()))
-
     if historico:
         if data_inicio is not None:
             queryset = queryset.filter(romaneio__created_at__gte=_inicio_dia_local(data_inicio))
@@ -1030,30 +921,6 @@ def _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim):
 
 def obter_cards_minuta(romaneio='', status='', busca='', data_inicio=None, data_fim=None):
     inicio = time.perf_counter()
-    diagnostico = diagnosticar_schema_minuta(connection)
-    if not diagnostico['resultado_validacao']:
-        mensagem = _mensagem_erro_estrutura_minuta(diagnostico)
-        logger.error('MINUTA_SCHEMA_INVALID %s', mensagem)
-        payload = {
-            'resumo': {
-                'romaneios': 0,
-                'itens': 0,
-                'erros': 1,
-                'duplicados': 0,
-                'bloqueadas': 0,
-                'nfs_nao_localizadas': 0,
-                'xml_erros': 0,
-                'inconsistencias': 0,
-                'total_problemas': 0,
-                'atualizacao': 'Manual',
-            },
-            'minuta_inconsistencias': get_minuta_inconsistencias([]),
-            'schema_inconsistente': True,
-            'schema_mensagem': mensagem,
-        }
-        total_ms = round((time.perf_counter() - inicio) * 1000, 2)
-        _log_tempo_minuta('MINUTA_QUERY_MS', total_ms, etapa='cards_schema_guard', busca=busca or romaneio or '')
-        return payload
     cache_key = _minuta_cards_cache_key(romaneio, status, busca, data_inicio, data_fim)
     cached = cache.get(cache_key)
     if cached is not None:

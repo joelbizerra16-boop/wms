@@ -30,12 +30,9 @@ from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.core.models import MinutaRomaneio, MinutaRomaneioItem
 from apps.core.services.minuta_service import (
     MinutaImportacaoError,
-    buscar_vinculo_nf_historico,
     consultar_minuta_itens_queryset,
-	limite_operacional_minuta,
-    limpar_minutas_antigas,
+    limite_operacional_minuta,
     listar_minuta_itens,
-    registrar_minuta_pdf_gerada,
 )
 from apps.core.views_web import MAX_XML_FILES_POR_ENVIO
 from apps.logs.models import LiberacaoDivergencia, Log
@@ -320,25 +317,6 @@ class DashboardWebTests(TestCase):
 		self.assertContains(response, 'Carregando listagem de minutas', html=False)
 		self.assertNotContains(response, 'setInterval', html=False)
 
-	@patch('apps.core.views.diagnosticar_schema_minuta')
-	@patch('apps.core.views_minuta.diagnostico_schema_minuta')
-	def test_minuta_nao_quebra_quando_schema_esta_inconsistente(self, diagnostico_partial_mock, diagnostico_view_mock):
-		diagnostico = {
-			'resultado_validacao': False,
-			'erro': '',
-			'tabelas_faltantes': [],
-			'colunas_faltantes': {'core_minutaromaneio': ['status_expedicao']},
-		}
-		diagnostico_view_mock.return_value = diagnostico
-		diagnostico_partial_mock.return_value = diagnostico
-
-		response = self.client.get('/minuta/')
-
-		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Schema da minuta inconsistente')
-		self.assertFalse(response.context['defer_load'])
-		self.assertTrue(response.context['schema_inconsistente'])
-
 
 @override_settings(ROOT_URLCONF='config.urls')
 class MinutaImportacaoTests(TestCase):
@@ -486,31 +464,6 @@ class MinutaImportacaoTests(TestCase):
 
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'Estrutura da minuta ainda não está sincronizada no banco')
-
-	@patch('apps.core.services.minuta_service._diagnostico_tabelas_minuta')
-	def test_upload_minuta_bloqueia_schema_inconsistente_antes_de_persistir(self, diagnostico_mock):
-		diagnostico_mock.return_value = {
-			'schema_detectado': 'postgresql',
-			'alias': 'default',
-			'tabelas_encontradas': ['core_minutaromaneio', 'core_minutaromaneioitem'],
-			'tabelas_faltantes': [],
-			'colunas_faltantes': {'core_minutaromaneio': ['tipo_minuta']},
-			'erro': '',
-			'resultado_validacao': False,
-		}
-		arquivo = SimpleUploadedFile(
-			'romaneio_schema.xlsx',
-			_build_minuta_workbook([
-				('1', '29664', 'TRANSPORTES LUCAS', 'TRANSPORTES LUCAS', 'Cliente Minuta', 'Cliente Minuta', '5081690', self.nf.numero, '9999924589', 'MXS_15', '57.6', '0', '2186.36'),
-			]),
-			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-		)
-
-		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
-
-		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Schema da minuta inconsistente')
-		self.assertFalse(MinutaRomaneio.objects.filter(codigo_romaneio='5081690').exists())
 
 	@override_settings(
 		STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
@@ -1915,217 +1868,6 @@ class MinutaImportacaoTests(TestCase):
 		self.assertContains(response, 'conferencia-feedback', html=False)
 		self.assertNotContains(response, '>Finalizar<', html=False)
 		self.assertNotContains(response, '<h1>Conferência</h1>', html=False)
-
-
-@override_settings(ROOT_URLCONF='config.urls')
-class MinutaPersistenciaTests(TestCase):
-	def setUp(self):
-		from django.core.cache import cache
-		import uuid
-
-		cache.clear()
-		self._uuid = uuid
-		self.client = Client()
-		self.usuario = Usuario.objects.create_user(
-			username='gestor_minuta_persist',
-			nome='admin2',
-			perfil=Usuario.Perfil.GESTOR,
-			setores=[Setor.Codigo.FILTROS],
-			password='123456',
-			is_active=True,
-		)
-		self.client.login(username='gestor_minuta_persist', password='123456')
-
-	def test_registrar_pdf_marca_romaneio_impresso(self):
-		romaneio = MinutaRomaneio.objects.create(
-			codigo_romaneio='5081791',
-			data_saida=timezone.localdate(),
-			motorista='JOAO',
-			usuario_importacao=self.usuario,
-		)
-		item = MinutaRomaneioItem.objects.create(
-			romaneio=romaneio,
-			numero_nota='1416034',
-			status='LIBERADA',
-		)
-		registrar_minuta_pdf_gerada([item], self.usuario, carregamento=True, entrega=False)
-		romaneio.refresh_from_db()
-		self.assertIsNotNone(romaneio.pdf_gerado_em)
-		self.assertEqual(romaneio.pdf_gerado_por_id, self.usuario.id)
-		self.assertEqual(romaneio.status_expedicao, MinutaRomaneio.StatusExpedicao.IMPRESSA)
-		self.assertTrue(romaneio.hash_operacional)
-
-	def test_busca_nf_consulta_historico_fora_do_lote_ativo(self):
-		lote_antigo = self._uuid.uuid4()
-		romaneio_antigo = MinutaRomaneio.objects.create(
-			codigo_romaneio='5081001',
-			importacao_lote=lote_antigo,
-			data_saida=timezone.localdate(),
-			motorista='JOAO',
-			usuario_importacao=self.usuario,
-		)
-		MinutaRomaneioItem.objects.create(romaneio=romaneio_antigo, numero_nota='1416034', status='LIBERADA')
-
-		lote_novo = self._uuid.uuid4()
-		romaneio_novo = MinutaRomaneio.objects.create(
-			codigo_romaneio='5081002',
-			importacao_lote=lote_novo,
-			data_saida=timezone.localdate(),
-			motorista='MARIA',
-			usuario_importacao=self.usuario,
-		)
-		MinutaRomaneioItem.objects.create(romaneio=romaneio_novo, numero_nota='1419999', status='LIBERADA')
-
-		linhas_padrao, _ = listar_minuta_itens()
-		self.assertNotIn('1416034', {linha['numero_nota'] for linha in linhas_padrao})
-
-		historico = consultar_minuta_itens_queryset(busca='1416034')
-		self.assertTrue(historico.filter(numero_nota='1416034').exists())
-
-	def test_api_historico_nf_retorna_vinculo(self):
-		romaneio = MinutaRomaneio.objects.create(
-			codigo_romaneio='5081791',
-			data_saida=timezone.localdate(),
-			motorista='JOAO',
-			usuario_importacao=self.usuario,
-		)
-		MinutaRomaneioItem.objects.create(romaneio=romaneio, numero_nota='1416034', status='LIBERADA')
-		registrar_minuta_pdf_gerada(
-			list(MinutaRomaneioItem.objects.filter(romaneio=romaneio)),
-			self.usuario,
-		)
-
-		response = self.client.get('/api/minuta/historico/?numero=1416034')
-		self.assertEqual(response.status_code, 200)
-		payload = response.json()
-		self.assertTrue(payload['encontrado'])
-		self.assertEqual(payload['vinculo']['romaneio'], '5081791')
-		self.assertEqual(payload['vinculo']['motorista'], 'JOAO')
-		self.assertTrue(payload['vinculo']['pdf_gerado'])
-
-	@patch('apps.core.views.diagnosticar_schema_minuta')
-	def test_pdf_minuta_retorna_503_quando_schema_esta_inconsistente(self, diagnostico_mock):
-		diagnostico_mock.return_value = {
-			'resultado_validacao': False,
-			'erro': '',
-			'tabelas_faltantes': [],
-			'colunas_faltantes': {'core_minutaromaneio': ['status_expedicao']},
-		}
-
-		response = self.client.get('/minuta/pdf/')
-
-		self.assertEqual(response.status_code, 503)
-		self.assertIn(b'Schema da minuta inconsistente', response.content)
-
-	def test_api_lista_limita_abertura_padrao_em_50_registros(self):
-		romaneio = MinutaRomaneio.objects.create(
-			codigo_romaneio='5083001',
-			importacao_lote=self._uuid.uuid4(),
-			data_saida=timezone.localdate(),
-			motorista='JOAO',
-			usuario_importacao=self.usuario,
-		)
-		for indice in range(55):
-			MinutaRomaneioItem.objects.create(
-				romaneio=romaneio,
-				numero_nota=f'1417{indice:03d}',
-				status='LIBERADA',
-			)
-
-		response = self.client.get('/api/minuta/lista/')
-
-		self.assertEqual(response.status_code, 200)
-		self.assertEqual(len(response.context['linhas']), limite_operacional_minuta())
-		self.assertTrue(response.context['has_next'])
-
-	@patch('apps.core.views_minuta.diagnostico_schema_minuta')
-	def test_api_lista_retorna_aviso_quando_schema_esta_inconsistente(self, diagnostico_mock):
-		diagnostico_mock.return_value = {
-			'resultado_validacao': False,
-			'erro': '',
-			'tabelas_faltantes': [],
-			'colunas_faltantes': {'core_minutaromaneio': ['status_expedicao']},
-		}
-
-		response = self.client.get('/api/minuta/lista/')
-
-		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Schema da minuta inconsistente')
-
-	def test_api_lista_limita_busca_historica_em_30_registros(self):
-		lote = self._uuid.uuid4()
-		romaneio = MinutaRomaneio.objects.create(
-			codigo_romaneio='BUSCA-30',
-			importacao_lote=lote,
-			data_saida=timezone.localdate(),
-			motorista='MARIA',
-			usuario_importacao=self.usuario,
-		)
-		for indice in range(35):
-			MinutaRomaneioItem.objects.create(
-				romaneio=romaneio,
-				numero_nota=f'1416{indice:03d}',
-				status='LIBERADA',
-			)
-
-		response = self.client.get('/api/minuta/lista/', {'busca': '1416'})
-
-		self.assertEqual(response.status_code, 200)
-		self.assertEqual(len(response.context['linhas']), limite_operacional_minuta(busca='1416'))
-		self.assertTrue(response.context['has_next'])
-
-	def test_importacao_nao_remove_romaneio_com_pdf_gerado(self):
-		romaneio_pdf = MinutaRomaneio.objects.create(
-			codigo_romaneio='5081690',
-			data_saida=timezone.localdate(),
-			motorista='JOAO',
-			usuario_importacao=self.usuario,
-		)
-		item = MinutaRomaneioItem.objects.create(romaneio=romaneio_pdf, numero_nota='1416034', status='LIBERADA')
-		registrar_minuta_pdf_gerada([item], self.usuario)
-
-		arquivo = SimpleUploadedFile(
-			'romaneio_novo.xlsx',
-			_build_minuta_workbook([
-				('1', '29664', 'CLIENTE', 'CLIENTE', 'Cliente', 'Cliente', '5081690', '1418888', 'PED001', 'MXS_15', '10', '0', '100'),
-			]),
-			content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-		)
-		response = self.client.post('/minuta/', {'acao': 'upload', 'arquivo': arquivo}, follow=True)
-		self.assertEqual(response.status_code, 200)
-		self.assertTrue(MinutaRomaneio.objects.filter(id=romaneio_pdf.id, pdf_gerado_em__isnull=False).exists())
-		self.assertTrue(MinutaRomaneioItem.objects.filter(romaneio__codigo_romaneio='5081690', numero_nota='1418888').exists())
-
-	def test_cleanup_remove_minutas_antigas(self):
-		romaneio = MinutaRomaneio.objects.create(
-			codigo_romaneio='5080001',
-			data_saida=timezone.localdate(),
-			usuario_importacao=self.usuario,
-		)
-		MinutaRomaneioItem.objects.create(romaneio=romaneio, numero_nota='1410001', status='LIBERADA')
-		MinutaRomaneio.objects.filter(pk=romaneio.pk).update(created_at=timezone.now() - timedelta(days=15))
-		limpar_minutas_antigas(dias=10)
-		self.assertFalse(MinutaRomaneio.objects.filter(pk=romaneio.pk).exists())
-
-	def test_buscar_vinculo_nf_historico_prioriza_pdf(self):
-		romaneio_rascunho = MinutaRomaneio.objects.create(
-			codigo_romaneio='5082001',
-			data_saida=timezone.localdate(),
-			usuario_importacao=self.usuario,
-		)
-		MinutaRomaneioItem.objects.create(romaneio=romaneio_rascunho, numero_nota='1416034', status='LIBERADA')
-
-		romaneio_pdf = MinutaRomaneio.objects.create(
-			codigo_romaneio='5081791',
-			data_saida=timezone.localdate(),
-			motorista='JOAO',
-			usuario_importacao=self.usuario,
-		)
-		item_pdf = MinutaRomaneioItem.objects.create(romaneio=romaneio_pdf, numero_nota='1416034', status='LIBERADA')
-		registrar_minuta_pdf_gerada([item_pdf], self.usuario)
-
-		vinculo = buscar_vinculo_nf_historico('1416034')
-		self.assertEqual(vinculo.romaneio.codigo_romaneio, '5081791')
 
 
 @override_settings(ROOT_URLCONF='config.urls')

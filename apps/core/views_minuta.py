@@ -3,13 +3,11 @@ import logging
 import time
 
 from django.conf import settings
-from django.db import connection
 from django.shortcuts import render
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.db_fixes import diagnosticar_schema_minuta, mensagem_schema_minuta_inconsistente
 from apps.core.operacional_periodo import filtros_template_periodo, resolver_periodo_operacional_request
 from apps.core.services.minuta_service import (
     buscar_vinculo_nf_historico,
@@ -40,28 +38,6 @@ def _log_tempo_minuta(evento, total_ms, **campos):
         logger.warning(mensagem)
     else:
         logger.info(mensagem)
-
-
-def diagnostico_schema_minuta():
-    return diagnosticar_schema_minuta(connection)
-
-
-def contexto_schema_minuta_inconsistente():
-    diagnostico = diagnostico_schema_minuta()
-    mensagem = mensagem_schema_minuta_inconsistente(diagnostico)
-    logger.error('MINUTA_SCHEMA_INVALID %s', mensagem)
-    return {
-        'linhas': [],
-        'current_page': 1,
-        'has_previous': False,
-        'previous_page': 1,
-        'has_next': False,
-        'next_page': 2,
-        'is_paginated': False,
-        'pagination_query': '',
-        'schema_inconsistente': True,
-        'schema_mensagem': mensagem,
-    }
 
 
 def _minuta_ajax_partial(request):
@@ -102,13 +78,6 @@ def _filtros_consulta_minuta(filtros):
 
 def contexto_minuta_tabela(request, filtros):
     inicio = time.perf_counter()
-    diagnostico = diagnostico_schema_minuta()
-    if not diagnostico['resultado_validacao']:
-        contexto = contexto_schema_minuta_inconsistente()
-        contexto['filtros'] = filtros
-        total_ms = round((time.perf_counter() - inicio) * 1000, 2)
-        _log_tempo_minuta('MINUTA_QUERY_MS', total_ms, etapa='lista_schema_guard', busca=filtros.get('busca') or filtros.get('romaneio') or '')
-        return contexto
     queryset = consultar_minuta_itens_queryset(**_filtros_consulta_minuta(filtros))
     historico = consulta_minuta_historica_ativa(filtros.get('romaneio', ''), filtros.get('busca', ''))
     page_size = limite_operacional_minuta(filtros.get('romaneio', ''), filtros.get('busca', ''))
@@ -188,11 +157,6 @@ class MinutaHistoricoNFAPIView(APIView):
         numero = (request.GET.get('numero') or request.GET.get('nf') or '').strip()
         if not numero:
             return Response({'erro': 'Informe o número da NF.'}, status=400)
-        diagnostico = diagnostico_schema_minuta()
-        if not diagnostico['resultado_validacao']:
-            mensagem = mensagem_schema_minuta_inconsistente(diagnostico)
-            logger.error('MINUTA_SCHEMA_INVALID %s', mensagem)
-            return Response({'encontrado': False, 'vinculo': None, 'schema_inconsistente': True, 'erro': mensagem}, status=503)
         item = buscar_vinculo_nf_historico(numero)
         if item is None:
             return Response({'encontrado': False, 'vinculo': None})
