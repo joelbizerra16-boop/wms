@@ -11,11 +11,10 @@ RENDER_MARKERS = (
 
 
 def is_production_environment(environ=None):
+    """Runtime em producao: ENVIRONMENT=production ou marcadores Render — nao usa DATABASE_URL."""
     environ = environ or os.environ
     environment = (environ.get('ENVIRONMENT') or environ.get('APP_ENV') or '').strip().lower()
     if environment in PRODUCTION_ENV_VALUES:
-        return True
-    if environ.get('DATABASE_URL'):
         return True
     return any(environ.get(marker) for marker in RENDER_MARKERS)
 

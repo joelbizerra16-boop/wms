@@ -2,7 +2,7 @@ services:
   - type: web
     name: wms
     env: python
-    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    buildCommand: pip install -r requirements.txt && DJANGO_SETTINGS_MODULE=config.settings.build python manage.py collectstatic --noinput
     preDeployCommand: python manage.py create_render_superuser && python manage.py clearsessions
     startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --worker-class gthread --workers 4 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
     envVars:

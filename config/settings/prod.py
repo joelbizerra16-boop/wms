@@ -1,14 +1,15 @@
-import logging
-import sys
+"""
+Settings de producao (runtime Render / Gunicorn).
+
+Regra: configurar somente o necessario. Nada de validacao de host/porta no import.
+Build usa config.settings.build (ver render.yaml).
+"""
 
 import dj_database_url
 from decouple import Csv, config
-from urllib.parse import urlparse
 
 from .base import *
 
-
-logger = logging.getLogger(__name__)
 
 DEBUG = False
 SECRET_KEY = config('SECRET_KEY')
@@ -17,61 +18,33 @@ ALLOWED_HOSTS = config(
 	default='.onrender.com,127.0.0.1,localhost',
 	cast=Csv(),
 )
+
 DATABASE_URL = config('DATABASE_URL', default='').strip()
+if not DATABASE_URL:
+	raise RuntimeError('DATABASE_URL obrigatoria em producao.')
+
+DATABASES = {
+	'default': dj_database_url.config(
+		default=DATABASE_URL,
+		conn_max_age=config('DB_CONN_MAX_AGE', default=600, cast=int),
+		ssl_require=DATABASE_URL.startswith(('postgres://', 'postgresql://')),
+	),
+}
+
+_engine = (DATABASES['default'].get('ENGINE') or '').lower()
+if 'sqlite' in _engine:
+	raise RuntimeError('Producao exige PostgreSQL; SQLite nao e permitido.')
+if 'postgresql' in _engine:
+	DATABASES['default'].setdefault('OPTIONS', {})
+	DATABASES['default']['OPTIONS'].setdefault('sslmode', 'require')
+	DATABASES['default']['CONN_HEALTH_CHECKS'] = True
+
 _csrf_origins = config(
 	'CSRF_TRUSTED_ORIGINS',
 	default='https://wms-okv1.onrender.com,https://.onrender.com',
 	cast=Csv(),
 )
 CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(_csrf_origins))
-
-_COLLECTSTATIC_PHASE = len(sys.argv) > 1 and sys.argv[1] in {'collectstatic', 'compilemessages'}
-
-
-def _configure_production_database():
-	global DATABASES
-
-	if not DATABASE_URL:
-		if _COLLECTSTATIC_PHASE:
-			DATABASES = {
-				'default': {
-					'ENGINE': 'django.db.backends.postgresql',
-					'NAME': 'collectstatic',
-					'USER': 'collectstatic',
-					'PASSWORD': '',
-					'HOST': '127.0.0.1',
-					'PORT': '5432',
-				}
-			}
-			return
-		raise RuntimeError('DATABASE_URL obrigatoria em producao')
-
-	parsed_database_url = urlparse(DATABASE_URL)
-	database_host = parsed_database_url.hostname or ''
-	database_port = parsed_database_url.port
-	if not (database_host.endswith('pooler.supabase.com') and database_port == 6543):
-		logger.warning(
-			'DATABASE_URL fora do padrao recomendado Supabase pooler (host *.pooler.supabase.com:6543). '
-			'host=%s port=%s',
-			database_host,
-			database_port,
-		)
-
-	DATABASES = {
-		'default': dj_database_url.config(
-			default=DATABASE_URL,
-			conn_max_age=600,
-			ssl_require=DATABASE_URL.startswith(('postgres://', 'postgresql://')),
-		)
-	}
-	if 'postgresql' not in DATABASES['default']['ENGINE']:
-		raise RuntimeError('Producao exige PostgreSQL real; SQLite nao e permitido.')
-	DATABASES['default'].setdefault('OPTIONS', {})
-	DATABASES['default']['OPTIONS']['sslmode'] = 'require'
-	DATABASES['default']['CONN_HEALTH_CHECKS'] = True
-
-
-_configure_production_database()
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'

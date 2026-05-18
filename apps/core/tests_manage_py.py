@@ -32,55 +32,54 @@ class ManagePySettingsSelectionTests(SimpleTestCase):
                 if valor is not None:
                     os.environ[chave] = valor
 
-    def test_default_settings_module_usa_prod_quando_database_url_existe(self):
-        self.assertEqual(default_settings_module({'DATABASE_URL': 'postgresql://user:pass@host:6543/db'}), 'config.settings.prod')
+    def test_default_settings_module_usa_prod_com_environment_production(self):
+        self.assertEqual(default_settings_module({'ENVIRONMENT': 'production'}), 'config.settings.prod')
+
+    def test_default_settings_module_nao_usa_prod_apenas_por_database_url(self):
+        self.assertEqual(
+            default_settings_module({'DATABASE_URL': 'postgresql://user:pass@db.example.com:5432/postgres'}),
+            'config.settings.dev',
+        )
 
     def test_is_production_environment_usa_environment_explicito(self):
         self.assertTrue(is_production_environment({'ENVIRONMENT': 'production'}))
 
-    def _reload_prod_settings(self):
-        sys.modules.pop('config.settings.prod', None)
-        return importlib.import_module('config.settings.prod')
+    def _reload_settings(self, module_name):
+        sys.modules.pop(module_name, None)
+        return importlib.import_module(module_name)
 
-    def test_prod_settings_permite_collectstatic_sem_database_url(self):
+    def test_build_settings_usa_backend_dummy(self):
+        build_settings = self._reload_settings('config.settings.build')
+        self.assertEqual(build_settings.DATABASES['default']['ENGINE'], 'django.db.backends.dummy')
+
+    def test_prod_settings_exige_database_url(self):
         env_backup = {
             chave: os.environ.get(chave)
             for chave in ('DATABASE_URL', 'SECRET_KEY', 'DJANGO_SETTINGS_MODULE')
         }
-        argv_backup = sys.argv[:]
         try:
             os.environ.pop('DATABASE_URL', None)
             os.environ['SECRET_KEY'] = 'test-secret'
-            os.environ['DJANGO_SETTINGS_MODULE'] = 'config.settings.prod'
-            sys.argv = ['manage.py', 'collectstatic']
-            prod_settings = self._reload_prod_settings()
-            self.assertEqual(
-                prod_settings.DATABASES['default']['ENGINE'],
-                'django.db.backends.postgresql',
-            )
+            with self.assertRaises(RuntimeError):
+                self._reload_settings('config.settings.prod')
         finally:
-            sys.argv = argv_backup
             for chave, valor in env_backup.items():
                 if valor is None:
                     os.environ.pop(chave, None)
                 else:
                     os.environ[chave] = valor
 
-    def test_prod_settings_aceita_database_url_direta_supabase(self):
+    def test_prod_settings_aceita_qualquer_host_postgresql(self):
         env_backup = {
             chave: os.environ.get(chave)
             for chave in ('DATABASE_URL', 'SECRET_KEY', 'DJANGO_SETTINGS_MODULE')
         }
-        argv_backup = sys.argv[:]
         try:
             os.environ['SECRET_KEY'] = 'test-secret'
-            os.environ['DJANGO_SETTINGS_MODULE'] = 'config.settings.prod'
             os.environ['DATABASE_URL'] = 'postgresql://user:pass@db.abcdef.supabase.co:5432/postgres'
-            sys.argv = ['manage.py', 'runserver']
-            prod_settings = self._reload_prod_settings()
+            prod_settings = self._reload_settings('config.settings.prod')
             self.assertIn('postgresql', prod_settings.DATABASES['default']['ENGINE'])
         finally:
-            sys.argv = argv_backup
             for chave, valor in env_backup.items():
                 if valor is None:
                     os.environ.pop(chave, None)
