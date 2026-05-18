@@ -82,9 +82,13 @@ def _avaliar_migrations_para_fake(cursor):
             }
         )
 
-    if _coluna_existe(cursor, 'core_minutaromaneio', 'status_expedicao') and _coluna_existe(
-        cursor, 'core_minutaromaneio', 'pdf_gerado_em'
-    ):
+    colunas_expedicao = (
+        'hash_operacional',
+        'status_expedicao',
+        'tipo_minuta',
+        'pdf_gerado_em',
+    )
+    if all(_coluna_existe(cursor, 'core_minutaromaneio', coluna) for coluna in colunas_expedicao):
         fakes.update(
             {
                 '0005_minuta_expedicao_persistencia',

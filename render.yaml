@@ -2,9 +2,9 @@ services:
   - type: web
     name: wms
     env: python
-    buildCommand: pip install -r requirements.txt && DJANGO_SETTINGS_MODULE=config.settings.build python manage.py collectstatic --noinput
-    preDeployCommand: python manage.py create_render_superuser && python manage.py clearsessions
-    startCommand: python manage.py bootstrap_core_migrations && python manage.py migrate --noinput --fake-initial && gunicorn config.wsgi:application --worker-class gthread --workers 4 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
+    buildCommand: bash scripts/render_build.sh
+    preDeployCommand: bash scripts/render_predeploy.sh
+    startCommand: bash scripts/render_start.sh
     envVars:
       - key: ENVIRONMENT
         value: production

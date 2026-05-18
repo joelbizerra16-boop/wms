@@ -51,6 +51,60 @@ def invalidar_cache_schema_fix():
         _SCHEMA_VALIDATION_CACHE.clear()
 
 
+def aplicar_reconcile_schema_minuta_postgresql(connection):
+    """
+    Idempotente: cria colunas/indice da minuta ausentes em banco legado.
+    Executado em todo deploy antes do migrate (Render/Supabase brownfield).
+    """
+    if connection.vendor != 'postgresql':
+        return False
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name = 'core_minutaromaneio'
+            )
+            """
+        )
+        if not cursor.fetchone()[0]:
+            return False
+
+        comandos = [
+            "ALTER TABLE core_minutaromaneio ADD COLUMN IF NOT EXISTS importacao_lote UUID",
+            "UPDATE core_minutaromaneio SET importacao_lote = gen_random_uuid() WHERE importacao_lote IS NULL",
+            "ALTER TABLE core_minutaromaneio ADD COLUMN IF NOT EXISTS pdf_gerado_em TIMESTAMPTZ",
+            "ALTER TABLE core_minutaromaneio ADD COLUMN IF NOT EXISTS pdf_gerado_por_id BIGINT",
+            "ALTER TABLE core_minutaromaneio ADD COLUMN IF NOT EXISTS hash_operacional VARCHAR(64)",
+            "ALTER TABLE core_minutaromaneio ADD COLUMN IF NOT EXISTS status_expedicao VARCHAR(20)",
+            "ALTER TABLE core_minutaromaneio ADD COLUMN IF NOT EXISTS tipo_minuta VARCHAR(40)",
+            "ALTER TABLE core_minutaromaneioitem ADD COLUMN IF NOT EXISTS bairro VARCHAR(100)",
+            "UPDATE core_minutaromaneio SET hash_operacional = '' WHERE hash_operacional IS NULL",
+            "UPDATE core_minutaromaneio SET status_expedicao = 'ATIVA' WHERE status_expedicao IS NULL OR BTRIM(status_expedicao) = ''",
+            "UPDATE core_minutaromaneio SET tipo_minuta = '' WHERE tipo_minuta IS NULL",
+            "ALTER TABLE core_minutaromaneio ALTER COLUMN hash_operacional SET DEFAULT ''",
+            "ALTER TABLE core_minutaromaneio ALTER COLUMN hash_operacional SET NOT NULL",
+            "ALTER TABLE core_minutaromaneio ALTER COLUMN status_expedicao SET DEFAULT 'ATIVA'",
+            "ALTER TABLE core_minutaromaneio ALTER COLUMN status_expedicao SET NOT NULL",
+            "ALTER TABLE core_minutaromaneio ALTER COLUMN tipo_minuta SET DEFAULT ''",
+            "ALTER TABLE core_minutaromaneio ALTER COLUMN tipo_minuta SET NOT NULL",
+            "CREATE INDEX IF NOT EXISTS min_rom_created_ix ON core_minutaromaneio (created_at)",
+            "CREATE INDEX IF NOT EXISTS min_rom_hash_operacional_ix ON core_minutaromaneio (hash_operacional)",
+            "CREATE INDEX IF NOT EXISTS min_rom_status_expedicao_ix ON core_minutaromaneio (status_expedicao)",
+            "CREATE INDEX IF NOT EXISTS min_rom_tipo_minuta_ix ON core_minutaromaneio (tipo_minuta)",
+            "CREATE INDEX IF NOT EXISTS min_rom_exp_pdf_ix ON core_minutaromaneio (status_expedicao, pdf_gerado_em)",
+            "CREATE INDEX IF NOT EXISTS min_rom_lote_created_ix ON core_minutaromaneio (importacao_lote, created_at)",
+        ]
+        for comando in comandos:
+            cursor.execute(comando)
+
+    invalidar_cache_schema_fix()
+    return True
+
+
 def _cache_key(connection, escopo):
     return connection.alias, connection.vendor, escopo
 
