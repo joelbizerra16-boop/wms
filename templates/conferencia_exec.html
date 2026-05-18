@@ -418,7 +418,7 @@
         let redirecionandoConclusao = false;
         const listaConferenciaUrl = "{% url 'web-conferencia-lista' %}";
 
-        function navegarAposConclusao() {
+        function navegarAposConclusao(redirectUrl) {
             if (redirecionandoConclusao) return;
             redirecionandoConclusao = true;
             stopPolling();
@@ -426,8 +426,7 @@
                 codigoInput.disabled = true;
                 codigoInput.placeholder = 'Conferencia finalizada';
             }
-            if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
-            window.location.replace(listaConferenciaUrl);
+            window.location.replace(redirectUrl || listaConferenciaUrl);
         }
 
         function getCookie(name) {
@@ -526,7 +525,8 @@
             const response = await fetch(`/api/status/nf/${nfId}/`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
             try {
                 if (!response.ok) throw new Error('Nao foi possivel atualizar NF.');
-                const data = await response.json();
+                const payload = unpackEnvelope(await response.json());
+                const data = payload.data || {};
 
                 setStatusBadge(data.nf_status);
                 const itemAtual = data.itens.find((item) => item.status !== 'OK') || data.itens[0];
@@ -562,6 +562,17 @@
             }, pollingIntervalMs);
         }
 
+        function unpackEnvelope(payload) {
+            const envelope = payload && typeof payload === 'object' ? payload : {};
+            return {
+                success: envelope.success !== false,
+                message: envelope.message || envelope.mensagem || envelope.erro || '',
+                data: envelope.data !== undefined ? envelope.data : envelope,
+                redirect: envelope.redirect || envelope.redirect_url || null,
+                reload: Boolean(envelope.reload),
+            };
+        }
+
         async function handleBipagem(codigo, origem) {
             if (bipagemEmAndamento) return;
             const valor = (codigo || '').trim();
@@ -582,17 +593,18 @@
                     },
                     body: JSON.stringify({ conferencia_id: conferenciaId, codigo: valor }),
                 });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.mensagem || data.erro || 'Falha na bipagem.');
+                const payload = unpackEnvelope(await response.json());
+                const data = payload.data || {};
+                if (!response.ok || !payload.success) throw new Error(payload.message || 'Falha na bipagem.');
 
+                if (data.finalizado) {
+                    if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
+                    navegarAposConclusao(payload.redirect || data.redirect_url);
+                    return;
+                }
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
                 codigoInput.value = '';
                 setFeedback('Leitura registrada com sucesso.', 'ok');
-                if (data.finalizado) {
-                    setFeedback('Conferência concluída.', 'ok');
-                    navegarAposConclusao();
-                    return;
-                }
                 await refreshNFStatus();
             } catch (error) {
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
@@ -709,8 +721,8 @@
                         },
                         body: JSON.stringify({ nf_id: nfId }),
                     });
-                    const data = await response.json();
-                    if (!response.ok) throw new Error(data.erro || 'Não foi possível aceitar a conferência.');
+                    const payload = unpackEnvelope(await response.json());
+                    if (!response.ok || !payload.success) throw new Error(payload.message || 'Não foi possível aceitar a conferência.');
                     window.location.replace(window.location.pathname);
                 } catch (error) {
                     alert(error.message);

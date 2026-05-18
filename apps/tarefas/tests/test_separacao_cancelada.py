@@ -72,7 +72,7 @@ class SeparacaoCanceladaAPITests(TestCase):
         response = self.client.post('/api/separacao/iniciar/', {'tarefa_id': self.tarefa_ok.id}, format='json')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['status'], Tarefa.Status.EM_EXECUCAO)
+        self.assertEqual(response.data['data']['status'], Tarefa.Status.EM_EXECUCAO)
         self.tarefa_ok.refresh_from_db()
         self.assertEqual(self.tarefa_ok.usuario_id, self.usuario.id)
 
@@ -80,14 +80,14 @@ class SeparacaoCanceladaAPITests(TestCase):
         response = self.client.post('/api/separacao/iniciar/', {'tarefa_id': self.tarefa_cancelada.id}, format='json')
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'erro': 'NF cancelada não pode ser processada'})
+        self.assertEqual(response.data['message'], 'NF cancelada não pode ser processada')
 
     def test_nf_cancelada_nao_aparece_na_lista_de_tarefas(self):
         response = self.client.get('/api/separacao/tarefas/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], self.tarefa_ok.id)
+        self.assertEqual(len(response.data['data']), 1)
+        self.assertEqual(response.data['data'][0]['id'], self.tarefa_ok.id)
 
     def test_tentativa_bloqueada_registra_log(self):
         self.client.post('/api/separacao/iniciar/', {'tarefa_id': self.tarefa_cancelada.id}, format='json')

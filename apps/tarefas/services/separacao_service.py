@@ -167,6 +167,13 @@ def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None)
             tarefa.id,
         ),
     )
+    logger.info(
+        'FILTRO_DEBUG user_id=%s setores_usuario=%s filtros_aplicados=%s queryset_final_count=%s',
+        getattr(usuario, 'id', None),
+        sorted(_setores_usuario(usuario)) if usuario is not None and _setores_usuario(usuario) else [],
+        'tarefas.setor__in' if usuario is not None and not _usuario_pode_ver_todos_setores(usuario) else 'sem_restricao',
+        len(tarefas_ordenadas),
+    )
     return [_serializar_tarefa_lista(tarefa, usuario) for tarefa in tarefas_ordenadas]
 
 
@@ -626,6 +633,8 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                 'status_tarefa': status_tarefa,
                 'finalizado': finalizado,
                 'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
+                'cor': 'verde',
+                'som': 'beep-curto',
             }
             if finalizado:
                 from apps.core.operacional_transicao import anexar_transicao_separacao
@@ -784,6 +793,13 @@ def _filtrar_tarefas_por_setor(queryset, usuario):
         return queryset
     setores_usuario = _setores_usuario(usuario)
     if not setores_usuario:
+        logger.warning(
+            'FILTRO_DEBUG user_id=%s setores_usuario=%s filtros_aplicados=%s queryset_final_count=%s',
+            getattr(usuario, 'id', None),
+            [],
+            'tarefas.sem_setor',
+            0,
+        )
         return queryset.none()
     return queryset.filter(setor__in=setores_usuario)
 

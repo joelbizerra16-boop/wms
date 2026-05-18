@@ -93,37 +93,49 @@ class ConferenciaAPITests(TestCase):
         )
         TarefaItem.objects.create(tarefa=self.tarefa_2, nf=self.nf, produto=self.produto_2, quantidade_total='1.00', quantidade_separada='1.00')
 
+    def _body(self, response):
+        return response.data['data']
+
+    def _message(self, response):
+        return response.data['message']
+
     def test_lista_nfs_disponiveis_e_inicia_conferencia(self):
         response_nfs = self.client.get('/api/conferencia/nfs/')
 
         self.assertEqual(response_nfs.status_code, 200)
-        self.assertEqual(len(response_nfs.data), 1)
-        self.assertEqual(response_nfs.data[0]['numero'], self.nf.numero)
+        self.assertEqual(len(self._body(response_nfs)), 1)
+        self.assertEqual(self._body(response_nfs)[0]['numero'], self.nf.numero)
 
         response_inicio = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
 
         self.assertEqual(response_inicio.status_code, 200)
-        self.assertEqual(response_inicio.data['status'], Conferencia.Status.EM_CONFERENCIA)
-        self.assertEqual(response_inicio.data['progresso']['esperado'], 1.0)
-        self.assertEqual(ConferenciaItem.objects.filter(conferencia_id=response_inicio.data['id']).count(), 1)
+        self.assertEqual(self._body(response_inicio)['status'], Conferencia.Status.EM_CONFERENCIA)
+        self.assertEqual(self._body(response_inicio)['progresso']['esperado'], 1.0)
+        self.assertEqual(ConferenciaItem.objects.filter(conferencia_id=self._body(response_inicio)['id']).count(), 1)
 
     def test_bipagem_e_finalizacao_ok(self):
-        conferencia_id = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json').data['id']
+        conferencia_id = self._body(self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json'))['id']
 
         self.client.post('/api/conferencia/bipar/', {'conferencia_id': conferencia_id, 'codigo': 'PRD001'}, format='json')
         self.client.post('/api/conferencia/bipar/', {'conferencia_id': conferencia_id, 'codigo': '7890001'}, format='json')
-        response_final = self.client.post('/api/conferencia/bipar/', {'conferencia_id': conferencia_id, 'codigo': 'PRD002'}, format='json')
+        with self.captureOnCommitCallbacks(execute=True):
+            response_final = self.client.post(
+                '/api/conferencia/bipar/',
+                {'conferencia_id': conferencia_id, 'codigo': 'PRD002'},
+                format='json',
+            )
 
         self.assertEqual(response_final.status_code, 200)
-        self.assertEqual(response_final.data['status'], 'ok')
-        self.assertTrue(response_final.data['finalizado'])
-        self.assertEqual(response_final.data['conferencia']['status'], Conferencia.Status.OK)
-        self.assertEqual(response_final.data['conferencia']['progresso']['percentual'], 100.0)
+        self.assertEqual(response_final.data['success'], True)
+        self.assertTrue(self._body(response_final)['finalizado'])
+        self.assertTrue(self._body(response_final)['ok'])
+        self.assertIn('/conferencia/', response_final.data['redirect'])
+        self.assertEqual(Conferencia.objects.get(id=conferencia_id).status, Conferencia.Status.OK)
         self.nf.refresh_from_db()
         self.assertFalse(self.nf.bloqueada)
 
     def test_divergencia_gera_retorno_para_separacao(self):
-        conferencia_id = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json').data['id']
+        conferencia_id = self._body(self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json'))['id']
         item_1 = ConferenciaItem.objects.get(conferencia_id=conferencia_id, produto=self.produto_2)
 
         response_div = self.client.post(
@@ -131,11 +143,13 @@ class ConferenciaAPITests(TestCase):
             {'item_id': item_1.id, 'motivo': ConferenciaItem.MotivoDivergencia.FALTA, 'observacao': 'faltou 1 unidade'},
             format='json',
         )
-        response_final = self.client.post('/api/conferencia/finalizar/', {'conferencia_id': conferencia_id}, format='json')
+        with self.captureOnCommitCallbacks(execute=True):
+            response_final = self.client.post('/api/conferencia/finalizar/', {'conferencia_id': conferencia_id}, format='json')
 
         self.assertEqual(response_div.status_code, 200)
         self.assertEqual(response_final.status_code, 200)
-        self.assertEqual(response_final.data['status'], Conferencia.Status.DIVERGENCIA)
+        self.assertEqual(self._body(response_final)['status'], Conferencia.Status.DIVERGENCIA)
+        self.assertTrue(self._body(response_final)['finalizado'])
         self.nf.refresh_from_db()
         self.assertTrue(self.nf.bloqueada)
         self.assertEqual(self.nf.status, NotaFiscal.Status.BLOQUEADA_COM_RESTRICAO)
@@ -173,32 +187,32 @@ class ConferenciaAPITests(TestCase):
         response = self.client.get('/api/conferencia/nfs/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [])
+        self.assertEqual(self._body(response), [])
 
     def test_conferente_multi_setor_visualiza_nf(self):
         self.client.force_authenticate(self.usuario_multi)
         response = self.client.get('/api/conferencia/nfs/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], self.nf.id)
+        self.assertEqual(len(self._body(response)), 1)
+        self.assertEqual(self._body(response)[0]['id'], self.nf.id)
 
     def test_inicia_conferencia_filtrando_itens_pelos_setores_do_conferente(self):
         response_filtros = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
 
         self.assertEqual(response_filtros.status_code, 200)
-        conferencia_filtros = Conferencia.objects.get(id=response_filtros.data['id'])
+        conferencia_filtros = Conferencia.objects.get(id=self._body(response_filtros)['id'])
         itens_filtros = list(conferencia_filtros.itens.select_related('produto').order_by('produto__cod_prod'))
         self.assertEqual([item.produto.cod_prod for item in itens_filtros], ['PRD002'])
-        self.assertEqual(response_filtros.data['progresso']['esperado'], 1.0)
+        self.assertEqual(self._body(response_filtros)['progresso']['esperado'], 1.0)
 
         self.client.force_authenticate(self.outro_usuario)
         response_agregado = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
 
         self.assertEqual(response_agregado.status_code, 200)
-        conferencia_agregado = Conferencia.objects.get(id=response_agregado.data['id'])
+        conferencia_agregado = Conferencia.objects.get(id=self._body(response_agregado)['id'])
         itens_agregado = list(conferencia_agregado.itens.select_related('produto').order_by('produto__cod_prod'))
         self.assertEqual([item.produto.cod_prod for item in itens_agregado], ['PRD001'])
-        self.assertEqual(response_agregado.data['progresso']['esperado'], 2.0)
+        self.assertEqual(self._body(response_agregado)['progresso']['esperado'], 2.0)
 
     def test_conferencia_respeita_setor_do_produto_quando_categoria_diverge(self):
         self.produto_1.setor = Setor.Codigo.AGREGADO
@@ -211,7 +225,7 @@ class ConferenciaAPITests(TestCase):
         response_filtros = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
 
         self.assertEqual(response_filtros.status_code, 200)
-        conferencia_filtros = Conferencia.objects.get(id=response_filtros.data['id'])
+        conferencia_filtros = Conferencia.objects.get(id=self._body(response_filtros)['id'])
         itens_filtros = list(conferencia_filtros.itens.select_related('produto').order_by('produto__cod_prod'))
         self.assertEqual([item.produto.cod_prod for item in itens_filtros], ['PRD002'])
 
@@ -219,7 +233,7 @@ class ConferenciaAPITests(TestCase):
         response_agregado = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
 
         self.assertEqual(response_agregado.status_code, 200)
-        conferencia_agregado = Conferencia.objects.get(id=response_agregado.data['id'])
+        conferencia_agregado = Conferencia.objects.get(id=self._body(response_agregado)['id'])
         itens_agregado = list(conferencia_agregado.itens.select_related('produto').order_by('produto__cod_prod'))
         self.assertEqual([item.produto.cod_prod for item in itens_agregado], ['PRD001'])
 
@@ -269,7 +283,7 @@ class ConferenciaAPITests(TestCase):
 
         resposta_vazia = self.client.get('/api/conferencia/nfs/')
         self.assertEqual(resposta_vazia.status_code, 200)
-        self.assertFalse(any(item['id'] == nf.id for item in resposta_vazia.data))
+        self.assertFalse(any(item['id'] == nf.id for item in self._body(resposta_vazia)))
 
         self.client.force_authenticate(separador)
         self.client.post('/api/separacao/iniciar/', {'tarefa_id': tarefa.id}, format='json')
@@ -285,17 +299,17 @@ class ConferenciaAPITests(TestCase):
         resposta_atualizada = self.client.get('/api/conferencia/nfs/')
 
         self.assertEqual(resposta_atualizada.status_code, 200)
-        self.assertTrue(any(item['id'] == nf.id for item in resposta_atualizada.data))
+        self.assertTrue(any(item['id'] == nf.id for item in self._body(resposta_atualizada)))
 
     def test_conferente_sem_setor_nao_visualiza_nf_e_nao_inicia(self):
         self.client.force_authenticate(self.usuario_sem_setor)
         response_lista = self.client.get('/api/conferencia/nfs/')
         self.assertEqual(response_lista.status_code, 200)
-        self.assertEqual(response_lista.data, [])
+        self.assertEqual(self._body(response_lista), [])
 
         response_inicio = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
         self.assertEqual(response_inicio.status_code, 400)
-        self.assertEqual(response_inicio.data, {'erro': 'Usuário sem setor vinculado. Contate o administrador.'})
+        self.assertEqual(self._message(response_inicio), 'Usuário sem setor vinculado. Contate o administrador.')
 
     def test_nf_cancelada_bloqueia_inicio_conferencia(self):
         self.nf.status_fiscal = NotaFiscal.StatusFiscal.CANCELADA
@@ -306,7 +320,7 @@ class ConferenciaAPITests(TestCase):
         response = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'erro': 'NF cancelada não pode ser processada'})
+        self.assertEqual(self._message(response), 'NF cancelada não pode ser processada')
 
     def test_conferencia_liberada_permita_finalizar_com_pendencia(self):
         conferencia = Conferencia.objects.create(

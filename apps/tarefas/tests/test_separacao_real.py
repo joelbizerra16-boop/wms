@@ -151,23 +151,29 @@ class SeparacaoRealAPITests(TestCase):
     def _autenticar(self, usuario):
         self.client.force_authenticate(user=usuario)
 
+    def _body(self, response):
+        return response.data['data']
+
+    def _message(self, response):
+        return response.data['message']
+
     def test_lista_respeita_setor_operacional(self):
         self._autenticar(self.usuario_lub)
         response_lub = self.client.get('/api/separacao/tarefas/')
         self.assertEqual(response_lub.status_code, 200)
-        self.assertEqual([item['id'] for item in response_lub.data], [self.tarefa_rota_lub.id])
-        self.assertEqual(response_lub.data[0]['operacao'], 'ROTA')
+        self.assertEqual([item['id'] for item in self._body(response_lub)], [self.tarefa_rota_lub.id])
+        self.assertEqual(self._body(response_lub)[0]['operacao'], 'ROTA')
 
         self._autenticar(self.usuario_filtro)
         response_filtro = self.client.get('/api/separacao/tarefas/')
         self.assertEqual(response_filtro.status_code, 200)
-        self.assertEqual([item['id'] for item in response_filtro.data], [self.tarefa_filtro.id])
-        self.assertEqual(response_filtro.data[0]['operacao'], 'NF')
+        self.assertEqual([item['id'] for item in self._body(response_filtro)], [self.tarefa_filtro.id])
+        self.assertEqual(self._body(response_filtro)[0]['operacao'], 'NF')
 
         self._autenticar(self.usuario_ne)
         response_ne = self.client.get('/api/separacao/tarefas/')
         self.assertEqual(response_ne.status_code, 200)
-        self.assertEqual([item['id'] for item in response_ne.data], [self.tarefa_rota_ne.id])
+        self.assertEqual([item['id'] for item in self._body(response_ne)], [self.tarefa_rota_ne.id])
 
     def test_gestor_visualiza_tarefas_dos_setores_vinculados(self):
         self._autenticar(self.usuario_gestor)
@@ -176,7 +182,7 @@ class SeparacaoRealAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            {item['id'] for item in response.data},
+            {item['id'] for item in self._body(response)},
             {self.tarefa_rota_ne.id},
         )
 
@@ -186,14 +192,14 @@ class SeparacaoRealAPITests(TestCase):
         response = self.client.get('/api/separacao/tarefas/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [])
+        self.assertEqual(self._body(response), [])
 
     def test_separador_multi_setor_visualiza_tarefas_de_todos_setores_permitidos(self):
         self._autenticar(self.usuario_multi)
         response = self.client.get('/api/separacao/tarefas/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            {item['id'] for item in response.data},
+            {item['id'] for item in self._body(response)},
             {self.tarefa_rota_lub.id, self.tarefa_filtro.id},
         )
 
@@ -201,7 +207,7 @@ class SeparacaoRealAPITests(TestCase):
         self._autenticar(self.usuario_sem_setor)
         response = self.client.post('/api/separacao/iniciar/', {'tarefa_id': self.tarefa_rota_lub.id}, format='json')
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'erro': 'Usuário sem setor vinculado. Contate o administrador.'})
+        self.assertEqual(self._message(response), 'Usuário sem setor vinculado. Contate o administrador.')
 
     def test_iniciar_tarefa_atribui_responsavel_e_marca_em_execucao(self):
         self._autenticar(self.usuario_lub)
@@ -222,13 +228,13 @@ class SeparacaoRealAPITests(TestCase):
         response = self.client.post('/api/separacao/iniciar/', {'tarefa_id': self.tarefa_rota_lub.id}, format='json')
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'erro': 'Tarefa ja esta em execucao por outro usuario'})
+        self.assertEqual(self._message(response), 'Tarefa ja esta em execucao por outro usuario')
 
         self._autenticar(self.usuario_lub)
         response_mesmo_usuario = self.client.post('/api/separacao/iniciar/', {'tarefa_id': self.tarefa_rota_lub.id}, format='json')
 
         self.assertEqual(response_mesmo_usuario.status_code, 200)
-        self.assertEqual(response_mesmo_usuario.data['status'], Tarefa.Status.EM_EXECUCAO)
+        self.assertEqual(self._body(response_mesmo_usuario)['status'], Tarefa.Status.EM_EXECUCAO)
 
     def test_bipagem_aceita_codigo_ou_ean_e_conclui_tarefa_de_rota(self):
         self._autenticar(self.usuario_lub)
@@ -247,11 +253,11 @@ class SeparacaoRealAPITests(TestCase):
 
         self.assertEqual(response_codigo.status_code, 200)
         self.assertEqual(response_ean.status_code, 200)
-        self.assertIn('Produto validado no setor', response_ean.data['feedback'])
-        self.assertEqual(response_ean.data['cor'], 'verde')
-        self.assertEqual(response_ean.data['som'], 'beep-curto')
-        self.tarefa_rota_lub.refresh_from_db()
-        self.assertEqual(self.tarefa_rota_lub.status, Tarefa.Status.CONCLUIDO)
+        self.assertIn('Produto validado no setor', self._body(response_ean)['feedback'])
+        self.assertEqual(self._body(response_ean)['cor'], 'verde')
+        self.assertEqual(self._body(response_ean)['som'], 'beep-curto')
+        self.assertTrue(self._body(response_ean)['finalizado'])
+        self.assertEqual(self._body(response_ean)['status_tarefa'], Tarefa.Status.CONCLUIDO)
 
     def test_bipagem_rejeita_produto_de_outro_segmento(self):
         self._autenticar(self.usuario_lub)
@@ -263,7 +269,7 @@ class SeparacaoRealAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn('não corresponde ao item esperado', response.data['erro'])
+        self.assertIn('não corresponde ao item esperado', self._message(response))
 
     def test_filtro_nao_permita_finalizar_concluido_com_pendencia(self):
         self._autenticar(self.usuario_filtro)
@@ -275,7 +281,7 @@ class SeparacaoRealAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn('NF de filtros com item faltante', response.data['erro'])
+        self.assertIn('NF de filtros com item faltante', self._message(response))
 
     def test_fechamento_com_restricao_exige_motivo(self):
         self._autenticar(self.usuario_ne)
@@ -296,9 +302,9 @@ class SeparacaoRealAPITests(TestCase):
         )
 
         self.assertEqual(response_sem_motivo.status_code, 400)
-        self.assertIn('nao envia para conferencia', response_sem_motivo.data['erro'])
+        self.assertIn('nao envia para conferencia', self._message(response_sem_motivo))
         self.assertEqual(response_com_motivo.status_code, 400)
-        self.assertIn('nao envia para conferencia', response_com_motivo.data['erro'])
+        self.assertIn('nao envia para conferencia', self._message(response_com_motivo))
 
     def test_item_com_restricao_bloqueia_nf_inteira(self):
         self._autenticar(self.usuario_ne)
