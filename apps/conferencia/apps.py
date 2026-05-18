@@ -5,3 +5,6 @@ class ConferenciaConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'apps.conferencia'
     verbose_name = 'Conferencia'
+
+    def ready(self):
+        from . import signals  # noqa: F401

@@ -306,6 +306,18 @@
     </style>
 </head>
 <body>
+    <script>
+    function unpackEnvelope(payload) {
+        const envelope = payload && typeof payload === 'object' ? payload : {};
+        return {
+            success: envelope.success !== false,
+            message: envelope.message || envelope.mensagem || envelope.erro || '',
+            data: envelope.data !== undefined ? envelope.data : envelope,
+            redirect: envelope.redirect || envelope.redirect_url || null,
+            reload: Boolean(envelope.reload),
+        };
+    }
+    </script>
     <header class="op-header">
         <a class="op-back" href="{% url 'web-conferencia-lista' %}" aria-label="Voltar">←</a>
         <div class="op-user">{{ usuario.nome|default:usuario.username }}</div>
@@ -562,17 +574,6 @@
             }, pollingIntervalMs);
         }
 
-        function unpackEnvelope(payload) {
-            const envelope = payload && typeof payload === 'object' ? payload : {};
-            return {
-                success: envelope.success !== false,
-                message: envelope.message || envelope.mensagem || envelope.erro || '',
-                data: envelope.data !== undefined ? envelope.data : envelope,
-                redirect: envelope.redirect || envelope.redirect_url || null,
-                reload: Boolean(envelope.reload),
-            };
-        }
-
         async function handleBipagem(codigo, origem) {
             if (bipagemEmAndamento) return;
             const valor = (codigo || '').trim();
@@ -722,7 +723,16 @@
                         body: JSON.stringify({ nf_id: nfId }),
                     });
                     const payload = unpackEnvelope(await response.json());
+                    const data = payload.data || {};
                     if (!response.ok || !payload.success) throw new Error(payload.message || 'Não foi possível aceitar a conferência.');
+                    if (payload.redirect) {
+                        window.location.replace(payload.redirect);
+                        return;
+                    }
+                    if (data.nf_id) {
+                        window.location.replace(`/conferencia/${data.nf_id}/`);
+                        return;
+                    }
                     window.location.replace(window.location.pathname);
                 } catch (error) {
                     alert(error.message);

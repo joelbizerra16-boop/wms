@@ -11,7 +11,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.conferencia.models import Conferencia, ConferenciaItem
-from apps.conferencia.services.conferencia_service import listar_nfs_disponiveis
+from apps.conferencia.services.conferencia_service import CONFERENCIA_LISTAGEM_MAX_RESULTADOS, listar_nfs_disponiveis
 from apps.nf.models import NotaFiscal
 from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa
@@ -216,7 +216,11 @@ def _carregar_historico_conferencia_dashboard(
 
 def get_nfs_para_conferencia(usuario, data_inicio=None, data_fim=None, busca=None):
     busca = (busca or '').strip().lower()
-    nfs = listar_nfs_disponiveis(usuario, somente_leitura=True)
+    nfs = listar_nfs_disponiveis(
+        usuario,
+        somente_leitura=True,
+        max_resultados=CONFERENCIA_LISTAGEM_MAX_RESULTADOS,
+    )
     if not nfs:
         return []
 

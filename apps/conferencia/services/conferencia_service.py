@@ -17,7 +17,7 @@ from apps.core.services.produto_validacao_service import (
 )
 from apps.logs.models import Log, UserActivityLog
 from apps.nf.models import NotaFiscal, NotaFiscalItem
-from apps.nf.services.consistencia_service import sanear_consistencia_nf, separacao_concluida_nf
+from apps.nf.services.consistencia_service import _itens_separacao_prefetch_nf, sanear_consistencia_nf, separacao_concluida_nf
 from apps.nf.services.status_service import atualizar_status_nf, sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa, TarefaItem
@@ -25,6 +25,13 @@ from apps.usuarios.models import Setor
 from apps.usuarios.session_utils import usuario_esta_logado
 
 logger = logging.getLogger(__name__)
+
+CONFERENCIA_FINALIZACAO_LENTA_MS = 150
+CONFERENCIA_LISTAGEM_WARNING_MS = 1000
+CONFERENCIA_BIPAGEM_WARNING_MS = 1000
+CONFERENCIA_FINALIZACAO_WARNING_MS = 1000
+CONFERENCIA_LISTAGEM_MAX_RESULTADOS = 30
+CONFERENCIA_LISTAGEM_JANELA_CANDIDATOS = 120
 
 
 class ConferenciaError(Exception):
@@ -247,6 +254,21 @@ def _conferencia_mais_recente(conferencias):
 
 
 def _resumo_separacao_nf(nf):
+    itens_prefetch = _itens_separacao_prefetch_nf(nf)
+    if itens_prefetch is not None:
+        total_itens = len(itens_prefetch)
+        if total_itens == 0:
+            return {'status_separacao': 'PENDENTE', 'itens_pendentes': 0, 'itens_separados': 0, 'total_itens': 0}
+        itens_pendentes = sum(1 for item in itens_prefetch if item.quantidade_separada < item.quantidade_total)
+        itens_separados = max(total_itens - itens_pendentes, 0)
+        status_separacao = 'SEPARADO' if itens_pendentes == 0 else 'PENDENTE'
+        return {
+            'status_separacao': status_separacao,
+            'itens_pendentes': itens_pendentes,
+            'itens_separados': itens_separados,
+            'total_itens': total_itens,
+        }
+
     itens_qs = _itens_separacao_nf_qs(nf)
     total_itens = itens_qs.count()
     if total_itens == 0:
@@ -297,16 +319,29 @@ def listar_nfs_disponiveis(
     usar_cache=True,
     data_inicio=None,
     data_fim=None,
+    max_resultados=None,
 ):
+    inicio_listagem = time.perf_counter()
+    cache_hit = False
+    if connection.in_atomic_block:
+        usar_cache = False
     if usuario is not None and not _usuario_pode_ver_todos_setores(usuario) and not _setores_usuario(usuario):
         return []
     if usar_cache:
         cache_key = _cache_key_nfs_disponiveis(usuario)
         cached = cache.get(cache_key)
         if cached is not None:
+            cache_hit = True
             if data_inicio is None and data_fim is None:
-                return cached
-            return _filtrar_nfs_por_periodo_lista(cached, data_inicio, data_fim)
+                resultado_cache = cached[:max_resultados] if max_resultados else cached
+                total_ms = round((time.perf_counter() - inicio_listagem) * 1000, 2)
+                _log_conferencia_listagem(total_ms, usuario=usuario, total=len(resultado_cache), cache_hit=cache_hit)
+                return resultado_cache
+            filtrado_cache = _filtrar_nfs_por_periodo_lista(cached, data_inicio, data_fim)
+            resultado_cache = filtrado_cache[:max_resultados] if max_resultados else filtrado_cache
+            total_ms = round((time.perf_counter() - inicio_listagem) * 1000, 2)
+            _log_conferencia_listagem(total_ms, usuario=usuario, total=len(resultado_cache), cache_hit=cache_hit)
+            return resultado_cache
     tarefa_itens_prefetch = Prefetch(
         'itens',
         queryset=TarefaItem.objects.select_related('tarefa').only(
@@ -333,6 +368,7 @@ def listar_nfs_disponiveis(
             'quantidade',
             'produto__id',
             'produto__categoria',
+            'produto__setor',
         ),
     )
     itens_tarefa_prefetch = Prefetch(
@@ -398,13 +434,16 @@ def listar_nfs_disponiveis(
             | Q(data_emissao__date__lte=data_fim)
         )
 
+    janela_candidatos = max(max_resultados or CONFERENCIA_LISTAGEM_MAX_RESULTADOS, CONFERENCIA_LISTAGEM_MAX_RESULTADOS)
+    janela_candidatos = max(janela_candidatos * 4, CONFERENCIA_LISTAGEM_JANELA_CANDIDATOS)
+    nfs = nfs[:janela_candidatos]
+
     disponiveis = []
     for nf in nfs:
-        consistencia = sanear_consistencia_nf(nf, actor=usuario)
-        if not consistencia['valida']:
-            continue
         if not somente_leitura:
-            atualizar_status_nf(nf)
+            consistencia = sanear_consistencia_nf(nf, actor=usuario)
+            if not consistencia['valida']:
+                continue
 
         validacao_fluxo = avaliar_liberacao_conferencia(nf)
         if not _nf_pertence_a_setores_usuario(nf, usuario):
@@ -505,10 +544,34 @@ def listar_nfs_disponiveis(
                 ),
             }
         )
+        if max_resultados and len(disponiveis) >= max_resultados:
+            break
     disponiveis.sort(key=lambda nf: (0 if nf['balcao'] else 1, -nf['updated_ts']))
+    logger.info(
+        'FILTRO_DEBUG user_id=%s setores_usuario=%s filtros_aplicados=%s queryset_final_count=%s',
+        getattr(usuario, 'id', None),
+        sorted(_setores_usuario(usuario)) if usuario is not None and _setores_usuario(usuario) else [],
+        'conferencia.nf_por_setor_usuario' if usuario is not None and not _usuario_pode_ver_todos_setores(usuario) else 'sem_restricao',
+        len(disponiveis),
+    )
+    if max_resultados:
+        disponiveis = disponiveis[:max_resultados]
     if usar_cache:
         cache.set(_cache_key_nfs_disponiveis(usuario), disponiveis, CONFERENCIA_LIST_CACHE_TTL)
+    total_ms = round((time.perf_counter() - inicio_listagem) * 1000, 2)
+    _log_conferencia_listagem(total_ms, usuario=usuario, total=len(disponiveis), cache_hit=cache_hit)
     return disponiveis
+
+
+def _log_conferencia_listagem(total_ms, *, usuario, total, cache_hit):
+    mensagem = (
+        'CONFERENCIA_LISTAGEM_MS user_id=%s total_ms=%s total=%s cache_hit=%s'
+        % (getattr(usuario, 'id', None), total_ms, total, cache_hit)
+    )
+    if total_ms > CONFERENCIA_LISTAGEM_WARNING_MS:
+        logger.warning(mensagem)
+    else:
+        logger.info(mensagem)
 
 
 def _filtrar_nfs_por_periodo_lista(nfs, data_inicio, data_fim):
@@ -543,6 +606,7 @@ def obter_proxima_nf_conferencia(usuario, *, excluir_nf_id=None):
         usar_cache=False,
         data_inicio=data_inicio,
         data_fim=data_fim,
+        max_resultados=CONFERENCIA_LISTAGEM_MAX_RESULTADOS,
     )
     for nf in nfs:
         if excluir_nf_id and nf['id'] == excluir_nf_id:
@@ -641,6 +705,7 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
     from apps.core.operacional_side_effects import agendar_atualizar_status_nf, agendar_logs_bipagem_conferencia
 
     metricas = BipagemMetrics('conferencia', conferencia_id, getattr(usuario, 'id', None))
+    inicio_bipagem = time.perf_counter()
     try:
         nf_id = None
         nf_numero = ''
@@ -752,7 +817,9 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
 
                 finalizado = not itens_restantes
                 nf_id = conferencia_local.nf_id
-                nf_numero = conferencia_local.nf.numero
+                nf_numero = (
+                    NotaFiscal.objects.filter(id=nf_id).values_list('numero', flat=True).first() or ''
+                )
                 produto_cod = item_local.produto.cod_prod
                 conferido = nova_conferida
                 esperado = item_local.qtd_esperada
@@ -767,15 +834,6 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                 if not finalizado:
                     agendar_atualizar_status_nf(nf_id)
 
-                    def _invalidar_apos_bipagem():
-                        _invalidate_conferencia_operacional_cache(
-                            motivo='bipagem_conferencia',
-                            nf_id=nf_id,
-                            setor=setor_cache,
-                        )
-
-                    transaction.on_commit(_invalidar_apos_bipagem)
-
         try:
             _executar()
         except OperationalError as exc:
@@ -784,6 +842,8 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
             raise
 
         with metricas.fase('response'):
+            from apps.core.operacional_transicao import url_lista_conferencia
+
             resposta = {
                 'status': 'ok',
                 'esperado': float(esperado),
@@ -791,18 +851,19 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                 'finalizado': finalizado,
             }
             if finalizado:
-                finalizar_conferencia(conferencia_id, usuario)
-                conferencia_final = Conferencia.objects.only('id', 'status').get(id=conferencia_id)
-                resposta['conferencia'] = {
-                    'id': conferencia_final.id,
-                    'status': conferencia_final.status,
-                    'progresso': {'percentual': 100.0},
-                }
-                from apps.core.operacional_transicao import anexar_transicao_conferencia
-
-                anexar_transicao_conferencia(resposta, usuario, nf_id_atual=nf_id)
+                payload_final = finalizar_conferencia(conferencia_id, usuario, resposta_minima=True)
+                resposta.update(payload_final)
             return resposta
     finally:
+        total_ms = round((time.perf_counter() - inicio_bipagem) * 1000, 2)
+        mensagem = (
+            'CONFERENCIA_BIPAGEM_MS conferencia_id=%s user_id=%s total_ms=%s'
+            % (conferencia_id, getattr(usuario, 'id', None), total_ms)
+        )
+        if total_ms > CONFERENCIA_BIPAGEM_WARNING_MS:
+            logger.warning(mensagem)
+        else:
+            logger.info(mensagem)
         metricas.registrar()
 
 
@@ -838,53 +899,116 @@ def registrar_divergencia(item_id, motivo, observacao, usuario):
     return _dados_item(item)
 
 
-def finalizar_conferencia(conferencia_id, usuario):
-    conferencia = _obter_conferencia_em_andamento(conferencia_id, usuario)
-    itens = list(conferencia.itens.select_related('produto').all())
-
-    if not itens:
-        raise ConferenciaError('Conferencia sem itens para finalizar.')
-    conferencia_liberada = conferencia.status == Conferencia.Status.LIBERADO_COM_RESTRICAO or conferencia.nf.status == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
-    if any(item.status == ConferenciaItem.Status.AGUARDANDO for item in itens) and not conferencia_liberada:
-        raise ConferenciaError('Existem itens pendentes de bipagem ou tratativa.')
-
-    possui_divergencia = any(item.status == ConferenciaItem.Status.DIVERGENCIA for item in itens)
-    with transaction.atomic():
-        if conferencia_liberada:
-            conferencia.status = Conferencia.Status.CONCLUIDO_COM_RESTRICAO
-        else:
-            conferencia.status = Conferencia.Status.DIVERGENCIA if possui_divergencia else Conferencia.Status.OK
-        conferencia.save(update_fields=['status', 'updated_at'])
-
-        nf = conferencia.nf
-        sincronizar_status_operacional_nf(nf)
-
-        if conferencia.status == Conferencia.Status.CONCLUIDO_COM_RESTRICAO:
-            detalhe = f'Conferencia da NF {nf.numero} finalizada com restricao liberada.'
-        elif possui_divergencia:
-            _gerar_retorno_para_separacao(conferencia)
-            detalhe = f'Conferencia da NF {nf.numero} finalizada com divergencia.'
-        else:
-            detalhe = f'Conferencia da NF {nf.numero} finalizada com sucesso.'
-
-        Log.objects.create(usuario=usuario, acao='FINALIZACAO CONFERENCIA', detalhe=detalhe)
-        UserActivityLog.objects.create(
-            usuario=usuario,
-            tipo=UserActivityLog.Tipo.TAREFA_FIM,
-            tarefa=conferencia.nf.tarefas.first(),
-            timestamp=timezone.now(),
-        )
-    nf_id = conferencia.nf_id
-    setor = ','.join(sorted({_setor_operacional_produto(item.produto) for item in itens}))
-    _invalidate_conferencia_operacional_cache(
-        motivo='finalizacao_conferencia',
-        nf_id=nf_id,
-        setor=setor,
-    )
-    dados = _dados_conferencia(conferencia)
+def finalizar_conferencia(conferencia_id, usuario, *, resposta_minima=False):
+    from apps.core.operacional_side_effects import agendar_finalizacao_conferencia
     from apps.core.operacional_transicao import anexar_transicao_conferencia
 
-    return anexar_transicao_conferencia(dados, usuario, nf_id_atual=nf_id)
+    inicio = time.perf_counter()
+    query_inicio = time.perf_counter()
+
+    conferencia = (
+        Conferencia.objects.select_related('nf')
+        .only(
+            'id',
+            'status',
+            'conferente_id',
+            'nf_id',
+            'nf__id',
+            'nf__numero',
+            'nf__status',
+            'nf__status_fiscal',
+        )
+        .get(id=conferencia_id)
+    )
+    if conferencia.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
+        _registrar_bloqueio_nf_cancelada(usuario, 'CONFERENCIA BLOQUEADA', conferencia.nf)
+        raise ConferenciaError(NF_CANCELADA_ERRO)
+    _validar_setor_nf(conferencia.nf, usuario)
+    if conferencia.status not in {Conferencia.Status.EM_CONFERENCIA, Conferencia.Status.LIBERADO_COM_RESTRICAO}:
+        raise ConferenciaError('Conferencia nao esta em andamento.')
+    if conferencia.conferente_id != usuario.id:
+        raise ConferenciaError('Conferencia vinculada a outro usuario.')
+
+    if not ConferenciaItem.objects.filter(conferencia_id=conferencia_id).exists():
+        raise ConferenciaError('Conferencia sem itens para finalizar.')
+
+    conferencia_liberada = (
+        conferencia.status == Conferencia.Status.LIBERADO_COM_RESTRICAO
+        or conferencia.nf.status == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
+    )
+    if (
+        not conferencia_liberada
+        and ConferenciaItem.objects.filter(
+            conferencia_id=conferencia_id,
+            status=ConferenciaItem.Status.AGUARDANDO,
+        ).exists()
+    ):
+        raise ConferenciaError('Existem itens pendentes de bipagem ou tratativa.')
+
+    possui_divergencia = ConferenciaItem.objects.filter(
+        conferencia_id=conferencia_id,
+        status=ConferenciaItem.Status.DIVERGENCIA,
+    ).exists()
+    query_ms = round((time.perf_counter() - query_inicio) * 1000, 2)
+
+    if conferencia_liberada:
+        novo_status = Conferencia.Status.CONCLUIDO_COM_RESTRICAO
+    else:
+        novo_status = Conferencia.Status.DIVERGENCIA if possui_divergencia else Conferencia.Status.OK
+
+    save_inicio = time.perf_counter()
+    agora = timezone.now()
+    with transaction.atomic():
+        Conferencia.objects.filter(pk=conferencia_id).update(status=novo_status, updated_at=agora)
+        nf_id = conferencia.nf_id
+        nf_numero = conferencia.nf.numero or ''
+        if conferencia_liberada:
+            detalhe = f'Conferencia da NF {nf_numero} finalizada com restricao liberada.'
+        elif possui_divergencia:
+            detalhe = f'Conferencia da NF {nf_numero} finalizada com divergencia.'
+        else:
+            detalhe = f'Conferencia da NF {nf_numero} finalizada com sucesso.'
+
+        agendar_finalizacao_conferencia(
+            conferencia_id=conferencia_id,
+            nf_id=nf_id,
+            usuario_id=usuario.id,
+            possui_divergencia=possui_divergencia,
+            conferencia_liberada=conferencia_liberada,
+            detalhe_log=detalhe,
+        )
+    save_ms = round((time.perf_counter() - save_inicio) * 1000, 2)
+    total_ms = round((time.perf_counter() - inicio) * 1000, 2)
+    mensagem_metrica = (
+        f'CONFERENCIA_FINALIZACAO_MS conferencia_id={conferencia_id} total_ms={total_ms} '
+        f'query_ms={query_ms} save_ms={save_ms}'
+    )
+    if total_ms > CONFERENCIA_FINALIZACAO_WARNING_MS:
+        logger.warning(mensagem_metrica)
+    else:
+        logger.info(mensagem_metrica)
+
+    payload_transicao = anexar_transicao_conferencia({}, usuario, nf_id_atual=nf_id)
+    if resposta_minima:
+        retorno_minimo = {
+            'ok': True,
+            'finalizado': True,
+            'redirect_url': payload_transicao['redirect_url'],
+            'proxima_nf_id': payload_transicao['proxima_nf_id'],
+            'tem_proxima': payload_transicao['tem_proxima'],
+        }
+        return retorno_minimo
+
+    retorno = {
+        'status': novo_status,
+        'finalizado': True,
+        'redirect_url': payload_transicao['redirect_url'],
+        'id': conferencia_id,
+        'nf_id': nf_id,
+        'proxima_nf_id': payload_transicao['proxima_nf_id'],
+        'tem_proxima': payload_transicao['tem_proxima'],
+    }
+    return retorno
 
 
 def _obter_conferencia_em_andamento(conferencia_id, usuario):

@@ -210,7 +210,7 @@ def conferencia_lista_web(request):
 
     date_from, date_to, busca = resolver_periodo_operacional_request(request)
     nfs = get_nfs_para_conferencia(request.user, data_inicio=date_from, data_fim=date_to, busca=busca)
-    paginacao = _paginar_lista(request, nfs, por_pagina=50)
+    paginacao = _paginar_lista(request, nfs, por_pagina=30)
     contexto = {
         'nfs': paginacao['page_obj'],
         **paginacao,

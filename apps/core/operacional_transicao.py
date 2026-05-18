@@ -29,8 +29,10 @@ def anexar_transicao_separacao(payload, usuario, *, tarefa_id_atual):
 
 
 def anexar_transicao_conferencia(payload, usuario, *, nf_id_atual):
-    del usuario, nf_id_atual
-    payload['proxima_nf_id'] = None
-    payload['redirect_url'] = url_lista_conferencia()
-    payload['tem_proxima'] = False
+    from apps.conferencia.services.conferencia_service import obter_proxima_nf_conferencia
+
+    proxima_nf = obter_proxima_nf_conferencia(usuario, excluir_nf_id=nf_id_atual) if usuario is not None else None
+    payload['proxima_nf_id'] = proxima_nf['id'] if proxima_nf else None
+    payload['redirect_url'] = url_exec_conferencia(proxima_nf['id']) if proxima_nf else url_lista_conferencia()
+    payload['tem_proxima'] = bool(proxima_nf)
     return payload
