@@ -785,9 +785,11 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
         conferido = Decimal('0')
         esperado = Decimal('0')
         setor_cache = ''
+        redirect_url_final = None
+        finalizacao_inicio = None
 
         def _executar():
-            nonlocal nf_id, nf_numero, produto_cod, finalizado, status_final, conferido, esperado, setor_cache
+            nonlocal nf_id, nf_numero, produto_cod, finalizado, status_final, conferido, esperado, setor_cache, finalizacao_inicio
             with transaction.atomic():
                 with metricas.fase('lock'):
                     lock_kwargs = {}
@@ -899,6 +901,8 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         status=ConferenciaItem.Status.AGUARDANDO,
                         qtd_conferida__lt=F('qtd_esperada'),
                     ).exclude(pk=item_local.pk).exists()
+                    if finalizado and finalizacao_inicio is None:
+                        finalizacao_inicio = time.perf_counter()
                 nf_id = conferencia_local.nf_id
                 nf_numero = conferencia_local.nf.numero or ''
                 produto_cod = item_local.produto.cod_prod
@@ -963,14 +967,16 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                     'finalizado': finalizado,
                 }
             if finalizado:
-                with metricas.fase('cache'):
+                with metricas.fase('redirect'):
                     from apps.core.operacional_transicao import anexar_transicao_conferencia
 
                     payload_final = anexar_transicao_conferencia({}, usuario, nf_id_atual=nf_id)
+                    redirect_url_final = payload_final['redirect_url']
                     resposta.update(
                         {
                             'ok': True,
                             'finalizado': True,
+                            'finalizada': True,
                             'status_final': status_final,
                             'redirect_url': payload_final['redirect_url'],
                             'proxima_nf_id': payload_final['proxima_nf_id'],
@@ -980,6 +986,22 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
             return resposta
     finally:
         total_ms = round((time.perf_counter() - inicio_bipagem) * 1000, 2)
+        if finalizado:
+            total_finalizacao_ms = round(
+                ((time.perf_counter() - finalizacao_inicio) * 1000) if finalizacao_inicio is not None else total_ms,
+                2,
+            )
+            logger.info(
+                'CONFERENCIA_FINALIZACAO_MS conferencia_id=%s user_id=%s total_ms=%s lock_ms=%.2f query_ms=%.2f response_ms=%.2f redirect_ms=%.2f redirect_url=%s',
+                conferencia_id,
+                getattr(usuario, 'id', None),
+                total_finalizacao_ms,
+                metricas._fases.get('lock', 0.0),
+                metricas._fases.get('query', 0.0),
+                metricas._fases.get('response', 0.0),
+                metricas._fases.get('redirect', 0.0),
+                redirect_url_final or '',
+            )
         mensagem = (
             'CONFERENCIA_BIPAGEM_MS conferencia_id=%s user_id=%s total_ms=%s'
             % (conferencia_id, getattr(usuario, 'id', None), total_ms)
@@ -1231,6 +1253,7 @@ def finalizar_conferencia(conferencia_id, usuario, *, resposta_minima=False):
         retorno_minimo = {
             'ok': True,
             'finalizado': True,
+            'finalizada': True,
             'redirect_url': payload_transicao['redirect_url'],
             'proxima_nf_id': payload_transicao['proxima_nf_id'],
             'tem_proxima': payload_transicao['tem_proxima'],
@@ -1240,6 +1263,7 @@ def finalizar_conferencia(conferencia_id, usuario, *, resposta_minima=False):
     retorno = {
         'status': novo_status,
         'finalizado': True,
+        'finalizada': True,
         'redirect_url': payload_transicao['redirect_url'],
         'id': conferencia_id,
         'nf_id': nf_id,

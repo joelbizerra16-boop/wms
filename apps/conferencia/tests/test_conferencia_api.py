@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 from apps.clientes.models import Cliente
 from apps.conferencia.models import Conferencia, ConferenciaItem
 from apps.conferencia.services.conferencia_service import pedido_esta_liberado_para_conferencia
+from apps.core.operacional_transicao import url_lista_conferencia
 from apps.nf.models import NotaFiscal, NotaFiscalItem
 from apps.produtos.models import Produto
 from apps.rotas.models import Rota
@@ -133,8 +134,11 @@ class ConferenciaAPITests(TestCase):
         self.assertEqual(response_final.status_code, 200)
         self.assertEqual(response_final.data['success'], True)
         self.assertTrue(self._body(response_final)['finalizado'])
+        self.assertTrue(self._body(response_final)['finalizada'])
         self.assertTrue(self._body(response_final)['ok'])
-        self.assertIn('/conferencia/', response_final.data['redirect'])
+        self.assertEqual(response_final.data['redirect'], url_lista_conferencia())
+        self.assertFalse(self._body(response_final)['tem_proxima'])
+        self.assertIsNone(self._body(response_final)['proxima_nf_id'])
         self.assertEqual(Conferencia.objects.get(id=conferencia_id).status, Conferencia.Status.OK)
         self.nf.refresh_from_db()
         self.assertFalse(self.nf.bloqueada)
@@ -435,5 +439,6 @@ class ConferenciaAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(self._body(response)['finalizado'])
-        self.assertIn('/conferencia/', response.data['redirect'])
+        self.assertTrue(self._body(response)['finalizada'])
+        self.assertEqual(response.data['redirect'], url_lista_conferencia())
         self.assertEqual(Conferencia.objects.get(id=conferencia.id).status, Conferencia.Status.OK)

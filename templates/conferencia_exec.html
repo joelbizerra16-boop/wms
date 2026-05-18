@@ -438,7 +438,7 @@
                 codigoInput.disabled = true;
                 codigoInput.placeholder = 'Conferencia finalizada';
             }
-            window.location.replace(redirectUrl || listaConferenciaUrl);
+            window.location.href = redirectUrl || listaConferenciaUrl;
         }
 
         function getCookie(name) {
@@ -598,8 +598,12 @@
                 const data = payload.data || {};
                 if (!response.ok || !payload.success) throw new Error(payload.message || 'Falha na bipagem.');
 
-                if (data.finalizado) {
-                    if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
+                if (data.finalizado || data.finalizada) {
+                    try {
+                        if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
+                    } catch (audioError) {
+                        console.error('Falha ao tocar beep finalizado', audioError);
+                    }
                     navegarAposConclusao(payload.redirect || data.redirect_url);
                     return;
                 }
