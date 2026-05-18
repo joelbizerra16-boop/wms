@@ -74,8 +74,10 @@ class GarantirEstruturaMinutaTests(SimpleTestCase):
         self.connection.cursor.assert_not_called()
         self.connection.schema_editor.assert_not_called()
 
-    def test_cria_tabelas_minuta_quando_ausentes(self):
-        self.cursor.fetchone.side_effect = [None, None, object(), object(), object(), object()]
+    @patch('apps.core.db_fixes._tabela_existe')
+    @patch('apps.core.db_fixes._coluna_existe', return_value=True)
+    def test_cria_tabelas_minuta_quando_ausentes(self, _coluna_existe_mock, tabela_existe_mock):
+        tabela_existe_mock.side_effect = [False, False] + [True] * 20
         self.cursor.fetchall.return_value = []
 
         resultado = garantir_estrutura_minuta(self.connection)
@@ -84,8 +86,13 @@ class GarantirEstruturaMinutaTests(SimpleTestCase):
         self.schema_editor.create_model.assert_any_call(MinutaRomaneio)
         self.schema_editor.create_model.assert_any_call(MinutaRomaneioItem)
 
-    def test_adiciona_colunas_legadas_quando_tabelas_ja_existem(self):
-        self.cursor.fetchone.side_effect = [object(), object(), object(), None, object(), None]
+    @patch('apps.core.db_fixes._tabela_existe', return_value=True)
+    @patch('apps.core.db_fixes._coluna_existe')
+    def test_adiciona_colunas_legadas_quando_tabelas_ja_existem(self, coluna_existe_mock, _tabela_existe_mock):
+        coluna_existe_mock.side_effect = lambda cursor, table_name, column_name: (table_name, column_name) not in {
+            ('core_minutaromaneio', 'importacao_lote'),
+            ('core_minutaromaneioitem', 'bairro'),
+        }
         self.cursor.fetchall.return_value = [(1,), (2,)]
 
         resultado = garantir_estrutura_minuta(self.connection)
@@ -95,3 +102,20 @@ class GarantirEstruturaMinutaTests(SimpleTestCase):
         self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "importacao_lote" UUID' in comando for comando in comandos))
         self.assertTrue(any('ALTER TABLE "core_minutaromaneioitem" ADD COLUMN IF NOT EXISTS "bairro" VARCHAR(100)' in comando for comando in comandos))
         self.cursor.executemany.assert_called_once()
+
+    @patch('apps.core.db_fixes._tabela_existe', return_value=True)
+    @patch('apps.core.db_fixes._coluna_existe')
+    def test_adiciona_colunas_persistencia_pdf_quando_ausentes(self, coluna_existe_mock, _tabela_existe_mock):
+        colunas_ausentes = {'pdf_gerado_em', 'pdf_gerado_por_id', 'tipo_minuta', 'hash_operacional', 'status_expedicao'}
+        coluna_existe_mock.side_effect = lambda cursor, table_name, column_name: column_name not in colunas_ausentes
+        self.cursor.fetchall.return_value = []
+
+        resultado = garantir_estrutura_minuta(self.connection)
+
+        self.assertTrue(resultado)
+        comandos = [call.args[0] for call in self.cursor.execute.call_args_list]
+        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "pdf_gerado_em" TIMESTAMPTZ NULL' in comando for comando in comandos))
+        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "pdf_gerado_por_id" BIGINT NULL' in comando for comando in comandos))
+        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "tipo_minuta" VARCHAR(40)' in comando for comando in comandos))
+        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "hash_operacional" VARCHAR(64)' in comando for comando in comandos))
+        self.assertTrue(any('ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "status_expedicao" VARCHAR(20)' in comando for comando in comandos))

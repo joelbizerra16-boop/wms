@@ -94,6 +94,56 @@ def garantir_estrutura_minuta(connection):
                     logger.warning('AUTO_FIX_SCHEMA: coluna core_minutaromaneio.importacao_lote criada automaticamente.')
                     alterado = True
 
+                if _tabela_existe(cursor, 'core_minutaromaneio') and not _coluna_existe(cursor, 'core_minutaromaneio', 'pdf_gerado_em'):
+                    cursor.execute(
+                        'ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "pdf_gerado_em" TIMESTAMPTZ NULL'
+                    )
+                    cursor.execute(
+                        'CREATE INDEX IF NOT EXISTS "core_minutaromaneio_pdf_gerado_em_5f77dc52" ON "core_minutaromaneio" ("pdf_gerado_em")'
+                    )
+                    logger.warning('AUTO_FIX_SCHEMA: coluna core_minutaromaneio.pdf_gerado_em criada automaticamente.')
+                    alterado = True
+
+                if _tabela_existe(cursor, 'core_minutaromaneio') and not _coluna_existe(cursor, 'core_minutaromaneio', 'pdf_gerado_por_id'):
+                    cursor.execute(
+                        'ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "pdf_gerado_por_id" BIGINT NULL'
+                    )
+                    cursor.execute(
+                        'CREATE INDEX IF NOT EXISTS "core_minutaromaneio_pdf_gerado_por_id_21435f71" ON "core_minutaromaneio" ("pdf_gerado_por_id")'
+                    )
+                    logger.warning('AUTO_FIX_SCHEMA: coluna core_minutaromaneio.pdf_gerado_por_id criada automaticamente.')
+                    alterado = True
+
+                if _tabela_existe(cursor, 'core_minutaromaneio') and not _coluna_existe(cursor, 'core_minutaromaneio', 'tipo_minuta'):
+                    cursor.execute(
+                        'ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "tipo_minuta" VARCHAR(40) DEFAULT '''''
+                    )
+                    logger.warning('AUTO_FIX_SCHEMA: coluna core_minutaromaneio.tipo_minuta criada automaticamente.')
+                    alterado = True
+
+                if _tabela_existe(cursor, 'core_minutaromaneio') and not _coluna_existe(cursor, 'core_minutaromaneio', 'hash_operacional'):
+                    cursor.execute(
+                        'ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "hash_operacional" VARCHAR(64) DEFAULT '''''
+                    )
+                    cursor.execute(
+                        'CREATE INDEX IF NOT EXISTS "core_minutaromaneio_hash_operacional_780d6fce" ON "core_minutaromaneio" ("hash_operacional")'
+                    )
+                    logger.warning('AUTO_FIX_SCHEMA: coluna core_minutaromaneio.hash_operacional criada automaticamente.')
+                    alterado = True
+
+                if _tabela_existe(cursor, 'core_minutaromaneio') and not _coluna_existe(cursor, 'core_minutaromaneio', 'status_expedicao'):
+                    cursor.execute(
+                        'ALTER TABLE "core_minutaromaneio" ADD COLUMN IF NOT EXISTS "status_expedicao" VARCHAR(20) DEFAULT ''ATIVA'''
+                    )
+                    cursor.execute(
+                        'CREATE INDEX IF NOT EXISTS "core_minutaromaneio_status_expedicao_0dedf37f" ON "core_minutaromaneio" ("status_expedicao")'
+                    )
+                    cursor.execute(
+                        'CREATE INDEX IF NOT EXISTS "min_rom_exp_pdf_ix" ON "core_minutaromaneio" ("status_expedicao", "pdf_gerado_em")'
+                    )
+                    logger.warning('AUTO_FIX_SCHEMA: coluna core_minutaromaneio.status_expedicao criada automaticamente.')
+                    alterado = True
+
                 if _tabela_existe(cursor, 'core_minutaromaneioitem') and not _coluna_existe(cursor, 'core_minutaromaneioitem', 'bairro'):
                     cursor.execute(
                         "ALTER TABLE \"core_minutaromaneioitem\" ADD COLUMN IF NOT EXISTS \"bairro\" VARCHAR(100) DEFAULT ''"
