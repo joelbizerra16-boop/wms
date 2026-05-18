@@ -3,17 +3,11 @@
 import os
 import sys
 
+from config.settings_selector import default_settings_module
+
 
 def _default_settings_module():
-    render_markers = (
-        'RENDER',
-        'RENDER_EXTERNAL_URL',
-        'RENDER_SERVICE_ID',
-        'RENDER_INSTANCE_ID',
-    )
-    if any(os.environ.get(marker) for marker in render_markers):
-        return 'config.settings.prod'
-    return 'config.settings.dev'
+    return default_settings_module()
 
 
 def main():

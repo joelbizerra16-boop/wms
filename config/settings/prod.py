@@ -13,7 +13,9 @@ ALLOWED_HOSTS = config(
 	default='.onrender.com,127.0.0.1,localhost',
 	cast=Csv(),
 )
-DATABASE_URL = config('DATABASE_URL')
+DATABASE_URL = config('DATABASE_URL', default='').strip()
+if not DATABASE_URL:
+	raise RuntimeError('DATABASE_URL obrigatoria em producao')
 _csrf_origins = config(
 	'CSRF_TRUSTED_ORIGINS',
 	default='https://wms-okv1.onrender.com,https://.onrender.com',
@@ -42,6 +44,8 @@ DATABASES = {
 		ssl_require=DATABASE_URL.startswith(('postgres://', 'postgresql://')),
 	)
 }
+if 'postgresql' not in DATABASES['default']['ENGINE']:
+	raise RuntimeError('Produção exige PostgreSQL real; SQLite não é permitido.')
 if 'postgresql' in DATABASES['default']['ENGINE']:
 	DATABASES['default'].setdefault('OPTIONS', {})
 	DATABASES['default']['OPTIONS']['sslmode'] = 'require'

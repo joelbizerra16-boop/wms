@@ -6,6 +6,8 @@ services:
     preDeployCommand: python manage.py create_render_superuser && python manage.py clearsessions
     startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --worker-class gthread --workers 4 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
     envVars:
+      - key: ENVIRONMENT
+        value: production
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.prod
       - key: DEBUG
