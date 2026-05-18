@@ -21,5 +21,6 @@ DATABASES = {
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
+# Mesmo backend de producao: gera staticfiles.json (manifest) exigido em runtime.
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 STORAGES['staticfiles']['BACKEND'] = STATICFILES_STORAGE
