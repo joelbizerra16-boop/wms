@@ -1,4 +1,5 @@
 from io import StringIO
+import os
 import time
 
 from django.core.management import call_command
@@ -34,6 +35,7 @@ class Command(BaseCommand):
         settings_dict = connection.settings_dict
 
         self.stdout.write(self.style.SUCCESS('== HEALTHCHECK MINUTA =='))
+        self.stdout.write(f"settings_module={os.environ.get('DJANGO_SETTINGS_MODULE', '-')}")
         self.stdout.write(f"alias={connection.alias}")
         self.stdout.write(f"vendor={connection.vendor}")
         self.stdout.write(f"engine={settings_dict.get('ENGINE') or '-'}")

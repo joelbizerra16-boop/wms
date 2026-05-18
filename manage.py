@@ -4,9 +4,21 @@ import os
 import sys
 
 
+def _default_settings_module():
+    render_markers = (
+        'RENDER',
+        'RENDER_EXTERNAL_URL',
+        'RENDER_SERVICE_ID',
+        'RENDER_INSTANCE_ID',
+    )
+    if any(os.environ.get(marker) for marker in render_markers):
+        return 'config.settings.prod'
+    return 'config.settings.dev'
+
+
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', _default_settings_module())
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
