@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.tarefas.models import Tarefa, TarefaItem
+from apps.tarefas.models import OndaSeparacao, Tarefa, TarefaItem
 
 
 class TarefaItemInline(admin.TabularInline):
@@ -9,12 +9,21 @@ class TarefaItemInline(admin.TabularInline):
 	autocomplete_fields = ('produto',)
 
 
+@admin.register(OndaSeparacao)
+class OndaSeparacaoAdmin(admin.ModelAdmin):
+	list_display = ('codigo', 'rota', 'setor', 'tipo_embalagem', 'status', 'nf_total', 'percentual', 'created_at')
+	list_filter = ('status', 'setor', 'tipo_embalagem', 'rota')
+	search_fields = ('codigo', 'rota__nome', 'nfs__numero')
+	autocomplete_fields = ('rota', 'operador', 'nfs')
+	readonly_fields = ('codigo', 'created_at', 'updated_at')
+
+
 @admin.register(Tarefa)
 class TarefaAdmin(admin.ModelAdmin):
-	list_display = ('id', 'nf', 'tipo', 'rota', 'status', 'created_at')
-	list_filter = ('tipo', 'status', 'rota')
-	search_fields = ('id', 'nf__numero', 'rota__nome')
-	autocomplete_fields = ('nf', 'rota')
+	list_display = ('id', 'onda', 'nf', 'tipo', 'rota', 'tipo_embalagem', 'status', 'created_at')
+	list_filter = ('tipo', 'status', 'rota', 'tipo_embalagem')
+	search_fields = ('id', 'nf__numero', 'rota__nome', 'onda__codigo')
+	autocomplete_fields = ('onda', 'nf', 'rota')
 	readonly_fields = ('created_at', 'updated_at')
 	inlines = (TarefaItemInline,)
 

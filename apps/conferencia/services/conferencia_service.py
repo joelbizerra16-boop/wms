@@ -23,6 +23,11 @@ from apps.nf.services.consistencia_service import _itens_separacao_prefetch_nf, 
 from apps.nf.services.status_service import atualizar_status_nf, sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa, TarefaItem
+from apps.tarefas.services.onda_service import (
+    normalizar_tipo_embalagem,
+    obter_ou_criar_tarefa_onda,
+    registrar_item_tarefa_onda,
+)
 from apps.usuarios.models import Setor
 from apps.usuarios.session_utils import usuario_esta_logado
 
@@ -269,7 +274,7 @@ def _resumo_separacao_nf(nf):
             return {'status_separacao': 'PENDENTE', 'itens_pendentes': 0, 'itens_separados': 0, 'total_itens': 0, 'separado_em': None}
         itens_pendentes = sum(1 for item in itens_prefetch if item.quantidade_separada < item.quantidade_total)
         itens_separados = max(total_itens - itens_pendentes, 0)
-        status_separacao = 'SEPARADO' if itens_pendentes == 0 else 'PENDENTE'
+        status_separacao = 'SEPARADO' if itens_pendentes == 0 else ('PARCIALMENTE_SEPARADA' if itens_separados > 0 else 'PENDENTE')
         datas_bipagem = [getattr(item, 'data_bipagem', None) for item in itens_prefetch if getattr(item, 'data_bipagem', None)]
         return {
             'status_separacao': status_separacao,
@@ -302,7 +307,7 @@ def _resumo_separacao_nf(nf):
 
     itens_pendentes = sum(1 for item in itens_db if item['quantidade_separada'] < item['quantidade_total'])
     itens_separados = max(total_itens - itens_pendentes, 0)
-    status_separacao = 'SEPARADO' if itens_pendentes == 0 else 'PENDENTE'
+    status_separacao = 'SEPARADO' if itens_pendentes == 0 else ('PARCIALMENTE_SEPARADA' if itens_separados > 0 else 'PENDENTE')
     datas_bipagem = [item['data_bipagem'] for item in itens_db if item['data_bipagem']]
     logger.info(
         'CONFERENCIA_LIBERACAO_QUERY nf_id=%s origem=db itens_ids=%s quantidades=%s sql=%s',
@@ -1295,80 +1300,39 @@ def _gerar_retorno_para_separacao(conferencia):
     if not itens_divergentes:
         return
 
-    filtros = []
-    normais = []
+    agrupados_operacionais = {}
     for item in itens_divergentes:
         quantidade_retorno = item.qtd_esperada - item.qtd_conferida
         if quantidade_retorno <= 0:
             quantidade_retorno = item.qtd_esperada or Decimal('1')
-        if _setor_operacional_produto(item.produto) == Setor.Codigo.FILTROS:
-            filtros.append((item.produto, quantidade_retorno))
-        else:
-            normais.append((item.produto, quantidade_retorno))
+        setor = _setor_operacional_produto(item.produto)
+        tipo_embalagem = normalizar_tipo_embalagem(getattr(item.produto, 'embalagem', None))
+        agrupados_operacionais.setdefault((setor, tipo_embalagem), []).append((item.produto, quantidade_retorno))
 
-    if filtros:
-        tarefa_filtro = Tarefa.objects.create(
+    for (setor, tipo_embalagem), itens in agrupados_operacionais.items():
+        tarefa, _onda = obter_ou_criar_tarefa_onda(
             nf=conferencia.nf,
-            tipo=Tarefa.Tipo.FILTRO,
-            setor=Setor.Codigo.FILTROS,
             rota=conferencia.nf.rota,
-            status=Tarefa.Status.ABERTO,
+            setor=setor,
+            tipo_embalagem=tipo_embalagem,
         )
-        for produto, quantidade in filtros:
-            TarefaItem.objects.create(tarefa=tarefa_filtro, nf=conferencia.nf, produto=produto, quantidade_total=quantidade)
-
-    if normais:
-        agrupados_por_setor = {}
-        for produto, quantidade in normais:
-            agrupados_por_setor.setdefault(_setor_operacional_produto(produto), []).append((produto, quantidade))
-
-        for setor, itens in agrupados_por_setor.items():
-            tarefa = Tarefa.objects.filter(
-                nf__isnull=True,
-                tipo=Tarefa.Tipo.ROTA,
-                setor=setor,
-                rota=conferencia.nf.rota,
-                status=Tarefa.Status.ABERTO,
-            ).first()
-            if tarefa is None:
-                tarefa = Tarefa.objects.create(
-                    nf=None,
-                    tipo=Tarefa.Tipo.ROTA,
-                    setor=setor,
-                    rota=conferencia.nf.rota,
-                    status=Tarefa.Status.ABERTO,
-                )
-            for produto, quantidade in itens:
-                item_tarefa = TarefaItem.objects.filter(tarefa=tarefa, produto=produto, nf=conferencia.nf).first()
-                if item_tarefa is None:
-                    TarefaItem.objects.create(tarefa=tarefa, nf=conferencia.nf, produto=produto, quantidade_total=quantidade)
-                    continue
-                item_tarefa.quantidade_total += quantidade
-                item_tarefa.save(update_fields=['quantidade_total', 'updated_at'])
+        for produto, quantidade in itens:
+            item_tarefa = TarefaItem.objects.filter(tarefa=tarefa, produto=produto, nf=conferencia.nf).first()
+            if item_tarefa is None:
+                TarefaItem.objects.create(tarefa=tarefa, nf=conferencia.nf, produto=produto, quantidade_total=quantidade)
+                registrar_item_tarefa_onda(tarefa=tarefa, quantidade=quantidade)
+                continue
+            item_tarefa.quantidade_total += quantidade
+            item_tarefa.save(update_fields=['quantidade_total', 'updated_at'])
+            registrar_item_tarefa_onda(tarefa=tarefa, quantidade=quantidade)
 
 
 def _tarefas_relacionadas_nf(nf):
-    setores_nf = {
-        _setor_operacional_produto(item.produto)
-        for item in _itens_nf_relacionados(nf)
-        if item.produto_id is not None
-        if _setor_operacional_produto(item.produto) != Setor.Codigo.FILTROS
-    }
-    tarefas = [tarefa for tarefa in _tarefas_nf_relacionadas(nf) if tarefa.tipo == Tarefa.Tipo.FILTRO]
-    if not setores_nf:
-        return tarefas
-
-    tarefas_rota = list(
-        Tarefa.objects.filter(
-            nf__isnull=True,
-            tipo=Tarefa.Tipo.ROTA,
-            rota=nf.rota,
-            setor__in=setores_nf,
-        )
+    return list(
+        Tarefa.objects.filter(Q(nf=nf) | Q(itens__nf=nf))
+        .select_related('onda', 'rota')
+        .distinct()
     )
-    if len({tarefa.setor for tarefa in tarefas_rota}) != len(setores_nf):
-        return tarefas
-    return tarefas + tarefas_rota
 
 
 def _dados_conferencia(conferencia):

@@ -20,6 +20,7 @@ from apps.core.services.produto_validacao_service import (
 from apps.nf.services.status_service import sincronizar_status_operacional_nfs
 from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa, TarefaItem
+from apps.tarefas.services.onda_service import atualizar_progresso_bipagem, limpar_referencias_execucao_onda
 from apps.usuarios.models import Setor, Usuario, UsuarioSessao
 
 
@@ -139,7 +140,7 @@ def _setores_usuario(usuario):
 
 def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None):
     queryset = (
-        Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
+        Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao', 'onda')
         .defer('nf__bairro')
         .prefetch_related('itens__produto', 'itens__nf')
         .filter(ativo=True)
@@ -257,6 +258,14 @@ def _serializar_tarefa_lista(tarefa, usuario=None):
             if tarefa.usuario_em_execucao_id and tarefa.usuario_em_execucao
             else (tarefa.usuario.nome if tarefa.usuario_id and tarefa.usuario else '')
         ),
+        'onda_codigo': tarefa.onda.codigo if tarefa.onda_id and getattr(tarefa, 'onda', None) else '',
+        'onda_status': tarefa.onda.status if tarefa.onda_id and getattr(tarefa, 'onda', None) else '',
+        'tipo_embalagem': tarefa.tipo_embalagem or '',
+        'onda_nf_total': tarefa.onda.nf_total if tarefa.onda_id and getattr(tarefa, 'onda', None) else (1 if tarefa.nf_id else 0),
+        'itens_total': float(tarefa.itens_total or 0),
+        'itens_bipados': float(tarefa.itens_bipados or 0),
+        'itens_pendentes': float(tarefa.itens_pendentes or 0),
+        'percentual': float(tarefa.percentual or 0),
         'bloqueado': bool(
             usuario is not None
             and (tarefa.usuario_em_execucao_id or tarefa.usuario_id)
@@ -494,6 +503,10 @@ def iniciar_tarefa(tarefa_id, usuario):
                 tarefa.usuario_em_execucao = usuario
                 tarefa.data_inicio = timezone.now()
                 tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
+                if tarefa.onda_id:
+                    tarefa.onda.operador_id = usuario.id
+                    tarefa.onda.status = tarefa.onda.Status.EM_SEPARACAO
+                    tarefa.onda.save(update_fields=['operador', 'status', 'updated_at'])
                 identificador = _identificador_tarefa_log(tarefa)
                 _registrar_log_seguro(usuario, 'INICIO SEPARACAO', f'Tarefa {tarefa.id} iniciada para {identificador}.')
                 _registrar_atividade_segura(usuario, UserActivityLog.Tipo.TAREFA_INICIO, tarefa, timezone.now())
@@ -522,7 +535,23 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
         def _executar():
             with transaction.atomic():
                 with metricas.fase('lock'):
-                    tarefa_local = _tarefa_lock_queryset().get(id=tarefa_id)
+                    tarefa_local = (
+                        Tarefa.objects.select_related('onda')
+                        .only(
+                            'id',
+                            'status',
+                            'setor',
+                            'tipo',
+                            'nf_id',
+                            'rota_id',
+                            'usuario_id',
+                            'usuario_em_execucao_id',
+                            'itens_total',
+                            'itens_pendentes',
+                            'onda_id',
+                        )
+                        .get(id=tarefa_id)
+                    )
                     _validar_nf_cancelada(tarefa_local, usuario, 'SEPARACAO BLOQUEADA')
                     _validar_setor_tarefa(tarefa_local, usuario)
                     _validar_execucao_tarefa(tarefa_local, usuario)
@@ -531,7 +560,7 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
 
                 with metricas.fase('query'):
                     itens_pendentes_qs = (
-                        _itens_pendentes_lock_queryset()
+                        TarefaItem.objects
                         .filter(tarefa_id=tarefa_id, quantidade_separada__lt=F('quantidade_total'))
                         .select_related('produto')
                         .only(
@@ -575,7 +604,28 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         usuario=usuario,
                         codigo_lido=codigo,
                     )
-                    item_local = validacao.item
+
+                with metricas.fase('lock'):
+                    item_local = (
+                        TarefaItem.objects.select_for_update(**_select_for_update_kwargs())
+                        .select_related('produto')
+                        .only(
+                            'id',
+                            'tarefa_id',
+                            'nf_id',
+                            'produto_id',
+                            'quantidade_total',
+                            'quantidade_separada',
+                            'possui_restricao',
+                            'produto__id',
+                            'produto__cod_prod',
+                            'produto__cod_ean',
+                            'produto__codigo',
+                            'produto__setor',
+                            'produto__categoria',
+                        )
+                        .get(pk=validacao.item.id)
+                    )
 
                     if item_local.quantidade_separada >= item_local.quantidade_total:
                         raise SeparacaoError('Quantidade excedida')
@@ -593,13 +643,31 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         updated_at=agora,
                     )
                     item_local.quantidade_separada = nova_separada
+                    atualizar_progresso_bipagem(
+                        tarefa_id=tarefa_local.id,
+                        onda_id=tarefa_local.onda_id,
+                        operador_id=usuario.id,
+                        delta=Decimal('1'),
+                        finalizado=False,
+                    )
 
                 finalizado_local = False
-                if completo:
+                pendentes_antes = tarefa_local.itens_pendentes or Decimal('0')
+                if completo and tarefa_local.itens_total and pendentes_antes > 0:
+                    finalizado_local = pendentes_antes <= Decimal('1')
+                elif completo:
                     finalizado_local = not TarefaItem.objects.filter(
                         tarefa_id=tarefa_id,
                         quantidade_separada__lt=F('quantidade_total'),
                     ).exclude(pk=item_local.pk).exists()
+                if finalizado_local:
+                    atualizar_progresso_bipagem(
+                        tarefa_id=tarefa_local.id,
+                        onda_id=tarefa_local.onda_id,
+                        operador_id=usuario.id,
+                        delta=Decimal('0'),
+                        finalizado=True,
+                    )
                 nf_ids = []
                 if tarefa_local.nf_id:
                     nf_ids.append(tarefa_local.nf_id)
@@ -634,6 +702,8 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                     'separado': float(item.quantidade_separada),
                     'status_tarefa': status_tarefa,
                     'finalizado': finalizado,
+                    'onda_codigo': tarefa.onda.codigo if tarefa.onda_id and getattr(tarefa, 'onda', None) else '',
+                    'tipo_embalagem': tarefa.tipo_embalagem or '',
                     'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
                     'cor': 'verde',
                     'som': 'beep-curto',
@@ -714,6 +784,7 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
                 tarefa_local.usuario_em_execucao = None
                 tarefa_local.data_inicio = None
                 tarefa_local.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
+                limpar_referencias_execucao_onda(tarefa_local.onda_id)
             else:
                 tarefa_local.save(update_fields=['status', 'updated_at'])
             for item_local in TarefaItem.objects.select_for_update(**_select_for_update_kwargs()).filter(tarefa_id=tarefa_id):
@@ -896,6 +967,13 @@ def _dados_tarefa(tarefa):
         'usuario_em_execucao_id': tarefa.usuario_em_execucao_id,
         'tipo': tarefa.tipo,
         'setor': tarefa.setor,
+        'onda_codigo': tarefa.onda.codigo if tarefa.onda_id and getattr(tarefa, 'onda', None) else '',
+        'onda_status': tarefa.onda.status if tarefa.onda_id and getattr(tarefa, 'onda', None) else '',
+        'tipo_embalagem': tarefa.tipo_embalagem or '',
+        'itens_total': float(tarefa.itens_total or 0),
+        'itens_bipados': float(tarefa.itens_bipados or 0),
+        'itens_pendentes': float(tarefa.itens_pendentes or 0),
+        'percentual': float(tarefa.percentual or 0),
         'segmento': _segmento_tarefa(tarefa),
     }
 
@@ -931,6 +1009,7 @@ def sincronizar_conclusao_automatica_tarefa(tarefa, usuario=None):
     tarefa.usuario_em_execucao = None
     tarefa.data_inicio = None
     tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
+    limpar_referencias_execucao_onda(tarefa.onda_id)
     TarefaItem.objects.filter(tarefa=tarefa, possui_restricao=True).update(possui_restricao=False)
     return True
 
@@ -963,6 +1042,7 @@ def liberar_execucao_tarefa(tarefa_id, usuario):
             tarefa_local.usuario_em_execucao = None
             tarefa_local.data_inicio = None
             tarefa_local.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
+            limpar_referencias_execucao_onda(tarefa_local.onda_id)
             return tarefa_local
 
     tarefa = _executar_com_retry_sqlite_lock(_executar)

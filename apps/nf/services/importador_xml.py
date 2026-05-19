@@ -28,6 +28,11 @@ from apps.nf.services.status_service import sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
 from apps.rotas.services.roteirizacao_service import definir_rota
 from apps.tarefas.models import Tarefa, TarefaItem
+from apps.tarefas.services.onda_service import (
+    normalizar_tipo_embalagem,
+    obter_ou_criar_tarefa_onda,
+    registrar_item_tarefa_onda,
+)
 from apps.usuarios.models import Setor
 
 
@@ -639,54 +644,23 @@ def _registrar_produtos_criados_via_xml(nf, produtos_novos, usuario_log):
 
 def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
     rota = nf.rota
-    agrupados_por_setor = defaultdict(list)
-    itens_filtros = []
+    agrupados_operacionais = defaultdict(list)
 
     for item_nf in nf.itens.select_related('produto').all():
         produto = item_nf.produto
         setor = _resolver_setor_operacional_produto(produto)
-        if setor == Setor.Codigo.FILTROS:
-            itens_filtros.append((produto, item_nf.quantidade))
-            continue
-        agrupados_por_setor.setdefault(setor, []).append((produto, item_nf.quantidade))
+        tipo_embalagem = normalizar_tipo_embalagem(getattr(produto, 'embalagem', None))
+        agrupados_operacionais[(setor, tipo_embalagem)].append((produto, item_nf.quantidade))
 
-    if itens_filtros:
-        tarefa_filtro, criada = Tarefa.objects.get_or_create(
+    for (setor, tipo_embalagem), itens in agrupados_operacionais.items():
+        tarefa, onda = obter_ou_criar_tarefa_onda(
             nf=nf,
-            tipo=Tarefa.Tipo.FILTRO,
-            setor=Setor.Codigo.FILTROS,
             rota=rota,
-            defaults={'status': Tarefa.Status.ABERTO},
+            setor=setor,
+            tipo_embalagem=tipo_embalagem,
+            tarefas_lote_cache=tarefas_lote_cache,
         )
-        if criada:
-            print(f'Tarefa criada para NF {nf.numero}')
-        for produto, quantidade in itens_filtros:
-            item_tarefa, item_criado = TarefaItem.objects.get_or_create(
-                tarefa=tarefa_filtro,
-                nf=nf,
-                produto=produto,
-                defaults={'quantidade_total': quantidade},
-            )
-            if not item_criado:
-                item_tarefa.quantidade_total += quantidade
-                item_tarefa.save(update_fields=['quantidade_total', 'updated_at'])
-
-    for setor, itens in agrupados_por_setor.items():
-        chave_lote = (setor, rota.id)
-        tarefa = None
-        if tarefas_lote_cache is not None:
-            tarefa = tarefas_lote_cache.get(chave_lote)
-        if tarefa is None:
-            tarefa = Tarefa.objects.create(
-                nf=None,
-                tipo=Tarefa.Tipo.ROTA,
-                setor=setor,
-                rota=rota,
-                status=Tarefa.Status.ABERTO,
-            )
-            if tarefas_lote_cache is not None:
-                tarefas_lote_cache[chave_lote] = tarefa
-            print(f'Tarefa criada para lote/NF {nf.numero}')
+        print(f'Tarefa criada/atualizada para onda {onda.codigo or "NOVA"} NF {nf.numero}')
         for produto, quantidade in itens:
             item_tarefa = TarefaItem.objects.filter(tarefa=tarefa, produto=produto, nf=nf).first()
             if item_tarefa is None:
@@ -696,9 +670,11 @@ def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
                     produto=produto,
                     quantidade_total=quantidade,
                 )
+                registrar_item_tarefa_onda(tarefa=tarefa, quantidade=quantidade)
                 continue
             item_tarefa.quantidade_total += quantidade
             item_tarefa.save(update_fields=['quantidade_total', 'updated_at'])
+            registrar_item_tarefa_onda(tarefa=tarefa, quantidade=quantidade)
 
 
 def _normalizar_categoria_produto(produto, persistir=True):
