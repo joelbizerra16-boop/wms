@@ -6,6 +6,7 @@ import logging
 
 from django.conf import settings
 from django.db import OperationalError, connection, transaction
+from django.db.utils import ProgrammingError
 from django.db.models import F, IntegerField, Max, Q, Sum
 from django.db.models.functions import Cast
 from django.utils import timezone
@@ -138,8 +139,22 @@ def _setores_usuario(usuario):
     return setores
 
 
-def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None):
-    queryset = (
+def _erro_schema_onda_listagem(exc):
+    mensagem = str(exc).lower()
+    marcadores = (
+        'tarefas_ondaseparacao',
+        'onda_id',
+        'tipo_embalagem',
+        'itens_total',
+        'itens_bipados',
+        'itens_pendentes',
+        'percentual',
+    )
+    return any(marcador in mensagem for marcador in marcadores)
+
+
+def _queryset_tarefas_disponiveis_com_onda():
+    return (
         Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao', 'onda')
         .defer('nf__bairro')
         .prefetch_related('itens__produto', 'itens__nf')
@@ -148,6 +163,59 @@ def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None)
         .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal='CANCELADA'))
         .order_by('-id')
     )
+
+
+def _queryset_tarefas_disponiveis_classico():
+    return (
+        Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
+        .only(
+            'id',
+            'created_at',
+            'updated_at',
+            'tipo',
+            'setor',
+            'nf_id',
+            'rota_id',
+            'usuario_id',
+            'usuario_em_execucao_id',
+            'data_inicio',
+            'status',
+            'ativo',
+            'nf__id',
+            'nf__numero',
+            'nf__status_fiscal',
+            'nf__balcao',
+            'rota__id',
+            'rota__nome',
+            'usuario__id',
+            'usuario__nome',
+            'usuario__username',
+            'usuario_em_execucao__id',
+            'usuario_em_execucao__nome',
+            'usuario_em_execucao__username',
+        )
+        .prefetch_related('itens__produto', 'itens__nf')
+        .filter(ativo=True)
+        .filter(status__in=[Tarefa.Status.ABERTO, Tarefa.Status.EM_EXECUCAO])
+        .filter(Q(nf__isnull=True) | ~Q(nf__status_fiscal='CANCELADA'))
+        .order_by('-id')
+    )
+
+
+def _aplicar_defaults_fallback_onda(tarefas):
+    for tarefa in tarefas:
+        tarefa.__dict__['onda_id'] = None
+        tarefa.__dict__['onda'] = None
+        tarefa.__dict__['tipo_embalagem'] = ''
+        tarefa.__dict__['itens_total'] = Decimal('0')
+        tarefa.__dict__['itens_bipados'] = Decimal('0')
+        tarefa.__dict__['itens_pendentes'] = Decimal('0')
+        tarefa.__dict__['percentual'] = Decimal('0')
+    return tarefas
+
+
+def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None, path='/separacao/'):
+    queryset = _queryset_tarefas_disponiveis_com_onda()
     if data_inicio is not None:
         queryset = queryset.filter(
             Q(created_at__date__gte=data_inicio) | Q(updated_at__date__gte=data_inicio)
@@ -157,7 +225,28 @@ def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None)
             Q(created_at__date__lte=data_fim) | Q(updated_at__date__lte=data_fim)
         )
     queryset = _filtrar_tarefas_por_setor(queryset, usuario)
-    tarefas = list(queryset)
+    try:
+        tarefas = list(queryset)
+    except ProgrammingError as exc:
+        if not _erro_schema_onda_listagem(exc):
+            raise
+        logger.exception(
+            'ONDA_LISTAGEM_FALLBACK exception=%s user_id=%s path=%s modo=classico',
+            exc.__class__.__name__,
+            getattr(usuario, 'id', None),
+            path,
+        )
+        queryset = _queryset_tarefas_disponiveis_classico()
+        if data_inicio is not None:
+            queryset = queryset.filter(
+                Q(created_at__date__gte=data_inicio) | Q(updated_at__date__gte=data_inicio)
+            )
+        if data_fim is not None:
+            queryset = queryset.filter(
+                Q(created_at__date__lte=data_fim) | Q(updated_at__date__lte=data_fim)
+            )
+        queryset = _filtrar_tarefas_por_setor(queryset, usuario)
+        tarefas = _aplicar_defaults_fallback_onda(list(queryset))
     _normalizar_tarefas_lista_operacional(tarefas, usuario)
 
     tarefas = [tarefa for tarefa in tarefas if tarefa.status in STATUS_TAREFA_DISPONIVEL]

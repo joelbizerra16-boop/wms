@@ -1,5 +1,7 @@
 from django.test import TestCase, override_settings
+from django.db.utils import ProgrammingError
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from apps.clientes.models import Cliente
 from apps.nf.models import NotaFiscal
@@ -270,6 +272,27 @@ class SeparacaoRealAPITests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn('não corresponde ao item esperado', self._message(response))
+
+    @patch('apps.tarefas.services.separacao_service._queryset_tarefas_disponiveis_com_onda')
+    def test_lista_faz_fallback_classico_quando_query_onda_quebra(self, queryset_com_onda_mock):
+        self._autenticar(self.usuario_lub)
+
+        class QuerysetFalho:
+            def filter(self, *args, **kwargs):
+                return self
+
+            def __iter__(self):
+                raise ProgrammingError('relation "tarefas_ondaseparacao" does not exist')
+
+        queryset_com_onda_mock.return_value = QuerysetFalho()
+
+        response = self.client.get('/api/separacao/tarefas/')
+
+        self.assertEqual(response.status_code, 200)
+        payload = self._body(response)
+        self.assertEqual([item['id'] for item in payload], [self.tarefa_rota_lub.id])
+        self.assertEqual(payload[0]['onda_codigo'], '')
+        self.assertEqual(payload[0]['tipo_embalagem'], '')
 
     def test_filtro_nao_permita_finalizar_concluido_com_pendencia(self):
         self._autenticar(self.usuario_filtro)

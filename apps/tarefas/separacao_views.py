@@ -30,7 +30,10 @@ class ListarTarefasSeparacaoAPIView(OperacionalAPIView):
     allowed_profiles = (Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
 
     def get(self, request):
-        return Response(listar_tarefas_disponiveis(request.user), status=status.HTTP_200_OK)
+        return Response(
+            listar_tarefas_disponiveis(request.user, path=request.path),
+            status=status.HTTP_200_OK,
+        )
 
 
 class IniciarTarefaSeparacaoAPIView(OperacionalAPIView):

@@ -1229,7 +1229,7 @@ def separacao_lista_web(request):
     date_from, date_to, busca = resolver_periodo_operacional_request(request)
     paginacao = _paginar_lista(
         request,
-        listar_tarefas_disponiveis(request.user, data_inicio=date_from, data_fim=date_to),
+        listar_tarefas_disponiveis(request.user, data_inicio=date_from, data_fim=date_to, path=request.path),
     )
     contexto = {
         'tarefas': paginacao['page_obj'],

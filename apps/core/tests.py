@@ -1374,6 +1374,22 @@ class MinutaImportacaoTests(TestCase):
 		self.assertNotContains(response, 'Hoje + ontem', html=False)
 		self.assertContains(response, 'btn-refresh', html=False)
 
+	@patch('apps.tarefas.services.separacao_service._queryset_tarefas_disponiveis_com_onda')
+	def test_separacao_lista_abre_em_modo_classico_quando_onda_quebra(self, queryset_com_onda_mock):
+		class QuerysetFalho:
+			def filter(self, *args, **kwargs):
+				return self
+
+			def __iter__(self):
+				raise ProgrammingError('relation "tarefas_ondaseparacao" does not exist')
+
+		queryset_com_onda_mock.return_value = QuerysetFalho()
+
+		response = self.client.get('/separacao/')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'btn-refresh', html=False)
+
 	def test_separacao_lista_ajax_retorna_somente_tabela(self):
 		response = self.client.get('/separacao/', HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 
