@@ -653,14 +653,26 @@ def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
         agrupados_operacionais[(setor, tipo_embalagem)].append((produto, item_nf.quantidade))
 
     for (setor, tipo_embalagem), itens in agrupados_operacionais.items():
-        tarefa, onda = obter_ou_criar_tarefa_onda(
-            nf=nf,
-            rota=rota,
-            setor=setor,
-            tipo_embalagem=tipo_embalagem,
-            tarefas_lote_cache=tarefas_lote_cache,
-        )
-        print(f'Tarefa criada/atualizada para onda {onda.codigo or "NOVA"} NF {nf.numero}')
+        try:
+            tarefa, onda = obter_ou_criar_tarefa_onda(
+                nf=nf,
+                rota=rota,
+                setor=setor,
+                tipo_embalagem=tipo_embalagem,
+                tarefas_lote_cache=tarefas_lote_cache,
+            )
+            print(f'Tarefa criada/atualizada para onda {onda.codigo or "NOVA"} NF {nf.numero}')
+        except Exception as exc:
+            logger.exception(
+                'ONDA_FALLBACK_ATIVADO motivo=erro_fluxo_onda exception=%s nf_id=%s nf_numero=%s rota_id=%s rota_nome=%s setor=%s',
+                exc.__class__.__name__,
+                getattr(nf, 'id', None),
+                getattr(nf, 'numero', ''),
+                getattr(rota, 'id', None),
+                getattr(rota, 'nome', ''),
+                setor,
+            )
+            tarefa = _obter_ou_criar_tarefa_classica(nf=nf, rota=rota, setor=setor, tarefas_lote_cache=tarefas_lote_cache)
         for produto, quantidade in itens:
             item_tarefa = TarefaItem.objects.filter(tarefa=tarefa, produto=produto, nf=nf).first()
             if item_tarefa is None:
@@ -675,6 +687,41 @@ def gerar_tarefas_separacao(nf, tarefas_lote_cache=None):
             item_tarefa.quantidade_total += quantidade
             item_tarefa.save(update_fields=['quantidade_total', 'updated_at'])
             registrar_item_tarefa_onda(tarefa=tarefa, quantidade=quantidade)
+
+
+def _obter_ou_criar_tarefa_classica(*, nf, rota, setor, tarefas_lote_cache=None):
+    if setor == Setor.Codigo.FILTROS:
+        tarefa, _criada = Tarefa.objects.get_or_create(
+            nf=nf,
+            tipo=Tarefa.Tipo.FILTRO,
+            setor=Setor.Codigo.FILTROS,
+            rota=rota,
+            defaults={'status': Tarefa.Status.ABERTO},
+        )
+        return tarefa
+
+    chave_lote = ('fallback_classico', setor, rota.id)
+    if tarefas_lote_cache is not None and chave_lote in tarefas_lote_cache:
+        return tarefas_lote_cache[chave_lote]
+
+    tarefa = Tarefa.objects.filter(
+        nf__isnull=True,
+        tipo=Tarefa.Tipo.ROTA,
+        setor=setor,
+        rota=rota,
+        status=Tarefa.Status.ABERTO,
+    ).order_by('-id').first()
+    if tarefa is None:
+        tarefa = Tarefa.objects.create(
+            nf=None,
+            tipo=Tarefa.Tipo.ROTA,
+            setor=setor,
+            rota=rota,
+            status=Tarefa.Status.ABERTO,
+        )
+    if tarefas_lote_cache is not None:
+        tarefas_lote_cache[chave_lote] = tarefa
+    return tarefa
 
 
 def _normalizar_categoria_produto(produto, persistir=True):
