@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from django.db import transaction
 from django.db.utils import ProgrammingError
 from django.test import TestCase
 from django.utils import timezone
@@ -38,7 +39,7 @@ class WaveFallbackTests(TestCase):
 		)
 		NotaFiscalItem.objects.create(nf=self.nf, produto=self.produto, quantidade='2.00')
 
-	@patch('apps.nf.services.importador_xml.obter_ou_criar_tarefa_onda')
+	@patch('apps.tarefas.services.onda_service.obter_ou_criar_tarefa_onda')
 	def test_importacao_faz_fallback_classico_quando_onda_falha(self, obter_ou_criar_tarefa_onda_mock):
 		obter_ou_criar_tarefa_onda_mock.side_effect = ProgrammingError('relation "tarefas_ondaseparacao" does not exist')
 
@@ -50,3 +51,12 @@ class WaveFallbackTests(TestCase):
 		self.assertIsNone(tarefa.onda_id)
 		self.assertEqual(tarefa.tipo, Tarefa.Tipo.ROTA)
 		self.assertEqual(item.quantidade_total, self.nf.itens.first().quantidade)
+
+	@patch('apps.tarefas.services.onda_service.obter_ou_criar_tarefa_onda')
+	def test_fallback_onda_nao_invalida_transacao_pai(self, obter_ou_criar_tarefa_onda_mock):
+		obter_ou_criar_tarefa_onda_mock.side_effect = ProgrammingError('relation "tarefas_ondaseparacao" does not exist')
+
+		with transaction.atomic():
+			gerar_tarefas_separacao(self.nf, tarefas_lote_cache={})
+			# Se a transação pai tivesse sido abortada, esta query explodiria com InFailedSqlTransaction.
+			self.assertEqual(TarefaItem.objects.filter(nf=self.nf).count(), 1)

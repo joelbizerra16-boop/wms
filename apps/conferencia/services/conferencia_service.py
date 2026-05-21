@@ -23,9 +23,9 @@ from apps.nf.services.consistencia_service import _itens_separacao_prefetch_nf, 
 from apps.nf.services.status_service import atualizar_status_nf, sincronizar_status_operacional_nf
 from apps.produtos.models import Produto
 from apps.tarefas.models import Tarefa, TarefaItem
+from apps.tarefas.services.onda_fallback import obter_tarefa_separacao_com_fallback_onda
 from apps.tarefas.services.onda_service import (
     normalizar_tipo_embalagem,
-    obter_ou_criar_tarefa_onda,
     registrar_item_tarefa_onda,
 )
 from apps.usuarios.models import Setor
@@ -1310,7 +1310,7 @@ def _gerar_retorno_para_separacao(conferencia):
         agrupados_operacionais.setdefault((setor, tipo_embalagem), []).append((item.produto, quantidade_retorno))
 
     for (setor, tipo_embalagem), itens in agrupados_operacionais.items():
-        tarefa, _onda = obter_ou_criar_tarefa_onda(
+        tarefa, _onda = obter_tarefa_separacao_com_fallback_onda(
             nf=conferencia.nf,
             rota=conferencia.nf.rota,
             setor=setor,
