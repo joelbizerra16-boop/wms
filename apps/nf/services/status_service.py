@@ -3,6 +3,7 @@ from decimal import Decimal
 from apps.conferencia.models import Conferencia
 from apps.nf.models import NotaFiscal
 from apps.tarefas.models import Tarefa, TarefaItem
+from apps.tarefas.services.onda_schema import queryset_tarefa_item_com_tarefa
 
 
 def _itens_tarefa_prefetch_nf(nf):
@@ -76,8 +77,7 @@ def atualizar_status_nf(nf):
         itens_com_restricao = [item for item in itens_prefetch if item.possui_restricao]
     else:
         itens_com_restricao = list(
-            TarefaItem.objects.select_related('tarefa')
-            .filter(nf=nf, possui_restricao=True)
+            queryset_tarefa_item_com_tarefa(TarefaItem.objects.filter(nf=nf, possui_restricao=True))
         )
     conferencias_validas = _conferencias_validas_nf(nf)
     ultima_conferencia = _ultima_conferencia(nf, conferencias_validas)

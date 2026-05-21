@@ -110,3 +110,37 @@ def queryset_tarefa_legado():
     from apps.tarefas.models import Tarefa
 
     return Tarefa.objects.only(*TAREFA_CAMPOS_LEGADO)
+
+
+def queryset_tarefa_operacional():
+    """Queryset de Tarefa seguro para schema brownfield (sem colunas de onda quando ausentes)."""
+    from apps.tarefas.models import Tarefa
+
+    if coluna_tarefa_onda_id_disponivel():
+        return Tarefa.objects
+    return queryset_tarefa_legado()
+
+
+def queryset_tarefa_item_com_tarefa(queryset=None):
+    """select_related('tarefa') sem carregar onda_id quando coluna não existe."""
+    from apps.tarefas.models import TarefaItem
+
+    qs = queryset if queryset is not None else TarefaItem.objects.all()
+    if coluna_tarefa_onda_id_disponivel():
+        return qs.select_related('tarefa')
+    campos_item = (
+        'id',
+        'created_at',
+        'updated_at',
+        'tarefa_id',
+        'nf_id',
+        'produto_id',
+        'quantidade_total',
+        'quantidade_separada',
+        'possui_restricao',
+        'bipado_por_id',
+        'data_bipagem',
+        'grupo_agregado_id',
+    )
+    campos_tarefa_rel = tuple(f'tarefa__{campo}' for campo in TAREFA_CAMPOS_LEGADO)
+    return qs.select_related('tarefa').only(*campos_item, *campos_tarefa_rel)

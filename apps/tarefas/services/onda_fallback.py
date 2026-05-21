@@ -8,6 +8,7 @@ from django.db import connection, transaction
 from django.utils import timezone
 
 from apps.tarefas.models import Tarefa
+from apps.tarefas.services.onda_schema import queryset_tarefa_legado
 from apps.usuarios.models import Setor
 
 logger = logging.getLogger(__name__)
