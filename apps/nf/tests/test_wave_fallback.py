@@ -60,3 +60,15 @@ class WaveFallbackTests(TestCase):
 			gerar_tarefas_separacao(self.nf, tarefas_lote_cache={})
 			# Se a transação pai tivesse sido abortada, esta query explodiria com InFailedSqlTransaction.
 			self.assertEqual(TarefaItem.objects.filter(nf=self.nf).count(), 1)
+
+	@patch('apps.tarefas.services.onda_schema.schema_onda_disponivel', return_value=False)
+	def test_gerar_tarefas_usa_modo_classico_sem_tentar_onda(self, _schema_mock):
+		with patch('apps.tarefas.services.onda_service.obter_ou_criar_tarefa_onda') as onda_mock:
+			gerar_tarefas_separacao(self.nf, tarefas_lote_cache={})
+			onda_mock.assert_not_called()
+
+		tarefa = Tarefa.objects.only('id', 'tipo', 'setor', 'nf_id', 'rota_id', 'status', 'ativo').get(
+			rota=self.rota,
+			setor=Setor.Codigo.LUBRIFICANTE,
+		)
+		self.assertEqual(TarefaItem.objects.filter(tarefa=tarefa, nf=self.nf).count(), 1)

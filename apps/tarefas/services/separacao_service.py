@@ -215,6 +215,32 @@ def _aplicar_defaults_fallback_onda(tarefas):
 
 
 def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None, path='/separacao/'):
+    from apps.tarefas.services.onda_schema import schema_onda_disponivel
+
+    if not schema_onda_disponivel():
+        queryset = _queryset_tarefas_disponiveis_classico()
+        if data_inicio is not None:
+            queryset = queryset.filter(
+                Q(created_at__date__gte=data_inicio) | Q(updated_at__date__gte=data_inicio)
+            )
+        if data_fim is not None:
+            queryset = queryset.filter(
+                Q(created_at__date__lte=data_fim) | Q(updated_at__date__lte=data_fim)
+            )
+        queryset = _filtrar_tarefas_por_setor(queryset, usuario)
+        tarefas = _aplicar_defaults_fallback_onda(list(queryset))
+        _normalizar_tarefas_lista_operacional(tarefas, usuario)
+        tarefas = [tarefa for tarefa in tarefas if tarefa.status in STATUS_TAREFA_DISPONIVEL]
+        tarefas_ordenadas = sorted(
+            tarefas,
+            key=lambda tarefa: (
+                0 if (_tarefa_balcao(tarefa) and tarefa.status == Tarefa.Status.ABERTO) else 1,
+                0 if tarefa.status == Tarefa.Status.ABERTO else 1,
+                tarefa.id,
+            ),
+        )
+        return [_serializar_tarefa_lista(tarefa, usuario) for tarefa in tarefas_ordenadas]
+
     queryset = _queryset_tarefas_disponiveis_com_onda()
     if data_inicio is not None:
         queryset = queryset.filter(

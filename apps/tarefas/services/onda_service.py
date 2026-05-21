@@ -120,6 +120,11 @@ def obter_ou_criar_tarefa_onda(*, nf, rota, setor, tipo_embalagem, tarefas_lote_
 
 
 def registrar_item_tarefa_onda(*, tarefa, quantidade):
+	from apps.tarefas.services.onda_schema import schema_onda_disponivel
+
+	if not schema_onda_disponivel():
+		return
+
 	quantidade = Decimal(str(quantidade or 0))
 	if quantidade <= ZERO_DECIMAL:
 		return
