@@ -12,6 +12,9 @@ class RequestTimingMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        from apps.core.db_telemetry import install_db_execute_wrapper
+
+        install_db_execute_wrapper()
         started_at = time.perf_counter()
         response = self.get_response(request)
         elapsed_ms = (time.perf_counter() - started_at) * 1000

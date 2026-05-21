@@ -6,14 +6,19 @@ from django.db import OperationalError, connection
 from django.db.models import Q
 from django.utils import timezone
 
+from django.core.cache import cache
+
 from apps.core.bipagem_leitura import (
     codigo_bipagem_primario,
     normalizar_codigo_barras as normalizar_codigo_barras_leitura,
     sanitizar_entrada_scanner,
     variantes_codigo_barras,
 )
+from apps.core.db_telemetry import registrar_cache_hit, registrar_cache_miss
 from apps.logs.models import Log
 from apps.produtos.models import Produto
+
+PRODUTO_LOOKUP_CACHE_TTL = 300
 
 logger = logging.getLogger(__name__)
 
@@ -236,22 +241,45 @@ def _codigo_corresponde_identificador(codigo_lido_normalizado, identificadores):
     return False
 
 
+def _chave_cache_produto(variantes):
+    if not variantes:
+        return ''
+    return f'wms:prod:lookup:{variantes[0]}'
+
+
 def _buscar_produto_por_codigo(codigo_normalizado):
     if not codigo_normalizado:
         return None
-    for variante in _codigo_variantes(codigo_normalizado):
-        produto = Produto.objects.filter(cod_ean=variante, ativo=True).first()
+    variantes = _codigo_variantes(codigo_normalizado)
+    if not variantes:
+        return None
+
+    cache_key = _chave_cache_produto(variantes)
+    produto_id = cache.get(cache_key)
+    if produto_id:
+        produto = (
+            Produto.objects.filter(pk=produto_id, ativo=True)
+            .only('id', 'cod_prod', 'cod_ean', 'codigo', 'setor', 'categoria', 'descricao')
+            .first()
+        )
         if produto:
+            registrar_cache_hit('produto', cache_key)
             return produto
-    for variante in _codigo_variantes(codigo_normalizado):
-        produto = Produto.objects.filter(cod_prod=variante, ativo=True).first()
-        if produto:
-            return produto
-    for variante in _codigo_variantes(codigo_normalizado):
-        produto = Produto.objects.filter(codigo=variante, ativo=True).first()
-        if produto:
-            return produto
-    return None
+        cache.delete(cache_key)
+
+    registrar_cache_miss('produto', cache_key)
+    filtro = Q()
+    for variante in variantes:
+        filtro |= Q(cod_ean=variante) | Q(cod_prod=variante) | Q(codigo=variante)
+    produto = (
+        Produto.objects.filter(filtro, ativo=True)
+        .only('id', 'cod_prod', 'cod_ean', 'codigo', 'setor', 'categoria', 'descricao')
+        .order_by('id')
+        .first()
+    )
+    if produto:
+        cache.set(cache_key, produto.id, PRODUTO_LOOKUP_CACHE_TTL)
+    return produto
 
 
 def _log_validacao(

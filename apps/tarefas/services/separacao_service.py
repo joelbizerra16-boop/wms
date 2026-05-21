@@ -1,4 +1,4 @@
-import time
+﻿import time
 import traceback
 from datetime import timedelta
 from decimal import Decimal
@@ -77,9 +77,9 @@ def _obter_tarefa_ou_erro(queryset, tarefa_id):
         raise SeparacaoError('Tarefa nao encontrada')
     return tarefa
 
-NF_CANCELADA_ERRO = 'NF cancelada não pode ser processada'
-TAREFA_SETOR_ERRO = 'Tarefa não pertence ao setor do usuário'
-USUARIO_SEM_SETOR_ERRO = 'Usuário sem setor vinculado. Contate o administrador.'
+NF_CANCELADA_ERRO = 'NF cancelada n├úo pode ser processada'
+TAREFA_SETOR_ERRO = 'Tarefa n├úo pertence ao setor do usu├írio'
+USUARIO_SEM_SETOR_ERRO = 'Usu├írio sem setor vinculado. Contate o administrador.'
 FINALIZACAO_FILTRO_PENDENTE_ERRO = 'NF de filtros com item faltante nao pode ser finalizada'
 TAREFA_EM_EXECUCAO_ERRO = 'Tarefa ja esta em execucao por outro usuario'
 TAREFA_NAO_ACEITA_ERRO = 'Aceite a tarefa antes de iniciar a bipagem'
@@ -297,7 +297,7 @@ def listar_tarefas_disponiveis(usuario=None, *, data_inicio=None, data_fim=None,
 
 
 def _normalizar_tarefas_lista_operacional(tarefas, usuario=None):
-    """Conclusão automática e liberação de tarefas órfãs sem N saves na listagem."""
+    """Conclus├úo autom├ítica e libera├º├úo de tarefas ├│rf├ús sem N saves na listagem."""
     if not tarefas:
         return
     limite_online = timezone.now() - timedelta(minutes=5)
@@ -394,7 +394,7 @@ def _serializar_tarefa_lista(tarefa, usuario=None):
 
 
 def obter_proxima_tarefa_separacao(usuario, *, excluir_tarefa_id=None):
-    """Próxima tarefa ativa no período operacional (consulta leve, sem histórico)."""
+    """Pr├│xima tarefa ativa no per├¡odo operacional (consulta leve, sem hist├│rico)."""
     from apps.core.operacional_periodo import periodo_operacional_padrao
 
     data_inicio, data_fim = periodo_operacional_padrao()
@@ -692,8 +692,13 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
     )
     from apps.tarefas.services.onda_schema import queryset_tarefa_bipagem_lock, schema_onda_disponivel
 
+    from apps.core.db_telemetry import operacional_db_scope
+
     codigo = sanitizar_entrada_scanner(codigo)
     metricas = BipagemMetrics('separacao', tarefa_id, getattr(usuario, 'id', None))
+    inicio_sep = time.perf_counter()
+    db_scope = operacional_db_scope('separacao', 'bipar')
+    db_scope.__enter__()
     try:
         if eh_bipagem_duplicada(modulo='separacao', entidade_id=tarefa_id, usuario_id=usuario.id, codigo=codigo):
             metricas.duplicada = True
@@ -726,7 +731,7 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                     _validar_setor_tarefa(tarefa_local, usuario)
                     _validar_execucao_tarefa(tarefa_local, usuario)
                     if tarefa_local.status == Tarefa.Status.CONCLUIDO:
-                        raise SeparacaoError('Tarefa já concluída.')
+                        raise SeparacaoError('Tarefa j├í conclu├¡da.')
 
                 with metricas.fase('query'):
                     itens_pendentes_qs = (
@@ -907,6 +912,13 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                     anexar_transicao_separacao(resposta, usuario, tarefa_id_atual=tarefa.id)
             return resposta
     finally:
+        db_scope.__exit__(None, None, None)
+        logger.info(
+            'SEPARACAO_TOTAL_MS tarefa_id=%s user_id=%s total_ms=%.2f',
+            tarefa_id,
+            getattr(usuario, 'id', None),
+            (time.perf_counter() - inicio_sep) * 1000,
+        )
         metricas.registrar()
 
 
@@ -925,7 +937,7 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
     _validar_setor_tarefa(tarefa, usuario)
     _validar_execucao_tarefa(tarefa, usuario)
     if status not in {Tarefa.Status.CONCLUIDO, Tarefa.Status.FECHADO_COM_RESTRICAO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}:
-        raise SeparacaoError('Status de finalização inválido')
+        raise SeparacaoError('Status de finaliza├º├úo inv├ílido')
     possui_pendencia = TarefaItem.objects.filter(
         tarefa_id=tarefa.id,
         quantidade_separada__lt=F('quantidade_total'),
@@ -1095,7 +1107,7 @@ def _validar_execucao_tarefa(tarefa, usuario, exigir_aceite=True):
     if tarefa.status == Tarefa.Status.EM_EXECUCAO and usuario_execucao_id not in {None, usuario.id}:
         raise SeparacaoError(TAREFA_EM_EXECUCAO_ERRO)
     if tarefa.status == Tarefa.Status.EM_EXECUCAO and usuario_execucao_id is None:
-        raise SeparacaoError('Tarefa em execução sem responsável. Reabra a tarefa.')
+        raise SeparacaoError('Tarefa em execu├º├úo sem respons├ível. Reabra a tarefa.')
 
 
 def _validar_produto_no_setor(item, produto, usuario=None, codigo_lido=None):
@@ -1114,7 +1126,7 @@ def _validar_produto_no_setor(item, produto, usuario=None, codigo_lido=None):
             ),
         )
     raise SeparacaoError(
-        f'Produto do setor {produto_setor or "-"} não corresponde ao item do setor {item_setor or "-"}'
+        f'Produto do setor {produto_setor or "-"} n├úo corresponde ao item do setor {item_setor or "-"}'
     )
 
 
@@ -1258,7 +1270,7 @@ def _executar_com_retry_sqlite_lock(func):
             return func()
         except OperationalError as exc:
             if connection.vendor == 'postgresql' and 'could not obtain lock' in str(exc).lower():
-                raise SeparacaoError('Tarefa em uso por outra operação. Tente novamente.') from exc
+                raise SeparacaoError('Tarefa em uso por outra opera├º├úo. Tente novamente.') from exc
             if not _is_sqlite_database_locked(exc):
                 raise
             if tentativa >= SQLITE_LOCK_RETRY_MAX - 1:

@@ -10,6 +10,7 @@ from apps.core.views_minuta import (
     MinutaListaAPIView,
 )
 from apps.core.views_status import DashboardResumoAPIView, StatusNFAPIView, StatusTarefaAPIView
+from apps.core.views_telemetry import TelemetriaOperacionalAPIView
 from apps.nf.views import ImportarXMLAPIView
 
 
@@ -19,6 +20,7 @@ urlpatterns = [
     path('status/tarefa/<int:tarefa_id>/', StatusTarefaAPIView.as_view(), name='status-tarefa'),
     path('tarefa-status/<int:tarefa_id>/', StatusTarefaAPIView.as_view(), name='api-tarefa-status'),
     path('dashboard/resumo/', DashboardResumoAPIView.as_view(), name='dashboard-resumo'),
+    path('telemetry/operacional/', TelemetriaOperacionalAPIView.as_view(), name='api-telemetry-operacional'),
     path('minuta/cards/', MinutaCardsAPIView.as_view(), name='api-minuta-cards'),
     path('minuta/historico/', MinutaHistoricoNFAPIView.as_view(), name='api-minuta-historico'),
     path('minuta/lista/', MinutaListaAPIView.as_view(), name='api-minuta-lista'),

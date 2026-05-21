@@ -42,6 +42,17 @@ class BipagemMetrics:
             cache_flag = 'CACHE_MISS=1'
         if self.duplicada:
             cache_flag = f'{cache_flag} BIPAGEM_DUPLICADA=1'.strip()
+        try:
+            from apps.core.db_telemetry import obter_stats_escopo_atual
+
+            stats = obter_stats_escopo_atual()
+            if stats and stats.modulo == self.modulo:
+                extra = (
+                    f'{extra} DB_TRANSACTION_MS={stats.transaction_ms:.2f} '
+                    f'query_count={stats.query_count} query_ms={stats.query_ms:.2f}'
+                ).strip()
+        except Exception:
+            pass
         logger.info(
             'BIPAGEM_TOTAL_MS modulo=%s entidade_id=%s user_id=%s total_ms=%.2f '
             'LOCK_MS=%.2f QUERY_MS=%.2f save_ms=%.2f serialize_ms=%.2f batch_ms=%.2f '

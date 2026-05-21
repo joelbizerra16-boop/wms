@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 CONFERENCIA_FINALIZACAO_LENTA_MS = 150
 CONFERENCIA_LISTAGEM_WARNING_MS = 1000
 CONFERENCIA_BIPAGEM_WARNING_MS = 1000
+CONFERENCIA_SLOW_LOG_MS = float(getattr(settings, 'CONFERENCIA_SLOW_LOG_MS', 500))
 CONFERENCIA_FINALIZACAO_WARNING_MS = 1000
 CONFERENCIA_LISTAGEM_MAX_RESULTADOS = 30
 CONFERENCIA_LISTAGEM_JANELA_CANDIDATOS = 120
@@ -810,9 +811,15 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
     )
     from apps.core.operacional_side_effects import agendar_atualizar_status_nf, agendar_logs_bipagem_conferencia
 
+    from apps.core.db_telemetry import operacional_db_scope
+
     codigo = sanitizar_entrada_scanner(codigo)
     metricas = BipagemMetrics('conferencia', conferencia_id, getattr(usuario, 'id', None))
     inicio_bipagem = time.perf_counter()
+    redirect_url_final = None
+    finalizado = False
+    db_scope = operacional_db_scope('conferencia', 'bipar')
+    db_scope.__enter__()
     try:
         if eh_bipagem_duplicada(modulo='conferencia', entidade_id=conferencia_id, usuario_id=usuario.id, codigo=codigo):
             metricas.duplicada = True
@@ -874,12 +881,8 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         raise ConferenciaError('Conferencia vinculada a outro usuario.')
 
                 with metricas.fase('query'):
-                    item_lock_kwargs = {'skip_locked': True}
-                    if connection.vendor == 'postgresql':
-                        item_lock_kwargs['of'] = ('self',)
                     itens_pendentes_qs = (
-                        ConferenciaItem.objects.select_for_update(**item_lock_kwargs)
-                        .filter(
+                        ConferenciaItem.objects.filter(
                             conferencia_id=conferencia_id,
                             status=ConferenciaItem.Status.AGUARDANDO,
                             qtd_conferida__lt=F('qtd_esperada'),
@@ -923,7 +926,28 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                     except ProdutoValidacaoError as exc:
                         raise ConferenciaError(str(exc)) from exc
 
-                    item_local = validacao.item
+                with metricas.fase('lock'):
+                    item_lock_kwargs = {'nowait': True}
+                    if connection.vendor == 'postgresql':
+                        item_lock_kwargs['of'] = ('self',)
+                    item_local = (
+                        ConferenciaItem.objects.select_for_update(**item_lock_kwargs)
+                        .select_related('produto')
+                        .only(
+                            'id',
+                            'conferencia_id',
+                            'produto_id',
+                            'qtd_esperada',
+                            'qtd_conferida',
+                            'status',
+                            'produto__id',
+                            'produto__cod_prod',
+                            'produto__cod_ean',
+                            'produto__codigo',
+                            'produto__setor',
+                        )
+                        .get(pk=validacao.item.id)
+                    )
                     if item_local.status == ConferenciaItem.Status.DIVERGENCIA:
                         raise ConferenciaError('Item em divergencia nao pode ser bipado sem tratativa.')
                     if item_local.qtd_conferida >= item_local.qtd_esperada:
@@ -1067,7 +1091,16 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                     )
             return resposta
     finally:
+        db_scope.__exit__(None, None, None)
         total_ms = round((time.perf_counter() - inicio_bipagem) * 1000, 2)
+        logger.info(
+            'CONFERENCIA_TOTAL_MS conferencia_id=%s user_id=%s total_ms=%s',
+            conferencia_id,
+            getattr(usuario, 'id', None),
+            total_ms,
+        )
+        if total_ms > CONFERENCIA_SLOW_LOG_MS:
+            logger.warning('CONFERENCIA_LENTA conferencia_id=%s total_ms=%s', conferencia_id, total_ms)
         if finalizado:
             total_finalizacao_ms = round(
                 ((time.perf_counter() - finalizacao_inicio) * 1000) if finalizacao_inicio is not None else total_ms,
