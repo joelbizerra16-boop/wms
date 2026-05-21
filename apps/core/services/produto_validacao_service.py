@@ -1,3 +1,5 @@
+import logging
+import re
 from dataclasses import dataclass
 
 from django.db import OperationalError, connection
@@ -6,6 +8,8 @@ from django.utils import timezone
 
 from apps.logs.models import Log
 from apps.produtos.models import Produto
+
+logger = logging.getLogger(__name__)
 
 
 class ProdutoValidacaoError(Exception):
@@ -21,15 +25,23 @@ class ProdutoValidado:
     setor_validado: str
 
 
-def buscar_produto_por_leitura(codigo_lido):
-    codigo_normalizado = _normalizar_codigo(codigo_lido)
+def normalizar_codigo_barras(codigo):
+    """Extrai dígitos da leitura e usa os 14 últimos quando o scanner envia prefixo extra."""
+    codigo = re.sub(r'\D', '', str(codigo or ''))
+    if len(codigo) > 14:
+        codigo = codigo[-14:]
+    return codigo
+
+
+def buscar_produto_por_leitura(codigo_lido, *, modulo=None):
+    codigo_normalizado = _normalizar_codigo(codigo_lido, modulo=modulo)
     if not codigo_normalizado:
         return None
     return _buscar_produto_por_codigo(codigo_normalizado)
 
 
-def selecionar_item_por_codigo_lido(codigo_lido, itens, *, fallback=None):
-    codigo_normalizado = _normalizar_codigo(codigo_lido)
+def selecionar_item_por_codigo_lido(codigo_lido, itens, *, fallback=None, modulo=None):
+    codigo_normalizado = _normalizar_codigo(codigo_lido, modulo=modulo)
     if not codigo_normalizado:
         return fallback
     for item in itens:
@@ -39,8 +51,8 @@ def selecionar_item_por_codigo_lido(codigo_lido, itens, *, fallback=None):
     return fallback
 
 
-def filtrar_queryset_por_codigo_produto(queryset, codigo_lido, *, prefixo_produto='produto__'):
-    codigo_normalizado = _normalizar_codigo(codigo_lido)
+def filtrar_queryset_por_codigo_produto(queryset, codigo_lido, *, prefixo_produto='produto__', modulo=None):
+    codigo_normalizado = _normalizar_codigo(codigo_lido, modulo=modulo)
     variantes = _codigo_variantes(codigo_normalizado)
     if not variantes:
         return queryset.none(), codigo_normalizado
@@ -54,7 +66,8 @@ def filtrar_queryset_por_codigo_produto(queryset, codigo_lido, *, prefixo_produt
 
 
 def validar_produto(codigo_lido, item_id, usuario, item_model, tipo_validacao, *, item_travado=None):
-    codigo_normalizado = _normalizar_codigo(codigo_lido)
+    modulo = 'separacao' if tipo_validacao == 'SEPARACAO' else 'conferencia'
+    codigo_normalizado = _normalizar_codigo(codigo_lido, modulo=modulo)
     if not codigo_normalizado:
         raise ProdutoValidacaoError('Informe um código válido para bipagem.')
 
@@ -161,11 +174,34 @@ def validar_produto(codigo_lido, item_id, usuario, item_model, tipo_validacao, *
     )
 
 
-def _normalizar_codigo(valor):
-    codigo = ''.join(str(valor or '').strip().split())
-    if not codigo:
+def _entrada_e_leitura_numerica(valor):
+    compacto = ''.join(str(valor or '').strip().split())
+    return bool(compacto) and compacto.isdigit()
+
+
+def _log_codigo_normalizado(codigo_original, codigo_normalizado, modulo):
+    if codigo_original == codigo_normalizado:
+        return
+    logger.info(
+        'CODIGO_NORMALIZADO codigo_original=%s codigo_normalizado=%s modulo=%s',
+        codigo_original,
+        codigo_normalizado,
+        modulo or 'operacional',
+    )
+
+
+def _normalizar_codigo(valor, *, modulo=None):
+    original = str(valor or '').strip()
+    if not original:
         return ''
-    return codigo.upper()
+    if _entrada_e_leitura_numerica(original):
+        somente_digitos = re.sub(r'\D', '', original)
+        normalizado = normalizar_codigo_barras(original)
+        if somente_digitos != normalizado:
+            _log_codigo_normalizado(somente_digitos, normalizado, modulo)
+        return normalizado
+    codigo = ''.join(original.split()).upper()
+    return codigo
 
 
 def _codigo_exibicao_produto(produto):
@@ -181,13 +217,28 @@ def _codigo_variantes(codigo):
         sem_zeros = codigo_base.lstrip('0') or '0'
         if sem_zeros not in variantes:
             variantes.append(sem_zeros)
+        if len(codigo_base) == 14:
+            sufixo_ean13 = codigo_base[-13:]
+            if sufixo_ean13 not in variantes:
+                variantes.append(sufixo_ean13)
+        digitos_brutos = re.sub(r'\D', '', str(codigo or ''))
+        if digitos_brutos and len(digitos_brutos) > 14:
+            recorte = digitos_brutos[-14:]
+            if recorte not in variantes:
+                variantes.append(recorte)
     return variantes
 
 
 def _identificadores_produto(produto):
     identificadores = set()
     for valor in [getattr(produto, 'cod_ean', ''), getattr(produto, 'cod_prod', ''), getattr(produto, 'codigo', '')]:
+        if not valor:
+            continue
         identificadores.update(_codigo_variantes(valor))
+        if _entrada_e_leitura_numerica(valor):
+            barras = normalizar_codigo_barras(valor)
+            if barras:
+                identificadores.update(_codigo_variantes(barras))
     return identificadores
 
 
