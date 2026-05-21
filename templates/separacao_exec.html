@@ -3,7 +3,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title>Separação {{ tarefa.id }} | WMS</title>
     <style>
         :root {
@@ -24,6 +24,13 @@
             font-family: "Segoe UI", Arial, sans-serif;
             background: var(--bg);
             color: var(--text);
+        }
+        .scanner-input {
+            font-size: 16px;
+            touch-action: manipulation;
+        }
+        body.scanner-mode-active {
+            overscroll-behavior: none;
         }
         .op-header {
             position: fixed;
@@ -322,7 +329,7 @@
                 {% csrf_token %}
                 <input type="hidden" name="acao" value="bipar">
                 <label for="codigo">Bipagem</label>
-                <input id="codigo" name="codigo" type="text" class="scan-input" placeholder="BIPAR CODIGO" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="done">
+                <input id="codigo" name="codigo" type="text" class="scan-input scanner-input" placeholder="BIPAR CODIGO" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="none" enterkeyhint="done">
             </form>
             {% endif %}
             {% else %}
@@ -341,6 +348,7 @@
     </main>
 
     <script src="{% static 'js/audio-feedback.js' %}"></script>
+    <script src="{% static 'js/scanner-enterprise.js' %}"></script>
     <script>
     (function () {
         if (window.WMSAudioFeedback) window.WMSAudioFeedback.init();
@@ -368,10 +376,7 @@
             if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
             window.location.replace(listaSeparacaoUrl);
         }
-        let scannerBuffer = '';
-        let scannerTimer = null;
-        let focusTimer = null;
-        const scannerTimeoutMs = 120;
+        let scannerCtrl = null;
         const pollingIntervalMs = 10000;
         let pollingHandle = null;
         let pollingInFlight = false;
@@ -445,29 +450,8 @@
         function scannerPronto() {
             return Boolean(form && codigoInput && !codigoInput.disabled);
         }
-        function isEditableElement(element) {
-            if (!element) return false;
-            const tagName = (element.tagName || '').toUpperCase();
-            return element.isContentEditable || tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
-        }
-        function clearScannerBuffer() {
-            scannerBuffer = '';
-            if (scannerTimer) {
-                clearTimeout(scannerTimer);
-                scannerTimer = null;
-            }
-        }
-        function scheduleScannerTimeout() {
-            if (scannerTimer) clearTimeout(scannerTimer);
-            scannerTimer = setTimeout(clearScannerBuffer, scannerTimeoutMs);
-        }
         function scheduleInputFocus() {
-            if (!scannerPronto() || document.hidden) return;
-            if (focusTimer) clearTimeout(focusTimer);
-            focusTimer = setTimeout(function () {
-                if (!scannerPronto() || document.hidden) return;
-                codigoInput.focus({ preventScroll: true });
-            }, 100);
+            if (scannerCtrl) scannerCtrl.scheduleInputFocus();
         }
         async function processarCodigo(codigo, origem) {
             if (!scannerPronto()) return;
@@ -512,7 +496,7 @@
                     );
                 }
                 setFeedback(`Item separado: ${formatNumber(data.separado)} / ${formatNumber(data.esperado)}`, 'ok');
-                codigoInput.value = '';
+                if (scannerCtrl) scannerCtrl.onBipagemConcluida();
                 agendarRefreshSincrono();
             } catch (error) {
                 setFeedback(error.message, 'erro');
@@ -525,11 +509,9 @@
             if (!codigoInput) return;
             codigoInput.disabled = true;
             codigoInput.placeholder = 'Separacao finalizada';
-            clearScannerBuffer();
-            if (focusTimer) {
-                clearTimeout(focusTimer);
-                focusTimer = null;
-            }
+            if (scannerCtrl) scannerCtrl.destroy();
+            scannerCtrl = null;
+            document.body.classList.remove('scanner-mode-active');
             setScannerStatus('offline');
             stopPolling();
         }
@@ -596,50 +578,19 @@
             }, pollingIntervalMs);
         }
 
-        if (form) {
-            form.addEventListener('submit', async function (event) {
-                event.preventDefault();
-                setScannerStatus('manual');
-                await processarCodigo(codigoInput.value, 'manual');
+        if (form && codigoInput && window.WMSScannerEnterprise) {
+            document.body.classList.add('scanner-mode-active');
+            scannerCtrl = window.WMSScannerEnterprise.create({
+                input: codigoInput,
+                form: form,
+                modulo: 'separacao',
+                isReady: scannerPronto,
+                onProcessar: function (codigo, origem) {
+                    processarCodigo(codigo, origem);
+                },
+                setScannerStatus: setScannerStatus,
             });
         }
-
-        if (codigoInput) {
-            codigoInput.addEventListener('focus', function () {
-                setScannerStatus('manual');
-            });
-            codigoInput.addEventListener('blur', function () {
-                if (!codigoInput.disabled) setScannerStatus('scanner');
-            });
-        }
-
-        document.addEventListener('keydown', function (event) {
-            if (!scannerPronto()) return;
-            if (event.ctrlKey || event.altKey || event.metaKey) return;
-
-            const activeElement = document.activeElement;
-            const manualNoCampo = activeElement === codigoInput;
-            const outroCampoEditavel = isEditableElement(activeElement) && !manualNoCampo;
-            if (outroCampoEditavel) return;
-
-            if (event.key === 'Enter') {
-                if (manualNoCampo) return;
-                if (!scannerBuffer) return;
-                event.preventDefault();
-                const codigoLido = scannerBuffer;
-                clearScannerBuffer();
-                setScannerStatus('scanner');
-                processarCodigo(codigoLido, 'scanner');
-                return;
-            }
-
-            if (manualNoCampo) return;
-            if (event.key.length !== 1) return;
-
-            scannerBuffer += event.key;
-            scheduleScannerTimeout();
-            event.preventDefault();
-        });
 
         document.addEventListener('visibilitychange', function () {
             if (document.hidden) {
