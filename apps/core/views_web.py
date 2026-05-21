@@ -310,11 +310,9 @@ def _obter_tarefa_permitida(request, tarefa_id):
     - Sem responsável definido: mantém acesso (fluxo legado / liberação).
     """
     pode_gerir = _usuario_pode_gerir_separacao(request.user)
-    base_qs = (
-        Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
-        .defer('nf__bairro')
-        .prefetch_related('itens__produto')
-    )
+    from apps.tarefas.services.onda_schema import queryset_tarefa_web
+
+    base_qs = queryset_tarefa_web(prefetch_itens=True)
     if pode_gerir:
         tarefa = get_object_or_404(base_qs, id=tarefa_id)
     else:

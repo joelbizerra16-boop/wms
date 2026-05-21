@@ -45,7 +45,9 @@ def _select_for_update_kwargs(*, nowait=True, skip_locked=False):
 
 
 def _tarefa_lock_queryset():
-    return Tarefa.objects.select_for_update(**_select_for_update_kwargs())
+    from apps.tarefas.services.onda_schema import queryset_tarefa_lock
+
+    return queryset_tarefa_lock(**_select_for_update_kwargs())
 
 
 def _itens_pendentes_lock_queryset():
@@ -594,10 +596,9 @@ def iniciar_tarefa(tarefa_id, usuario):
         if usuario is None or not usuario_tem_setor_vinculado(usuario):
             raise SeparacaoError(USUARIO_SEM_SETOR_ERRO)
 
-        tarefa = _obter_tarefa_ou_erro(
-            Tarefa.objects.select_related('nf', 'rota', 'usuario', 'usuario_em_execucao').defer('nf__bairro').prefetch_related('itens__produto', 'itens__nf'),
-            tarefa_id,
-        )
+        from apps.tarefas.services.onda_schema import queryset_tarefa_web
+
+        tarefa = _obter_tarefa_ou_erro(queryset_tarefa_web(prefetch_itens_nf=True), tarefa_id)
         _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
         _validar_setor_tarefa(tarefa, usuario)
         _validar_execucao_tarefa(tarefa, usuario, exigir_aceite=False)
@@ -618,7 +619,9 @@ def iniciar_tarefa(tarefa_id, usuario):
                 tarefa.usuario_em_execucao = usuario
                 tarefa.data_inicio = timezone.now()
                 tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
-                if tarefa.onda_id:
+                from apps.tarefas.services.onda_schema import schema_onda_disponivel
+
+                if schema_onda_disponivel() and getattr(tarefa, 'onda_id', None):
                     tarefa.onda.operador_id = usuario.id
                     tarefa.onda.status = tarefa.onda.Status.EM_SEPARACAO
                     tarefa.onda.save(update_fields=['operador', 'status', 'updated_at'])
@@ -650,22 +653,11 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
         def _executar():
             with transaction.atomic():
                 with metricas.fase('lock'):
-                    tarefa_local = (
-                        Tarefa.objects.select_related('onda')
-                        .only(
-                            'id',
-                            'status',
-                            'setor',
-                            'tipo',
-                            'nf_id',
-                            'rota_id',
-                            'usuario_id',
-                            'usuario_em_execucao_id',
-                            'itens_total',
-                            'itens_pendentes',
-                            'onda_id',
-                        )
-                        .get(id=tarefa_id)
+                    from apps.tarefas.services.onda_schema import queryset_tarefa_bipagem_lock
+
+                    tarefa_local = queryset_tarefa_bipagem_lock(
+                        tarefa_id=tarefa_id,
+                        select_for_update_kwargs=_select_for_update_kwargs(),
                     )
                     _validar_nf_cancelada(tarefa_local, usuario, 'SEPARACAO BLOQUEADA')
                     _validar_setor_tarefa(tarefa_local, usuario)
@@ -758,27 +750,31 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         updated_at=agora,
                     )
                     item_local.quantidade_separada = nova_separada
-                    atualizar_progresso_bipagem(
-                        tarefa_id=tarefa_local.id,
-                        onda_id=tarefa_local.onda_id,
-                        operador_id=usuario.id,
-                        delta=Decimal('1'),
-                        finalizado=False,
-                    )
+                    from apps.tarefas.services.onda_schema import schema_onda_disponivel
+
+                    if schema_onda_disponivel():
+                        atualizar_progresso_bipagem(
+                            tarefa_id=tarefa_local.id,
+                            onda_id=getattr(tarefa_local, 'onda_id', None),
+                            operador_id=usuario.id,
+                            delta=Decimal('1'),
+                            finalizado=False,
+                        )
 
                 finalizado_local = False
-                pendentes_antes = tarefa_local.itens_pendentes or Decimal('0')
-                if completo and tarefa_local.itens_total and pendentes_antes > 0:
+                pendentes_antes = getattr(tarefa_local, 'itens_pendentes', None) or Decimal('0')
+                itens_total_tarefa = getattr(tarefa_local, 'itens_total', None)
+                if completo and itens_total_tarefa and pendentes_antes > 0:
                     finalizado_local = pendentes_antes <= Decimal('1')
                 elif completo:
                     finalizado_local = not TarefaItem.objects.filter(
                         tarefa_id=tarefa_id,
                         quantidade_separada__lt=F('quantidade_total'),
                     ).exclude(pk=item_local.pk).exists()
-                if finalizado_local:
+                if finalizado_local and schema_onda_disponivel():
                     atualizar_progresso_bipagem(
                         tarefa_id=tarefa_local.id,
-                        onda_id=tarefa_local.onda_id,
+                        onda_id=getattr(tarefa_local, 'onda_id', None),
                         operador_id=usuario.id,
                         delta=Decimal('0'),
                         finalizado=True,
@@ -817,8 +813,8 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                     'separado': float(item.quantidade_separada),
                     'status_tarefa': status_tarefa,
                     'finalizado': finalizado,
-                    'onda_codigo': tarefa.onda.codigo if tarefa.onda_id and getattr(tarefa, 'onda', None) else '',
-                    'tipo_embalagem': tarefa.tipo_embalagem or '',
+                    'onda_codigo': tarefa.onda.codigo if getattr(tarefa, 'onda_id', None) and getattr(tarefa, 'onda', None) else '',
+                    'tipo_embalagem': getattr(tarefa, 'tipo_embalagem', '') or '',
                     'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
                     'cor': 'verde',
                     'som': 'beep-curto',
@@ -842,12 +838,9 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
         status,
         bool((motivo or '').strip()),
     )
-    tarefa = (
-        Tarefa.objects.select_related('nf', 'usuario', 'usuario_em_execucao')
-        .defer('nf__bairro')
-        .prefetch_related('itens__nf')
-        .get(id=tarefa_id)
-    )
+    from apps.tarefas.services.onda_schema import queryset_tarefa_web
+
+    tarefa = queryset_tarefa_web(prefetch_itens_nf=True).get(id=tarefa_id)
     _validar_nf_cancelada(tarefa, usuario, 'SEPARACAO BLOQUEADA')
     _validar_setor_tarefa(tarefa, usuario)
     _validar_execucao_tarefa(tarefa, usuario)
@@ -881,7 +874,7 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
         )
     def _executar():
         with transaction.atomic():
-            tarefa_local = Tarefa.objects.select_for_update(**_select_for_update_kwargs()).get(id=tarefa_id)
+            tarefa_local = _tarefa_lock_queryset().get(id=tarefa_id)
             _validar_nf_cancelada(tarefa_local, usuario, 'SEPARACAO BLOQUEADA')
             _validar_setor_tarefa(tarefa_local, usuario)
             _validar_execucao_tarefa(tarefa_local, usuario)
@@ -899,7 +892,10 @@ def finalizar_tarefa(tarefa_id, status, usuario, motivo=None):
                 tarefa_local.usuario_em_execucao = None
                 tarefa_local.data_inicio = None
                 tarefa_local.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
-                limpar_referencias_execucao_onda(tarefa_local.onda_id)
+                from apps.tarefas.services.onda_schema import schema_onda_disponivel
+
+                if schema_onda_disponivel():
+                    limpar_referencias_execucao_onda(getattr(tarefa_local, 'onda_id', None))
             else:
                 tarefa_local.save(update_fields=['status', 'updated_at'])
             for item_local in TarefaItem.objects.select_for_update(**_select_for_update_kwargs()).filter(tarefa_id=tarefa_id):
@@ -1124,13 +1120,18 @@ def sincronizar_conclusao_automatica_tarefa(tarefa, usuario=None):
     tarefa.usuario_em_execucao = None
     tarefa.data_inicio = None
     tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
-    limpar_referencias_execucao_onda(tarefa.onda_id)
+    from apps.tarefas.services.onda_schema import schema_onda_disponivel
+
+    if schema_onda_disponivel():
+        limpar_referencias_execucao_onda(getattr(tarefa, 'onda_id', None))
     TarefaItem.objects.filter(tarefa=tarefa, possui_restricao=True).update(possui_restricao=False)
     return True
 
 
 def liberar_execucao_tarefa(tarefa_id, usuario):
-    tarefa = Tarefa.objects.select_related('usuario', 'usuario_em_execucao').get(id=tarefa_id)
+    from apps.tarefas.services.onda_schema import queryset_tarefa_web
+
+    tarefa = queryset_tarefa_web().get(id=tarefa_id)
     _validar_setor_tarefa(tarefa, usuario)
     usuario_execucao_id = tarefa.usuario_em_execucao_id or tarefa.usuario_id
     if tarefa.status != Tarefa.Status.EM_EXECUCAO:
@@ -1157,7 +1158,10 @@ def liberar_execucao_tarefa(tarefa_id, usuario):
             tarefa_local.usuario_em_execucao = None
             tarefa_local.data_inicio = None
             tarefa_local.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'data_inicio', 'updated_at'])
-            limpar_referencias_execucao_onda(tarefa_local.onda_id)
+            from apps.tarefas.services.onda_schema import schema_onda_disponivel
+
+            if schema_onda_disponivel():
+                limpar_referencias_execucao_onda(getattr(tarefa_local, 'onda_id', None))
             return tarefa_local
 
     tarefa = _executar_com_retry_sqlite_lock(_executar)

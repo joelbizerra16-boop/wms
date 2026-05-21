@@ -141,6 +141,11 @@ def registrar_item_tarefa_onda(*, tarefa, quantidade):
 
 
 def atualizar_progresso_bipagem(*, tarefa_id, onda_id=None, operador_id=None, delta=UNIT_DECIMAL, finalizado=False):
+	from apps.tarefas.services.onda_schema import coluna_tarefa_onda_id_disponivel
+
+	if not coluna_tarefa_onda_id_disponivel():
+		return
+
 	delta = Decimal(str(delta or UNIT_DECIMAL))
 	bipado_expr = Coalesce(F('itens_bipados'), Value(ZERO_DECIMAL)) + Value(delta)
 	pendente_expr = Greatest(

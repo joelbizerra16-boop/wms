@@ -54,7 +54,9 @@ def liberar_tarefa_divergencia_view(request, tarefa_id):
     if request.method != 'POST':
         return redirect('web-separacao-exec', tarefa_id=tarefa_id)
 
-    tarefa = get_object_or_404(Tarefa.objects.select_related('nf').defer('nf__bairro'), id=tarefa_id)
+    from apps.tarefas.services.onda_schema import queryset_tarefa_web
+
+    tarefa = get_object_or_404(queryset_tarefa_web(), id=tarefa_id)
     try:
         liberar_tarefa_divergencia(
             tarefa=tarefa,
@@ -102,7 +104,9 @@ def excluir_tarefa_view(request, tarefa_id):
     if not motivo:
         return JsonResponse({'success': False, 'error': 'Informe o motivo da exclusão.'}, status=400)
 
-    tarefa = get_object_or_404(Tarefa.objects.select_related('nf').defer('nf__bairro'), id=tarefa_id, ativo=True)
+    from apps.tarefas.services.onda_schema import queryset_tarefa_web
+
+    tarefa = get_object_or_404(queryset_tarefa_web(), id=tarefa_id, ativo=True)
     status_anterior = tarefa.status
     if status_anterior in {Tarefa.Status.CONCLUIDO, Tarefa.Status.CONCLUIDO_COM_RESTRICAO}:
         return JsonResponse({'erro': 'Tarefa finalizada não pode ser excluída.'}, status=400)

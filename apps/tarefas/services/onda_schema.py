@@ -112,13 +112,93 @@ def queryset_tarefa_legado():
     return Tarefa.objects.only(*TAREFA_CAMPOS_LEGADO)
 
 
+_BROWNFIELD_RUNTIME_TENTADO = False
+
+
+def _tentar_alinhar_schema_onda_runtime():
+    global _BROWNFIELD_RUNTIME_TENTADO
+    if _BROWNFIELD_RUNTIME_TENTADO or connection.vendor != 'postgresql':
+        return
+    _BROWNFIELD_RUNTIME_TENTADO = True
+    try:
+        from apps.tarefas.db_onda_brownfield import aplicar_schema_onda_brownfield
+
+        aplicar_schema_onda_brownfield(connection)
+        invalidate_schema_onda_cache()
+        logger.info('ONDA_BROWNFIELD_SCHEMA_APLICADO origem=runtime_auto')
+    except Exception:
+        logger.exception('ONDA_BROWNFIELD_SCHEMA_FALHA origem=runtime_auto')
+
+
 def queryset_tarefa_operacional():
     """Queryset de Tarefa seguro para schema brownfield (sem colunas de onda quando ausentes)."""
     from apps.tarefas.models import Tarefa
 
-    if coluna_tarefa_onda_id_disponivel():
+    if not coluna_tarefa_onda_id_disponivel():
+        _tentar_alinhar_schema_onda_runtime()
+    if coluna_tarefa_onda_id_disponivel(force_refresh=True):
         return Tarefa.objects
+    logger.info('SEPARACAO_QUERYSET_LEGADO contexto=operacional')
     return queryset_tarefa_legado()
+
+
+def queryset_tarefa_web(*, prefetch_itens=False, prefetch_itens_nf=False):
+    """Detalhe/impressão/execução web sem carregar onda_id quando coluna ausente."""
+    if coluna_tarefa_onda_id_disponivel():
+        qs = queryset_tarefa_operacional().select_related(
+            'nf',
+            'rota',
+            'usuario',
+            'usuario_em_execucao',
+            'onda',
+        )
+    else:
+        logger.info('SEPARACAO_QUERYSET_LEGADO contexto=web')
+        qs = queryset_tarefa_legado().select_related('nf', 'rota', 'usuario', 'usuario_em_execucao')
+    qs = qs.defer('nf__bairro')
+    if prefetch_itens_nf:
+        return qs.prefetch_related('itens__produto', 'itens__nf')
+    if prefetch_itens:
+        return qs.prefetch_related('itens__produto')
+    return qs
+
+
+def queryset_tarefa_lock(**select_for_update_kwargs):
+    if not coluna_tarefa_onda_id_disponivel():
+        logger.info('SEPARACAO_QUERYSET_LEGADO contexto=lock')
+    return queryset_tarefa_operacional().select_for_update(**select_for_update_kwargs)
+
+
+def campos_tarefa_bipagem_lock():
+    if coluna_tarefa_onda_id_disponivel():
+        return (
+            'id',
+            'status',
+            'setor',
+            'tipo',
+            'nf_id',
+            'rota_id',
+            'usuario_id',
+            'usuario_em_execucao_id',
+            'itens_total',
+            'itens_pendentes',
+            'onda_id',
+        )
+    return TAREFA_CAMPOS_LEGADO
+
+
+def queryset_tarefa_bipagem_lock(*, tarefa_id, select_for_update_kwargs):
+    campos = campos_tarefa_bipagem_lock()
+    if coluna_tarefa_onda_id_disponivel():
+        return (
+            queryset_tarefa_operacional()
+            .select_related('onda')
+            .select_for_update(**select_for_update_kwargs)
+            .only(*campos)
+            .get(id=tarefa_id)
+        )
+    logger.info('SEPARACAO_QUERYSET_LEGADO contexto=bipagem_lock')
+    return queryset_tarefa_legado().select_for_update(**select_for_update_kwargs).get(id=tarefa_id)
 
 
 def queryset_tarefa_item_com_tarefa(queryset=None):
