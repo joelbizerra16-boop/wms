@@ -631,30 +631,93 @@ def iniciar_tarefa(tarefa_id, usuario):
                 return tarefa
 
         tarefa = _executar_com_retry_sqlite_lock(_executar)
+        from apps.core.operacional_sessao_cache import preload_mapa_bipagem_separacao
+
+        preload_mapa_bipagem_separacao(tarefa.id)
         return _dados_tarefa(tarefa)
     except Exception as exc:
         logger.exception('SEPARACAO_INICIAR_FALHA tarefa_id=%s user_id=%s erro=%s', tarefa_id, getattr(usuario, 'id', None), str(exc))
         raise
 
 
+def _montar_resposta_bipagem_separacao(tarefa, item, *, finalizado=False):
+    status_tarefa = tarefa.status
+    if finalizado:
+        status_tarefa = Tarefa.Status.CONCLUIDO
+    resposta = {
+        'status': 'ok',
+        'esperado': float(item.quantidade_total),
+        'separado': float(item.quantidade_separada),
+        'status_tarefa': status_tarefa,
+        'finalizado': finalizado,
+        'produto_cod': getattr(item.produto, 'cod_prod', '') or '',
+        'onda_codigo': tarefa.onda.codigo if getattr(tarefa, 'onda_id', None) and getattr(tarefa, 'onda', None) else '',
+        'tipo_embalagem': getattr(tarefa, 'tipo_embalagem', '') or '',
+        'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
+        'cor': 'verde',
+        'som': 'beep-curto',
+    }
+    return resposta
+
+
+def _resposta_bipagem_duplicada_separacao(tarefa_id, codigo):
+    from apps.core.operacional_sessao_cache import resolver_item_id_separacao
+
+    item_id, _ = resolver_item_id_separacao(tarefa_id, codigo)
+    if not item_id:
+        return None
+    item = (
+        TarefaItem.objects.filter(pk=item_id)
+        .select_related('produto', 'tarefa', 'tarefa__onda')
+        .first()
+    )
+    if item is None:
+        return None
+    return _montar_resposta_bipagem_separacao(item.tarefa, item, finalizado=False)
+
+
 def bipar_tarefa(tarefa_id, codigo, usuario):
+    from apps.core.bipagem_leitura import eh_bipagem_duplicada, sanitizar_entrada_scanner
     from apps.core.operacional_bipagem_metrics import BipagemMetrics
+    from apps.core.operacional_sessao_cache import (
+        atualizar_mapa_apos_bipagem_separacao,
+        invalidar_mapa_separacao,
+        resolver_item_id_separacao,
+    )
     from apps.core.operacional_side_effects import (
         agendar_conclusao_automatica_separacao,
         agendar_invalidacao_operacional,
         agendar_logs_bipagem_separacao,
         agendar_nf_ids_separacao,
     )
+    from apps.tarefas.services.onda_schema import queryset_tarefa_bipagem_lock, schema_onda_disponivel
 
+    codigo = sanitizar_entrada_scanner(codigo)
     metricas = BipagemMetrics('separacao', tarefa_id, getattr(usuario, 'id', None))
     try:
-        resultado = None
+        if eh_bipagem_duplicada(modulo='separacao', entidade_id=tarefa_id, usuario_id=usuario.id, codigo=codigo):
+            metricas.duplicada = True
+            with metricas.fase('response'):
+                resposta_dup = _resposta_bipagem_duplicada_separacao(tarefa_id, codigo)
+                if resposta_dup:
+                    return resposta_dup
+
+        with metricas.fase('cache'):
+            item_id_cache, cache_hit = resolver_item_id_separacao(tarefa_id, codigo)
+            metricas.cache_hit = cache_hit
+
+        pendente_side_effects = None
 
         def _executar():
+            nonlocal pendente_side_effects
+            tarefa_local = None
+            item_local = None
+            finalizado_local = False
+            nf_ids = []
+            onda_payload = None
+
             with transaction.atomic():
                 with metricas.fase('lock'):
-                    from apps.tarefas.services.onda_schema import queryset_tarefa_bipagem_lock
-
                     tarefa_local = queryset_tarefa_bipagem_lock(
                         tarefa_id=tarefa_id,
                         select_for_update_kwargs=_select_for_update_kwargs(),
@@ -667,8 +730,10 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
 
                 with metricas.fase('query'):
                     itens_pendentes_qs = (
-                        TarefaItem.objects
-                        .filter(tarefa_id=tarefa_id, quantidade_separada__lt=F('quantidade_total'))
+                        TarefaItem.objects.filter(
+                            tarefa_id=tarefa_id,
+                            quantidade_separada__lt=F('quantidade_total'),
+                        )
                         .select_related('produto')
                         .only(
                             'id',
@@ -687,8 +752,13 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         )
                         .order_by('nf_id', 'created_at')
                     )
-                    itens_candidatos_qs, _ = filtrar_queryset_por_codigo_produto(itens_pendentes_qs, codigo)
-                    item_esperado = itens_candidatos_qs.first()
+                    if item_id_cache:
+                        item_esperado = itens_pendentes_qs.filter(pk=item_id_cache).first()
+                    else:
+                        item_esperado = None
+                    if item_esperado is None:
+                        itens_candidatos_qs, _ = filtrar_queryset_por_codigo_produto(itens_pendentes_qs, codigo)
+                        item_esperado = itens_candidatos_qs.first()
                     if item_esperado is None:
                         item_esperado = itens_pendentes_qs.first()
                     if item_esperado is None:
@@ -733,10 +803,8 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         )
                         .get(pk=validacao.item.id)
                     )
-
                     if item_local.quantidade_separada >= item_local.quantidade_total:
                         raise SeparacaoError('Quantidade excedida')
-
                     nova_separada = item_local.quantidade_separada + Decimal('1')
                     completo = nova_separada >= item_local.quantidade_total
                     agora = timezone.now()
@@ -750,18 +818,7 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         updated_at=agora,
                     )
                     item_local.quantidade_separada = nova_separada
-                    from apps.tarefas.services.onda_schema import schema_onda_disponivel
 
-                    if schema_onda_disponivel():
-                        atualizar_progresso_bipagem(
-                            tarefa_id=tarefa_local.id,
-                            onda_id=getattr(tarefa_local, 'onda_id', None),
-                            operador_id=usuario.id,
-                            delta=Decimal('1'),
-                            finalizado=False,
-                        )
-
-                finalizado_local = False
                 pendentes_antes = getattr(tarefa_local, 'itens_pendentes', None) or Decimal('0')
                 itens_total_tarefa = getattr(tarefa_local, 'itens_total', None)
                 if completo and itens_total_tarefa and pendentes_antes > 0:
@@ -771,61 +828,84 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                         tarefa_id=tarefa_id,
                         quantidade_separada__lt=F('quantidade_total'),
                     ).exclude(pk=item_local.pk).exists()
-                if finalizado_local and schema_onda_disponivel():
-                    atualizar_progresso_bipagem(
-                        tarefa_id=tarefa_local.id,
-                        onda_id=getattr(tarefa_local, 'onda_id', None),
-                        operador_id=usuario.id,
-                        delta=Decimal('0'),
-                        finalizado=True,
-                    )
-                nf_ids = []
+
                 if tarefa_local.nf_id:
                     nf_ids.append(tarefa_local.nf_id)
                 if item_local.nf_id and item_local.nf_id not in nf_ids:
                     nf_ids.append(item_local.nf_id)
 
-                with metricas.fase('side_effects'):
-                    agendar_logs_bipagem_separacao(
-                        usuario_id=usuario.id,
-                        tarefa_id=tarefa_local.id,
-                        produto_cod=item_local.produto.cod_prod,
-                        finalizacao_automatica=finalizado_local,
-                    )
-                    if finalizado_local:
-                        agendar_conclusao_automatica_separacao(tarefa_id=tarefa_local.id, usuario_id=usuario.id)
-                        agendar_invalidacao_operacional(motivo='bipagem_separacao_finalizada')
-                    else:
-                        agendar_nf_ids_separacao(nf_ids)
+                if schema_onda_disponivel():
+                    onda_payload = {
+                        'tarefa_id': tarefa_local.id,
+                        'onda_id': getattr(tarefa_local, 'onda_id', None),
+                        'operador_id': usuario.id,
+                        'finalizado': finalizado_local,
+                    }
 
-                return tarefa_local, item_local, finalizado_local
+            pendente_side_effects = {
+                'tarefa_id': tarefa_local.id,
+                'produto_cod': item_local.produto.cod_prod,
+                'finalizado': finalizado_local,
+                'nf_ids': nf_ids,
+                'onda': onda_payload,
+                'item_id': item_local.id,
+                'codigo': codigo,
+            }
+            return tarefa_local, item_local, finalizado_local
 
         tarefa, item, finalizado = _executar_com_retry_sqlite_lock(_executar)
 
+        if pendente_side_effects:
+            payload = pendente_side_effects
+
+            def _pos_commit_side_effects():
+                try:
+                    if payload.get('onda') and schema_onda_disponivel():
+                        onda = payload['onda']
+                        atualizar_progresso_bipagem(
+                            tarefa_id=onda['tarefa_id'],
+                            onda_id=onda['onda_id'],
+                            operador_id=onda['operador_id'],
+                            delta=Decimal('0') if onda['finalizado'] else Decimal('1'),
+                            finalizado=onda['finalizado'],
+                        )
+                    agendar_logs_bipagem_separacao(
+                        usuario_id=usuario.id,
+                        tarefa_id=payload['tarefa_id'],
+                        produto_cod=payload['produto_cod'],
+                        finalizacao_automatica=payload['finalizado'],
+                    )
+                    if payload['finalizado']:
+                        agendar_conclusao_automatica_separacao(
+                            tarefa_id=payload['tarefa_id'],
+                            usuario_id=usuario.id,
+                        )
+                        agendar_invalidacao_operacional(motivo='bipagem_separacao_finalizada')
+                        invalidar_mapa_separacao(tarefa_id)
+                    else:
+                        agendar_nf_ids_separacao(payload['nf_ids'])
+                        atualizar_mapa_apos_bipagem_separacao(
+                            tarefa_id,
+                            payload['item_id'],
+                            payload['codigo'],
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        'ASYNC_SIDE_EFFECT falha modulo=separacao tarefa_id=%s erro=%s',
+                        payload['tarefa_id'],
+                        exc,
+                    )
+
+            transaction.on_commit(_pos_commit_side_effects)
+
         with metricas.fase('response'):
-            status_tarefa = tarefa.status
-            if finalizado:
-                status_tarefa = Tarefa.Status.CONCLUIDO
             with metricas.fase('serialize'):
-                resposta = {
-                    'status': 'ok',
-                    'esperado': float(item.quantidade_total),
-                    'separado': float(item.quantidade_separada),
-                    'status_tarefa': status_tarefa,
-                    'finalizado': finalizado,
-                    'onda_codigo': tarefa.onda.codigo if getattr(tarefa, 'onda_id', None) and getattr(tarefa, 'onda', None) else '',
-                    'tipo_embalagem': getattr(tarefa, 'tipo_embalagem', '') or '',
-                    'feedback': f'Produto validado no setor {(item.produto.setor or "").strip().upper() or "-"}',
-                    'cor': 'verde',
-                    'som': 'beep-curto',
-                }
-            if finalizado:
-                with metricas.fase('cache'):
+                resposta = _montar_resposta_bipagem_separacao(tarefa, item, finalizado=finalizado)
+                if finalizado:
                     from apps.core.operacional_transicao import anexar_transicao_separacao
 
                     anexar_transicao_separacao(resposta, usuario, tarefa_id_atual=tarefa.id)
-            resultado = resposta
-        return resultado
+            return resposta
     finally:
         metricas.registrar()
 

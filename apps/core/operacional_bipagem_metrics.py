@@ -14,6 +14,8 @@ class BipagemMetrics:
         self.usuario_id = usuario_id
         self._inicio_total = time.perf_counter()
         self._fases = {}
+        self.cache_hit = None
+        self.duplicada = False
 
     @contextmanager
     def fase(self, nome):
@@ -33,9 +35,17 @@ class BipagemMetrics:
         side_effects_ms = self._fases.get('side_effects', 0.0)
         cache_ms = self._fases.get('cache', 0.0)
         response_ms = self._fases.get('response', 0.0)
+        cache_flag = ''
+        if self.cache_hit is True:
+            cache_flag = 'CACHE_HIT=1'
+        elif self.cache_hit is False:
+            cache_flag = 'CACHE_MISS=1'
+        if self.duplicada:
+            cache_flag = f'{cache_flag} BIPAGEM_DUPLICADA=1'.strip()
         logger.info(
             'BIPAGEM_TOTAL_MS modulo=%s entidade_id=%s user_id=%s total_ms=%.2f '
-            'lock_ms=%.2f query_ms=%.2f save_ms=%.2f serialize_ms=%.2f batch_ms=%.2f side_effects_ms=%.2f cache_ms=%.2f response_ms=%.2f %s',
+            'LOCK_MS=%.2f QUERY_MS=%.2f save_ms=%.2f serialize_ms=%.2f batch_ms=%.2f '
+            'ASYNC_SIDE_EFFECT=%.2f cache_ms=%.2f response_ms=%.2f %s %s',
             self.modulo,
             self.entidade_id,
             self.usuario_id,
@@ -48,6 +58,7 @@ class BipagemMetrics:
             side_effects_ms,
             cache_ms,
             response_ms,
+            cache_flag,
             extra,
         )
         from django.conf import settings

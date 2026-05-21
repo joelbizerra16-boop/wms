@@ -429,6 +429,17 @@
         let pollingInFlight = false;
         let redirecionandoConclusao = false;
         const listaConferenciaUrl = "{% url 'web-conferencia-lista' %}";
+        let progressoConferido = Number({{ totais_nf.conferido|default:0 }});
+        let progressoEsperado = Number({{ totais_nf.esperado|default:0 }});
+        let refreshPendente = null;
+
+        function agendarRefreshSincrono() {
+            if (refreshPendente) clearTimeout(refreshPendente);
+            refreshPendente = setTimeout(function () {
+                refreshPendente = null;
+                refreshNFStatus().catch(function () {});
+            }, 400);
+        }
 
         function navegarAposConclusao(redirectUrl) {
             if (redirecionandoConclusao) return;
@@ -608,9 +619,18 @@
                     return;
                 }
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
+                progressoConferido = Math.min(progressoEsperado, progressoConferido + 1);
+                updateProgress(progressoConferido, progressoEsperado);
+                if (itemAtualProdutoEl && data.conferido !== undefined) {
+                    itemAtualProdutoEl.textContent = formatItemProduto(
+                        data.produto_cod || '',
+                        data.conferido,
+                        data.esperado
+                    );
+                }
                 codigoInput.value = '';
                 setFeedback('Leitura registrada com sucesso.', 'ok');
-                await refreshNFStatus();
+                agendarRefreshSincrono();
             } catch (error) {
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
                 setFeedback(error.message, 'erro');

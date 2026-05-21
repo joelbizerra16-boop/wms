@@ -1311,6 +1311,10 @@ def separacao_exec_web(request, tarefa_id):
         return redirect('web-separacao-lista')
     try:
         itens_exibicao = listar_itens_tarefa_para_exibicao_seguro(tarefa)
+        if tarefa.status != Tarefa.Status.ABERTO:
+            from apps.core.operacional_sessao_cache import preload_mapa_bipagem_separacao
+
+            preload_mapa_bipagem_separacao(tarefa.id)
         return _render(
             request,
             'separacao_exec.html',
@@ -1412,6 +1416,10 @@ def conferencia_exec_web(request, nf_id):
         return redirect('web-conferencia-exec', nf_id=nf.id)
 
     nf, conferencia, conferencia_ativa = _obter_conferencia_contexto(nf_id, request.user)
+    if conferencia_ativa:
+        from apps.core.operacional_sessao_cache import preload_mapa_bipagem_conferencia
+
+        preload_mapa_bipagem_conferencia(conferencia_ativa.id)
     return _render(
         request,
         'conferencia_exec.html',

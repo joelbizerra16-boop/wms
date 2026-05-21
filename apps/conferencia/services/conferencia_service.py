@@ -772,16 +772,59 @@ def iniciar_conferencia(nf_id, usuario):
         nf_id=nf.id,
         setor=','.join(sorted(setores_itens_usuario)),
     )
+    from apps.core.operacional_sessao_cache import preload_mapa_bipagem_conferencia
+
+    preload_mapa_bipagem_conferencia(conferencia.id)
     return _dados_conferencia(conferencia)
 
 
+def _resposta_bipagem_duplicada_conferencia(conferencia_id, codigo):
+    from apps.core.operacional_sessao_cache import resolver_item_id_conferencia
+
+    item_id, _ = resolver_item_id_conferencia(conferencia_id, codigo)
+    if not item_id:
+        return None
+    item = (
+        ConferenciaItem.objects.filter(pk=item_id)
+        .only('qtd_esperada', 'qtd_conferida', 'produto__cod_prod')
+        .select_related('produto')
+        .first()
+    )
+    if item is None:
+        return None
+    return {
+        'status': 'ok',
+        'esperado': float(item.qtd_esperada),
+        'conferido': float(item.qtd_conferida),
+        'finalizado': False,
+        'produto_cod': getattr(item.produto, 'cod_prod', '') or '',
+    }
+
+
 def bipar_conferencia(conferencia_id, codigo, usuario):
+    from apps.core.bipagem_leitura import eh_bipagem_duplicada, sanitizar_entrada_scanner
     from apps.core.operacional_bipagem_metrics import BipagemMetrics
+    from apps.core.operacional_sessao_cache import (
+        invalidar_mapa_conferencia,
+        resolver_item_id_conferencia,
+    )
     from apps.core.operacional_side_effects import agendar_atualizar_status_nf, agendar_logs_bipagem_conferencia
 
+    codigo = sanitizar_entrada_scanner(codigo)
     metricas = BipagemMetrics('conferencia', conferencia_id, getattr(usuario, 'id', None))
     inicio_bipagem = time.perf_counter()
     try:
+        if eh_bipagem_duplicada(modulo='conferencia', entidade_id=conferencia_id, usuario_id=usuario.id, codigo=codigo):
+            metricas.duplicada = True
+            with metricas.fase('response'):
+                resposta_dup = _resposta_bipagem_duplicada_conferencia(conferencia_id, codigo)
+                if resposta_dup:
+                    return resposta_dup
+
+        with metricas.fase('cache'):
+            item_id_cache, cache_hit = resolver_item_id_conferencia(conferencia_id, codigo)
+            metricas.cache_hit = cache_hit
+
         nf_id = None
         nf_numero = ''
         produto_cod = ''
@@ -792,9 +835,12 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
         setor_cache = ''
         redirect_url_final = None
         finalizacao_inicio = None
+        pendente_pos_commit = None
 
         def _executar():
-            nonlocal nf_id, nf_numero, produto_cod, finalizado, status_final, conferido, esperado, setor_cache, finalizacao_inicio
+            nonlocal nf_id, nf_numero, produto_cod, finalizado, conferido, esperado, setor_cache, finalizacao_inicio, pendente_pos_commit
+            conferencia_local = None
+            item_local = None
             with transaction.atomic():
                 with metricas.fase('lock'):
                     lock_kwargs = {}
@@ -817,8 +863,7 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         )
                         .get(id=conferencia_id)
                     )
-                    status_fiscal_nf = conferencia_local.nf.status_fiscal
-                    if status_fiscal_nf == NotaFiscal.StatusFiscal.CANCELADA:
+                    if conferencia_local.nf.status_fiscal == NotaFiscal.StatusFiscal.CANCELADA:
                         raise ConferenciaError(NF_CANCELADA_ERRO)
                     if conferencia_local.status not in {
                         Conferencia.Status.EM_CONFERENCIA,
@@ -855,8 +900,13 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         )
                         .order_by('id')
                     )
-                    itens_candidatos_qs, _ = filtrar_queryset_por_codigo_produto(itens_pendentes_qs, codigo)
-                    item_esperado = itens_candidatos_qs.first()
+                    if item_id_cache:
+                        item_esperado = itens_pendentes_qs.filter(pk=item_id_cache).first()
+                    else:
+                        item_esperado = None
+                    if item_esperado is None:
+                        itens_candidatos_qs, _ = filtrar_queryset_por_codigo_produto(itens_pendentes_qs, codigo)
+                        item_esperado = itens_candidatos_qs.first()
                     if item_esperado is None:
                         item_esperado = itens_pendentes_qs.first()
                     if item_esperado is None:
@@ -906,8 +956,9 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         status=ConferenciaItem.Status.AGUARDANDO,
                         qtd_conferida__lt=F('qtd_esperada'),
                     ).exclude(pk=item_local.pk).exists()
-                    if finalizado and finalizacao_inicio is None:
+                    if finalizado:
                         finalizacao_inicio = time.perf_counter()
+
                 nf_id = conferencia_local.nf_id
                 nf_numero = conferencia_local.nf.numero or ''
                 produto_cod = item_local.produto.cod_prod
@@ -915,46 +966,15 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                 esperado = item_local.qtd_esperada
                 setor_cache = _setor_operacional_produto(item_local.produto)
 
-                with metricas.fase('side_effects'):
-                    agendar_logs_bipagem_conferencia(
-                        usuario_id=usuario.id,
-                        nf_numero=nf_numero,
-                        produto_cod=produto_cod,
-                        tarefa_id=None,
-                    )
-                    if finalizado:
-                        conferencia_liberada = (
-                            conferencia_local.status == Conferencia.Status.LIBERADO_COM_RESTRICAO
-                            or conferencia_local.nf.status == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
-                        )
-                        possui_divergencia = ConferenciaItem.objects.filter(
-                            conferencia_id=conferencia_id,
-                            status=ConferenciaItem.Status.DIVERGENCIA,
-                        ).exists()
-                        status_final = (
-                            Conferencia.Status.CONCLUIDO_COM_RESTRICAO
-                            if conferencia_liberada
-                            else (Conferencia.Status.DIVERGENCIA if possui_divergencia else Conferencia.Status.OK)
-                        )
-                        agora_finalizacao = timezone.now()
-                        Conferencia.objects.filter(pk=conferencia_id).update(status=status_final, updated_at=agora_finalizacao)
-                        if conferencia_liberada:
-                            detalhe = f'Conferencia da NF {nf_numero} finalizada com restricao liberada.'
-                        elif possui_divergencia:
-                            detalhe = f'Conferencia da NF {nf_numero} finalizada com divergencia.'
-                        else:
-                            detalhe = f'Conferencia da NF {nf_numero} finalizada com sucesso.'
-                        _agendar_finalizacao_conferencia_segura(
-                            conferencia_id=conferencia_id,
-                            nf_id=nf_id,
-                            usuario_id=usuario.id,
-                            possui_divergencia=possui_divergencia,
-                            conferencia_liberada=conferencia_liberada,
-                            detalhe_log=detalhe,
-                            setor_cache=setor_cache,
-                        )
-                    else:
-                        agendar_atualizar_status_nf(nf_id)
+            pendente_pos_commit = {
+                'finalizado': finalizado,
+                'nf_id': nf_id,
+                'nf_numero': nf_numero,
+                'produto_cod': produto_cod,
+                'conferencia_status': conferencia_local.status,
+                'nf_status': conferencia_local.nf.status,
+                'setor_cache': setor_cache,
+            }
 
         try:
             _executar()
@@ -963,6 +983,63 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                 raise ConferenciaError('Conferência em uso por outra operação. Tente novamente.') from exc
             raise
 
+        if pendente_pos_commit:
+
+            def _pos_commit_side_effects():
+                payload = pendente_pos_commit
+                try:
+                    agendar_logs_bipagem_conferencia(
+                        usuario_id=usuario.id,
+                        nf_numero=payload['nf_numero'],
+                        produto_cod=payload['produto_cod'],
+                        tarefa_id=None,
+                    )
+                    if payload['finalizado']:
+                        conferencia_liberada = (
+                            payload['conferencia_status'] == Conferencia.Status.LIBERADO_COM_RESTRICAO
+                            or payload['nf_status'] == NotaFiscal.Status.LIBERADA_COM_RESTRICAO
+                        )
+                        possui_divergencia = ConferenciaItem.objects.filter(
+                            conferencia_id=conferencia_id,
+                            status=ConferenciaItem.Status.DIVERGENCIA,
+                        ).exists()
+                        status_local = (
+                            Conferencia.Status.CONCLUIDO_COM_RESTRICAO
+                            if conferencia_liberada
+                            else (Conferencia.Status.DIVERGENCIA if possui_divergencia else Conferencia.Status.OK)
+                        )
+                        agora_finalizacao = timezone.now()
+                        Conferencia.objects.filter(pk=conferencia_id).update(
+                            status=status_local,
+                            updated_at=agora_finalizacao,
+                        )
+                        if conferencia_liberada:
+                            detalhe = f'Conferencia da NF {payload["nf_numero"]} finalizada com restricao liberada.'
+                        elif possui_divergencia:
+                            detalhe = f'Conferencia da NF {payload["nf_numero"]} finalizada com divergencia.'
+                        else:
+                            detalhe = f'Conferencia da NF {payload["nf_numero"]} finalizada com sucesso.'
+                        _agendar_finalizacao_conferencia_segura(
+                            conferencia_id=conferencia_id,
+                            nf_id=payload['nf_id'],
+                            usuario_id=usuario.id,
+                            possui_divergencia=possui_divergencia,
+                            conferencia_liberada=conferencia_liberada,
+                            detalhe_log=detalhe,
+                            setor_cache=payload['setor_cache'],
+                        )
+                        invalidar_mapa_conferencia(conferencia_id)
+                    else:
+                        agendar_atualizar_status_nf(payload['nf_id'])
+                except Exception as exc:
+                    logger.warning(
+                        'ASYNC_SIDE_EFFECT falha modulo=conferencia conferencia_id=%s erro=%s',
+                        conferencia_id,
+                        exc,
+                    )
+
+            transaction.on_commit(_pos_commit_side_effects)
+
         with metricas.fase('response'):
             with metricas.fase('serialize'):
                 resposta = {
@@ -970,6 +1047,7 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                     'esperado': float(esperado),
                     'conferido': float(conferido),
                     'finalizado': finalizado,
+                    'produto_cod': produto_cod,
                 }
             if finalizado:
                 with metricas.fase('redirect'):
@@ -982,7 +1060,6 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                             'ok': True,
                             'finalizado': True,
                             'finalizada': True,
-                            'status_final': status_final,
                             'redirect_url': payload_final['redirect_url'],
                             'proxima_nf_id': payload_final['proxima_nf_id'],
                             'tem_proxima': payload_final['tem_proxima'],

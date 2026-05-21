@@ -6,6 +6,12 @@ from django.db import OperationalError, connection
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.core.bipagem_leitura import (
+    codigo_bipagem_primario,
+    normalizar_codigo_barras as normalizar_codigo_barras_leitura,
+    sanitizar_entrada_scanner,
+    variantes_codigo_barras,
+)
 from apps.logs.models import Log
 from apps.produtos.models import Produto
 
@@ -27,10 +33,7 @@ class ProdutoValidado:
 
 def normalizar_codigo_barras(codigo):
     """Extrai dígitos da leitura e usa os 14 últimos quando o scanner envia prefixo extra."""
-    codigo = re.sub(r'\D', '', str(codigo or ''))
-    if len(codigo) > 14:
-        codigo = codigo[-14:]
-    return codigo
+    return normalizar_codigo_barras_leitura(codigo)
 
 
 def buscar_produto_por_leitura(codigo_lido, *, modulo=None):
@@ -191,17 +194,16 @@ def _log_codigo_normalizado(codigo_original, codigo_normalizado, modulo):
 
 
 def _normalizar_codigo(valor, *, modulo=None):
-    original = str(valor or '').strip()
+    original = sanitizar_entrada_scanner(valor)
     if not original:
         return ''
     if _entrada_e_leitura_numerica(original):
         somente_digitos = re.sub(r'\D', '', original)
-        normalizado = normalizar_codigo_barras(original)
+        normalizado = codigo_bipagem_primario(original, modulo=modulo)
         if somente_digitos != normalizado:
             _log_codigo_normalizado(somente_digitos, normalizado, modulo)
         return normalizado
-    codigo = ''.join(original.split()).upper()
-    return codigo
+    return ''.join(original.split()).upper()
 
 
 def _codigo_exibicao_produto(produto):
@@ -209,24 +211,7 @@ def _codigo_exibicao_produto(produto):
 
 
 def _codigo_variantes(codigo):
-    codigo_base = _normalizar_codigo(codigo)
-    if not codigo_base:
-        return []
-    variantes = [codigo_base]
-    if codigo_base.isdigit():
-        sem_zeros = codigo_base.lstrip('0') or '0'
-        if sem_zeros not in variantes:
-            variantes.append(sem_zeros)
-        if len(codigo_base) == 14:
-            sufixo_ean13 = codigo_base[-13:]
-            if sufixo_ean13 not in variantes:
-                variantes.append(sufixo_ean13)
-        digitos_brutos = re.sub(r'\D', '', str(codigo or ''))
-        if digitos_brutos and len(digitos_brutos) > 14:
-            recorte = digitos_brutos[-14:]
-            if recorte not in variantes:
-                variantes.append(recorte)
-    return variantes
+    return variantes_codigo_barras(codigo)
 
 
 def _identificadores_produto(produto):

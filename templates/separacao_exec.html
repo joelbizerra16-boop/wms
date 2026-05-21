@@ -375,6 +375,17 @@
         const pollingIntervalMs = 10000;
         let pollingHandle = null;
         let pollingInFlight = false;
+        let progressoSeparado = Number({{ resumo_tarefa.separado|default:0 }});
+        let progressoTotal = Number({{ resumo_tarefa.total|default:0 }});
+        let refreshPendente = null;
+
+        function agendarRefreshSincrono() {
+            if (refreshPendente) clearTimeout(refreshPendente);
+            refreshPendente = setTimeout(function () {
+                refreshPendente = null;
+                refreshTaskStatus().catch(function () {});
+            }, 400);
+        }
 
         function getCookie(name) {
             const value = `; ${document.cookie}`;
@@ -491,9 +502,18 @@
                     return;
                 }
 
+                progressoSeparado = Math.min(progressoTotal, progressoSeparado + 1);
+                updateProgress(progressoSeparado, progressoTotal);
+                if (itemAtualProdutoEl && data.separado !== undefined) {
+                    itemAtualProdutoEl.textContent = formatItemProduto(
+                        data.produto_cod || '',
+                        data.separado,
+                        data.esperado
+                    );
+                }
                 setFeedback(`Item separado: ${formatNumber(data.separado)} / ${formatNumber(data.esperado)}`, 'ok');
                 codigoInput.value = '';
-                await refreshTaskStatus();
+                agendarRefreshSincrono();
             } catch (error) {
                 setFeedback(error.message, 'erro');
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();

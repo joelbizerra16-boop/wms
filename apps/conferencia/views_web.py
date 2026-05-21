@@ -316,6 +316,10 @@ def conferir_nf(request, nf_id):
     except PermissionDenied as exc:
         return HttpResponseForbidden(str(exc))
     item = _item_atual(conferencia_ativa or conferencia)
+    if conferencia_ativa:
+        from apps.core.operacional_sessao_cache import preload_mapa_bipagem_conferencia
+
+        preload_mapa_bipagem_conferencia(conferencia_ativa.id)
     return _render(
         request,
         'conferencia_exec.html',
