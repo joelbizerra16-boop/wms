@@ -7,6 +7,15 @@ from apps.usuarios.models import Setor
 SETORES_USUARIO_TTL = 60
 
 
+def _cache_key_setores_usuario(usuario_id):
+    return f'wms:op:setores:{usuario_id}'
+
+
+def invalidate_setores_usuario_cache(*, usuario_id=None):
+    if usuario_id:
+        cache.delete(_cache_key_setores_usuario(usuario_id))
+
+
 def _normalizar_setor_operacional(valor):
     setor = (valor or '').strip().upper()
     if setor == 'FILTRO':
@@ -27,7 +36,7 @@ def setores_usuario_operacional(usuario):
     if hasattr(usuario, attr):
         return getattr(usuario, attr)
 
-    cache_key = f'wms:op:setores:{usuario.id}'
+    cache_key = _cache_key_setores_usuario(usuario.id)
     cached = cache.get(cache_key)
     if cached is not None:
         valor = set(cached)
