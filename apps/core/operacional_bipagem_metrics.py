@@ -1,13 +1,17 @@
-"""Métricas estruturadas do caminho crítico de bipagem."""
+"""Métricas leves do caminho crítico de bipagem (sem profiling global de queries)."""
 
 import logging
 import time
 from contextlib import contextmanager
 
+from django.conf import settings
+
 logger = logging.getLogger(__name__)
 
 
 class BipagemMetrics:
+    """Mede lock/query/save/response com perf_counter; não altera fluxo operacional."""
+
     def __init__(self, modulo, entidade_id, usuario_id):
         self.modulo = modulo
         self.entidade_id = entidade_id
@@ -23,70 +27,56 @@ class BipagemMetrics:
         try:
             yield
         finally:
-            self._fases[nome] = (time.perf_counter() - inicio) * 1000
+            ms = (time.perf_counter() - inicio) * 1000
+            self._fases[nome] = self._fases.get(nome, 0.0) + ms
 
-    def registrar(self, *, extra=''):
+    def _ms(self, nome):
+        return self._fases.get(nome, 0.0)
+
+    def registrar(self):
+        if not getattr(settings, 'BIPAGEM_METRICS_ENABLED', True):
+            return
+
         total_ms = (time.perf_counter() - self._inicio_total) * 1000
-        lock_ms = self._fases.get('lock', 0.0)
-        query_ms = self._fases.get('query', 0.0)
-        save_ms = self._fases.get('save', 0.0)
-        serialize_ms = self._fases.get('serialize', 0.0)
-        batch_ms = self._fases.get('batch', 0.0)
-        side_effects_ms = self._fases.get('side_effects', 0.0)
-        cache_ms = self._fases.get('cache', 0.0)
-        response_ms = self._fases.get('response', 0.0)
-        cache_flag = ''
-        if self.cache_hit is True:
-            cache_flag = 'CACHE_HIT=1'
-        elif self.cache_hit is False:
-            cache_flag = 'CACHE_MISS=1'
-        if self.duplicada:
-            cache_flag = f'{cache_flag} BIPAGEM_DUPLICADA=1'.strip()
-        try:
-            from apps.core.db_telemetry import obter_stats_escopo_atual
+        lock_ms = self._ms('lock')
+        query_ms = self._ms('query')
+        save_ms = self._ms('save')
+        response_ms = self._ms('response')
 
-            stats = obter_stats_escopo_atual()
-            if stats and stats.modulo == self.modulo:
-                extra = (
-                    f'{extra} DB_TRANSACTION_MS={stats.transaction_ms:.2f} '
-                    f'query_count={stats.query_count} query_ms={stats.query_ms:.2f}'
-                ).strip()
-        except Exception:
-            pass
+        extras = []
+        if self.cache_hit is True:
+            extras.append('CACHE_HIT=1')
+        elif self.cache_hit is False:
+            extras.append('CACHE_MISS=1')
+        if self.duplicada:
+            extras.append('BIPAGEM_DUPLICADA=1')
+        extra_txt = ' '.join(extras)
+
         logger.info(
             'BIPAGEM_TOTAL_MS modulo=%s entidade_id=%s user_id=%s total_ms=%.2f '
-            'LOCK_MS=%.2f QUERY_MS=%.2f save_ms=%.2f serialize_ms=%.2f batch_ms=%.2f '
-            'ASYNC_SIDE_EFFECT=%.2f cache_ms=%.2f response_ms=%.2f %s %s',
+            'query_ms=%.2f lock_ms=%.2f save_ms=%.2f response_ms=%.2f %s',
             self.modulo,
             self.entidade_id,
             self.usuario_id,
             total_ms,
-            lock_ms,
             query_ms,
+            lock_ms,
             save_ms,
-            serialize_ms,
-            batch_ms,
-            side_effects_ms,
-            cache_ms,
             response_ms,
-            cache_flag,
-            extra,
+            extra_txt,
         )
-        from django.conf import settings
 
         slow = float(getattr(settings, 'BIPAGEM_SLOW_LOG_MS', 150))
         if total_ms >= slow:
             logger.warning(
-                'BIPAGEM_LENTA modulo=%s entidade_id=%s user_id=%s total_ms=%.2f lock_ms=%.2f query_ms=%.2f save_ms=%.2f serialize_ms=%.2f batch_ms=%.2f side_effects_ms=%.2f cache_ms=%.2f',
+                'BIPAGEM_LENTA modulo=%s entidade_id=%s user_id=%s total_ms=%.2f '
+                'query_ms=%.2f lock_ms=%.2f save_ms=%.2f response_ms=%.2f',
                 self.modulo,
                 self.entidade_id,
                 self.usuario_id,
                 total_ms,
-                lock_ms,
                 query_ms,
+                lock_ms,
                 save_ms,
-                serialize_ms,
-                batch_ms,
-                side_effects_ms,
-                cache_ms,
+                response_ms,
             )

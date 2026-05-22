@@ -811,11 +811,8 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
     )
     from apps.core.operacional_side_effects import agendar_atualizar_status_nf, agendar_logs_bipagem_conferencia
 
-    from apps.core.db_telemetry import operacional_db_scope
-
     codigo = sanitizar_entrada_scanner(codigo)
     metricas = BipagemMetrics('conferencia', conferencia_id, getattr(usuario, 'id', None))
-    inicio_bipagem = time.perf_counter()
     redirect_url_final = None
     finalizado = False
     db_scope = operacional_db_scope('conferencia', 'bipar')
@@ -841,11 +838,10 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
         esperado = Decimal('0')
         setor_cache = ''
         redirect_url_final = None
-        finalizacao_inicio = None
         pendente_pos_commit = None
 
         def _executar():
-            nonlocal nf_id, nf_numero, produto_cod, finalizado, conferido, esperado, setor_cache, finalizacao_inicio, pendente_pos_commit
+            nonlocal nf_id, nf_numero, produto_cod, finalizado, conferido, esperado, setor_cache, pendente_pos_commit
             conferencia_local = None
             item_local = None
             with transaction.atomic():
@@ -980,9 +976,6 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                         status=ConferenciaItem.Status.AGUARDANDO,
                         qtd_conferida__lt=F('qtd_esperada'),
                     ).exclude(pk=item_local.pk).exists()
-                    if finalizado:
-                        finalizacao_inicio = time.perf_counter()
-
                 nf_id = conferencia_local.nf_id
                 nf_numero = conferencia_local.nf.numero or ''
                 produto_cod = item_local.produto.cod_prod
@@ -1091,40 +1084,6 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
                     )
             return resposta
     finally:
-        db_scope.__exit__(None, None, None)
-        total_ms = round((time.perf_counter() - inicio_bipagem) * 1000, 2)
-        logger.info(
-            'CONFERENCIA_TOTAL_MS conferencia_id=%s user_id=%s total_ms=%s',
-            conferencia_id,
-            getattr(usuario, 'id', None),
-            total_ms,
-        )
-        if total_ms > CONFERENCIA_SLOW_LOG_MS:
-            logger.warning('CONFERENCIA_LENTA conferencia_id=%s total_ms=%s', conferencia_id, total_ms)
-        if finalizado:
-            total_finalizacao_ms = round(
-                ((time.perf_counter() - finalizacao_inicio) * 1000) if finalizacao_inicio is not None else total_ms,
-                2,
-            )
-            logger.info(
-                'CONFERENCIA_FINALIZACAO_MS conferencia_id=%s user_id=%s total_ms=%s lock_ms=%.2f query_ms=%.2f response_ms=%.2f redirect_ms=%.2f redirect_url=%s',
-                conferencia_id,
-                getattr(usuario, 'id', None),
-                total_finalizacao_ms,
-                metricas._fases.get('lock', 0.0),
-                metricas._fases.get('query', 0.0),
-                metricas._fases.get('response', 0.0),
-                metricas._fases.get('redirect', 0.0),
-                redirect_url_final or '',
-            )
-        mensagem = (
-            'CONFERENCIA_BIPAGEM_MS conferencia_id=%s user_id=%s total_ms=%s'
-            % (conferencia_id, getattr(usuario, 'id', None), total_ms)
-        )
-        if total_ms > CONFERENCIA_BIPAGEM_WARNING_MS:
-            logger.warning(mensagem)
-        else:
-            logger.info(mensagem)
         metricas.registrar()
 
 

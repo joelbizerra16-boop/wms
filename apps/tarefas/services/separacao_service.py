@@ -692,13 +692,8 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
     )
     from apps.tarefas.services.onda_schema import queryset_tarefa_bipagem_lock, schema_onda_disponivel
 
-    from apps.core.db_telemetry import operacional_db_scope
-
     codigo = sanitizar_entrada_scanner(codigo)
     metricas = BipagemMetrics('separacao', tarefa_id, getattr(usuario, 'id', None))
-    inicio_sep = time.perf_counter()
-    db_scope = operacional_db_scope('separacao', 'bipar')
-    db_scope.__enter__()
     try:
         if eh_bipagem_duplicada(modulo='separacao', entidade_id=tarefa_id, usuario_id=usuario.id, codigo=codigo):
             metricas.duplicada = True
@@ -912,13 +907,6 @@ def bipar_tarefa(tarefa_id, codigo, usuario):
                     anexar_transicao_separacao(resposta, usuario, tarefa_id_atual=tarefa.id)
             return resposta
     finally:
-        db_scope.__exit__(None, None, None)
-        logger.info(
-            'SEPARACAO_TOTAL_MS tarefa_id=%s user_id=%s total_ms=%.2f',
-            tarefa_id,
-            getattr(usuario, 'id', None),
-            (time.perf_counter() - inicio_sep) * 1000,
-        )
         metricas.registrar()
 
 
