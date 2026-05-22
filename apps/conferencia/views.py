@@ -60,13 +60,19 @@ class BiparConferenciaAPIView(OperacionalAPIView):
     def post(self, request):
         serializer = BiparConferenciaSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        conferencia_id = serializer.validated_data['conferencia_id']
+        codigo = serializer.validated_data['codigo']
         try:
-            resultado = bipar_conferencia(
-                serializer.validated_data['conferencia_id'],
-                serializer.validated_data['codigo'],
-                request.user,
+            resultado = bipar_conferencia(conferencia_id, codigo, request.user)
+        except ConferenciaError:
+            raise
+        except Exception:
+            logger.exception(
+                'BIPAGEM_CONFERENCIA_ERRO conferencia_id=%s codigo=%s usuario=%s',
+                conferencia_id,
+                codigo,
+                getattr(request.user, 'id', None),
             )
-        except ConferenciaError as exc:
             raise
         return Response(resultado, status=status.HTTP_200_OK)
 

@@ -815,8 +815,6 @@ def bipar_conferencia(conferencia_id, codigo, usuario):
     metricas = BipagemMetrics('conferencia', conferencia_id, getattr(usuario, 'id', None))
     redirect_url_final = None
     finalizado = False
-    db_scope = operacional_db_scope('conferencia', 'bipar')
-    db_scope.__enter__()
     try:
         if eh_bipagem_duplicada(modulo='conferencia', entidade_id=conferencia_id, usuario_id=usuario.id, codigo=codigo):
             metricas.duplicada = True
