@@ -2,7 +2,8 @@ from decimal import Decimal
 from io import BytesIO
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
+from django.urls import reverse
 
 from apps.nf.models import NotaFiscal
 from apps.recebimento.models import EstoqueTemporario
@@ -132,3 +133,25 @@ class RecebimentoImportacaoTestCase(TestCase):
         arquivo.name = 'venda.xml'
         with self.assertRaises(RecebimentoXMLError):
             importar_xml_recebimento(arquivo, usuario=self.gestor)
+
+
+class RecebimentoViewsWebTestCase(TestCase):
+    def setUp(self):
+        self.gestor = User.objects.create_user(
+            username='gestor_web',
+            password='x',
+            nome='Gestor Web',
+            perfil=User.Perfil.GESTOR,
+            setor=User.Setor.FILTROS,
+        )
+        self.client = Client()
+        self.client.force_login(self.gestor)
+
+    def test_telas_recebimento_renderizam_sem_500(self):
+        for url_name in (
+            'web-recebimento-importar-xml',
+            'web-recebimento-estoque-temp',
+            'web-recebimento-ativacao-scan',
+        ):
+            response = self.client.get(reverse(url_name))
+            self.assertEqual(response.status_code, 200, url_name)

@@ -7,12 +7,21 @@ from django.shortcuts import render
 from apps.recebimento.models import EstoqueTemporario
 from apps.recebimento.services.importador_recebimento import importar_xml_recebimento
 from apps.recebimento.services.xml_parser import RecebimentoXMLError
-from apps.usuarios.access import require_profiles
+from apps.usuarios.access import build_access_context, require_profiles
 from apps.usuarios.models import Usuario
 
 logger = logging.getLogger(__name__)
 
 MAX_XML_RECEBIMENTO = 50
+
+
+def _render(request, template_name, context=None):
+    """Mesmo contrato de contexto do WMS (usuario + acesso para base/sidebar)."""
+    base_context = {'usuario': request.user}
+    base_context.update(build_access_context(request.user))
+    if context:
+        base_context.update(context)
+    return render(request, template_name, base_context)
 
 
 @require_profiles(Usuario.Perfil.GESTOR)
@@ -65,11 +74,7 @@ def recebimento_importar_xml_web(request):
             if resultados['erros']:
                 messages.warning(request, f'{resultados["erros"]} arquivo(s) com erro.')
 
-    return render(
-        request,
-        'recebimento/importar_xml.html',
-        {'resultados': resultados},
-    )
+    return _render(request, 'recebimento/importar_xml.html', {'resultados': resultados})
 
 
 @require_profiles(Usuario.Perfil.GESTOR)
@@ -81,7 +86,7 @@ def recebimento_estoque_temporario_web(request):
     )
     paginator = Paginator(qs, 50)
     page_obj = paginator.get_page(request.GET.get('page'))
-    return render(
+    return _render(
         request,
         'recebimento/estoque_temporario.html',
         {
@@ -96,4 +101,4 @@ def recebimento_estoque_temporario_web(request):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def recebimento_ativacao_scan_web(request):
-    return render(request, 'recebimento/ativacao_scan.html')
+    return _render(request, 'recebimento/ativacao_scan.html')
