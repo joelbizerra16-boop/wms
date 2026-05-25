@@ -14,10 +14,10 @@ from apps.core.views_liberacao import (
     liberar_nf_divergencia_view,
     liberar_tarefa_divergencia_view,
 )
+from apps.estoque.views_movimentacoes import estoque_movimentacoes_web
 from apps.estoque.views_web import (
     estoque_armazenagem_web,
     estoque_lista_web,
-    estoque_movimentacoes_web,
     estoque_posicoes_web,
 )
 from apps.recebimento.views_web import (

@@ -127,3 +127,102 @@ class EstoqueFisico(BaseModel):
             return 0
         delta = timezone.now() - self.data_entrada
         return max(delta.days, 0)
+
+
+class MovimentacaoEstoque(BaseModel):
+    """Histórico imutável de movimentações físicas do estoque."""
+
+    class Tipo(models.TextChoices):
+        TRANSFERENCIA = 'TRANSFERENCIA', 'Transferência'
+        REABASTECIMENTO = 'REABASTECIMENTO', 'Reabastecimento'
+        AJUSTE = 'AJUSTE', 'Ajuste'
+        BLOQUEIO = 'BLOQUEIO', 'Bloqueio'
+        DESBLOQUEIO = 'DESBLOQUEIO', 'Desbloqueio'
+        ARMAZENAGEM = 'ARMAZENAGEM', 'Armazenagem'
+
+    class Motivo(models.TextChoices):
+        INVENTARIO = 'INVENTARIO', 'Inventário'
+        AVARIA = 'AVARIA', 'Avaria'
+        QUEBRA = 'QUEBRA', 'Quebra'
+        SOBRA = 'SOBRA', 'Sobra'
+        DIVERGENCIA = 'DIVERGENCIA', 'Divergência'
+        ERRO_OPERACIONAL = 'ERRO_OPERACIONAL', 'Erro operacional'
+        QUARENTENA = 'QUARENTENA', 'Quarentena'
+        QUALIDADE = 'QUALIDADE', 'Qualidade'
+        RECALL = 'RECALL', 'Recall'
+        REABASTECIMENTO = 'REABASTECIMENTO', 'Reabastecimento'
+        TRANSFERENCIA = 'TRANSFERENCIA', 'Transferência'
+        OUTRO = 'OUTRO', 'Outro'
+
+    class Status(models.TextChoices):
+        CONFIRMADO = 'CONFIRMADO', 'Confirmado'
+
+    tipo = models.CharField(max_length=20, choices=Tipo.choices, db_index=True, verbose_name='tipo')
+    produto = models.ForeignKey(
+        'produtos.Produto',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='movimentacoes_estoque',
+        verbose_name='produto',
+    )
+    codigo_produto = models.CharField(max_length=50, db_index=True, verbose_name='código produto')
+    descricao = models.CharField(max_length=255, blank=True, default='', verbose_name='descrição')
+    estoque_fisico = models.ForeignKey(
+        EstoqueFisico,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='movimentacoes',
+        verbose_name='linha estoque',
+    )
+    posicao_origem = models.ForeignKey(
+        PosicaoEstoque,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='movimentacoes_origem',
+        verbose_name='posição origem',
+    )
+    posicao_destino = models.ForeignKey(
+        PosicaoEstoque,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='movimentacoes_destino',
+        verbose_name='posição destino',
+    )
+    quantidade = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='quantidade')
+    fifo_nf = models.CharField(max_length=32, blank=True, default='', db_index=True, verbose_name='FIFO')
+    nf_entrada = models.CharField(max_length=20, blank=True, default='', verbose_name='NF entrada')
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='movimentacoes_estoque',
+        verbose_name='usuário',
+    )
+    motivo = models.CharField(max_length=24, blank=True, default='', verbose_name='motivo')
+    observacao = models.CharField(max_length=255, blank=True, default='', verbose_name='observação')
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.CONFIRMADO,
+        db_index=True,
+        verbose_name='status',
+    )
+
+    class Meta:
+        verbose_name = 'movimentação de estoque'
+        verbose_name_plural = 'movimentações de estoque'
+        ordering = ('-created_at',)
+        indexes = [
+            models.Index(fields=['codigo_produto', 'created_at'], name='mov_est_prod_data_ix'),
+            models.Index(fields=['fifo_nf', 'created_at'], name='mov_est_fifo_data_ix'),
+            models.Index(fields=['tipo', 'created_at'], name='mov_est_tipo_data_ix'),
+            models.Index(fields=['posicao_origem', 'created_at'], name='mov_est_orig_data_ix'),
+            models.Index(fields=['posicao_destino', 'created_at'], name='mov_est_dest_data_ix'),
+            models.Index(fields=['status', 'created_at'], name='mov_est_status_data_ix'),
+        ]
+
+    def __str__(self):
+        return f'{self.tipo} {self.codigo_produto} {self.quantidade}'

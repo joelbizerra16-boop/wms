@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.estoque.models import EstoqueFisico, PosicaoEstoque
+from apps.estoque.models import EstoqueFisico, MovimentacaoEstoque, PosicaoEstoque
 
 
 @admin.register(PosicaoEstoque)
@@ -33,3 +33,30 @@ class EstoqueFisicoAdmin(admin.ModelAdmin):
     list_filter = ('status',)
     search_fields = ('codigo_produto', 'fifo_nf', 'nf_entrada', 'descricao')
     readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(MovimentacaoEstoque)
+class MovimentacaoEstoqueAdmin(admin.ModelAdmin):
+    list_display = (
+        'created_at',
+        'tipo',
+        'codigo_produto',
+        'quantidade',
+        'fifo_nf',
+        'usuario',
+        'status',
+    )
+    list_filter = ('tipo', 'status', 'motivo')
+    search_fields = ('codigo_produto', 'fifo_nf', 'nf_entrada', 'descricao')
+    readonly_fields = (
+        'created_at',
+        'updated_at',
+        'tipo',
+        'codigo_produto',
+        'quantidade',
+        'fifo_nf',
+        'usuario',
+    )
+
+    def has_delete_permission(self, request, obj=None):
+        return False

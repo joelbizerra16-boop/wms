@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from django.db import transaction
 
 from apps.estoque.models import EstoqueFisico
 from apps.estoque.services.fifo import formatar_fifo_nf
 from apps.estoque.services.posicao import PosicaoEstoqueError, resolver_posicao
+from apps.estoque.services.quantidade import QuantidadeEstoqueError, parse_quantidade
 from apps.produtos.models import Produto
 from apps.recebimento.models import EstoqueTemporario
 
@@ -21,16 +22,10 @@ class ArmazenagemError(Exception):
 
 
 def parse_quantidade_armazenagem(valor) -> Decimal:
-    texto = str(valor or '').strip().replace(',', '.')
-    if not texto:
-        raise ArmazenagemError('Informe a quantidade para armazenar.')
     try:
-        qtd = Decimal(texto)
-    except (InvalidOperation, ValueError) as exc:
-        raise ArmazenagemError('Quantidade inválida.') from exc
-    if qtd <= 0:
-        raise ArmazenagemError('Quantidade deve ser maior que zero.')
-    return qtd
+        return parse_quantidade(valor)
+    except QuantidadeEstoqueError as exc:
+        raise ArmazenagemError(str(exc)) from exc
 
 
 def armazenar_item_temp(
@@ -91,6 +86,10 @@ def armazenar_item_temp(
             temp.status = EstoqueTemporario.Status.RESGATADO
             campos_update.append('status')
         temp.save(update_fields=campos_update)
+
+        from apps.estoque.services.movimentacao import registrar_movimentacao_armazenagem
+
+        registrar_movimentacao_armazenagem(estoque=estoque, usuario=usuario)
 
     logger.info(
         'ARMAZENAGEM_MOV temp_id=%s estoque_id=%s produto=%s posicao=%s qtd=%s saldo_temp=%s '

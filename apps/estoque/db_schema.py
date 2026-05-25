@@ -6,7 +6,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_TABELAS_ESTOQUE = ('estoque_posicaoestoque', 'estoque_estoquefisico')
+_TABELAS_ESTOQUE = (
+    'estoque_posicaoestoque',
+    'estoque_estoquefisico',
+    'estoque_movimentacaoestoque',
+)
 
 
 def tabelas_estoque_existem(connection) -> bool:

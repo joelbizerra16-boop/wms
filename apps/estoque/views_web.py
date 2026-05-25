@@ -249,7 +249,3 @@ def estoque_armazenagem_web(request):
         },
     )
 
-
-@require_profiles(Usuario.Perfil.GESTOR)
-def estoque_movimentacoes_web(request):
-    return _render(request, 'estoque/movimentacoes.html')

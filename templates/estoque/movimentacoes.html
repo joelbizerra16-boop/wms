@@ -8,13 +8,284 @@
     <div>
         <span class="section-label">Estoque</span>
         <h1>Movimentações</h1>
-        <p>Transferências, ajustes e reabastecimento — módulo em evolução.</p>
+        <p>Transferências, reabastecimento, ajustes, bloqueios e histórico logístico.</p>
     </div>
     <div class="actions-row">
-        <a href="{% url 'web-estoque-lista' %}" class="btn btn-light">Voltar ao estoque</a>
+        <a href="{% url 'web-estoque-lista' %}" class="btn btn-light">Estoque</a>
     </div>
 </div>
+
+<nav class="actions-row" style="margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+    {% for slug, label in abas %}
+    <a href="{% url 'web-estoque-movimentacoes' %}?aba={{ slug }}"
+       class="btn btn-sm {% if aba == slug %}btn-warning{% else %}btn-light{% endif %}">{{ label }}</a>
+    {% endfor %}
+</nav>
+
+{% if aba == 'transferencia' %}
 <div class="card">
-    <p class="text-muted">Em breve: movimentações internas, bloqueio por FIFO e auditoria de saldo.</p>
+    <h2 class="section-title">Transferência entre posições</h2>
+    <p class="text-muted">FIFO e NF da entrada original são preservados.</p>
+    <form method="post" class="cadastro-form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="aba" value="transferencia">
+        <input type="hidden" name="acao" value="transferir">
+        <div>
+            <label for="tr_produto">Produto (bipagem)</label>
+            <input id="tr_produto" name="codigo_produto" type="text" required class="input-scan" autocomplete="off">
+        </div>
+        <div>
+            <label for="tr_fifo">FIFO (opcional)</label>
+            <input id="tr_fifo" name="fifo_nf" type="text" placeholder="05/26-1414282">
+        </div>
+        <div>
+            <label for="tr_origem">Posição origem</label>
+            <input id="tr_origem" name="posicao_origem" type="text" required placeholder="1 1 2 1" class="input-scan" autocomplete="off">
+        </div>
+        <div>
+            <label for="tr_destino">Posição destino</label>
+            <input id="tr_destino" name="posicao_destino" type="text" required placeholder="1 1 3 1" class="input-scan" autocomplete="off">
+        </div>
+        <div>
+            <label for="tr_qtd">Quantidade</label>
+            <input id="tr_qtd" name="quantidade" type="number" step="any" min="0.01" required inputmode="decimal">
+        </div>
+        <div>
+            <label for="tr_obs">Observação</label>
+            <input id="tr_obs" name="observacao" type="text">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-warning">Confirmar transferência</button>
+        </div>
+    </form>
 </div>
+{% endif %}
+
+{% if aba == 'reabastecimento' %}
+<div class="card">
+    <h2 class="section-title">Reabastecimento pulmão → picking</h2>
+    <p class="text-muted">Origem: <strong>andar 1</strong> (pulmão). Destino: <strong>andar ≥ 2</strong> (picking).</p>
+    <form method="post" class="cadastro-form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="aba" value="reabastecimento">
+        <input type="hidden" name="acao" value="reabastecer">
+        <div>
+            <label for="rb_produto">Produto</label>
+            <input id="rb_produto" name="codigo_produto" type="text" required class="input-scan" autocomplete="off">
+        </div>
+        <div>
+            <label for="rb_origem">Posição origem (pulmão)</label>
+            <input id="rb_origem" name="posicao_origem" type="text" required placeholder="1 1 1 1" class="input-scan" autocomplete="off">
+        </div>
+        <div>
+            <label for="rb_destino">Posição destino (picking)</label>
+            <input id="rb_destino" name="posicao_destino" type="text" required placeholder="1 1 2 1" class="input-scan" autocomplete="off">
+        </div>
+        <div>
+            <label for="rb_qtd">Quantidade</label>
+            <input id="rb_qtd" name="quantidade" type="number" step="any" min="0.01" required inputmode="decimal">
+        </div>
+        <div>
+            <label for="rb_obs">Observação</label>
+            <input id="rb_obs" name="observacao" type="text">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-warning">Confirmar reabastecimento</button>
+        </div>
+    </form>
+</div>
+{% endif %}
+
+{% if aba == 'ajustes' %}
+<div class="card">
+    <h2 class="section-title">Ajustes de estoque</h2>
+    <form method="post" class="cadastro-form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="aba" value="ajustes">
+        <input type="hidden" name="acao" value="ajustar">
+        <div>
+            <label for="aj_produto">Produto</label>
+            <input id="aj_produto" name="codigo_produto" type="text" required class="input-scan" autocomplete="off">
+        </div>
+        <div>
+            <label for="aj_pos">Posição</label>
+            <input id="aj_pos" name="posicao" type="text" required class="input-scan" autocomplete="off">
+        </div>
+        <div>
+            <label for="aj_qtd">Quantidade</label>
+            <input id="aj_qtd" name="quantidade" type="number" step="any" min="0.01" required>
+        </div>
+        <div>
+            <label for="aj_dir">Direção</label>
+            <select id="aj_dir" name="direcao_ajuste">
+                <option value="positivo">Ajuste positivo (+)</option>
+                <option value="negativo">Ajuste negativo (-)</option>
+            </select>
+        </div>
+        <div>
+            <label for="aj_motivo">Motivo</label>
+            <select id="aj_motivo" name="motivo" required>
+                {% for m in motivos_ajuste %}
+                <option value="{{ m.value }}">{{ m.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="aj_obs">Observação</label>
+            <input id="aj_obs" name="observacao" type="text">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-warning">Registrar ajuste</button>
+        </div>
+    </form>
+</div>
+{% endif %}
+
+{% if aba == 'bloqueios' %}
+<div class="card" style="margin-bottom:16px;">
+    <h2 class="section-title">Bloquear entrada (FIFO / linha)</h2>
+    <p class="text-muted">Bloqueia apenas a linha/FIFO — não o produto inteiro.</p>
+    <form method="post" class="cadastro-form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="aba" value="bloqueios">
+        <input type="hidden" name="acao" value="bloquear">
+        <div>
+            <label for="bl_id">ID linha estoque (opcional)</label>
+            <input id="bl_id" name="estoque_id" type="number" min="1" placeholder="Ex.: 12">
+        </div>
+        <div>
+            <label for="bl_fifo">FIFO</label>
+            <input id="bl_fifo" name="fifo_nf" type="text" placeholder="05/26-1414282">
+        </div>
+        <div>
+            <label for="bl_prod">Produto</label>
+            <input id="bl_prod" name="codigo_produto" type="text">
+        </div>
+        <div>
+            <label for="bl_motivo">Motivo</label>
+            <select id="bl_motivo" name="motivo">
+                {% for m in motivos_bloqueio %}
+                <option value="{{ m.value }}">{{ m.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bl_obs">Observação</label>
+            <input id="bl_obs" name="observacao" type="text">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-warning">Bloquear</button>
+        </div>
+    </form>
+</div>
+<div class="card" style="margin-bottom:16px;">
+    <h2 class="section-title">Desbloquear</h2>
+    <form method="post" class="cadastro-form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="aba" value="bloqueios">
+        <input type="hidden" name="acao" value="desbloquear">
+        <div>
+            <label for="db_id">ID linha</label>
+            <input id="db_id" name="estoque_id" type="number" min="1">
+        </div>
+        <div>
+            <label for="db_fifo">FIFO</label>
+            <input id="db_fifo" name="fifo_nf" type="text">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn btn-light">Desbloquear</button>
+        </div>
+    </form>
+</div>
+<div class="card table-card">
+    <h2 class="section-title">Linhas bloqueadas</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Produto</th>
+                    <th>Posição</th>
+                    <th>Qtd</th>
+                    <th>FIFO</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in bloqueados %}
+                <tr>
+                    <td>{{ b.id }}</td>
+                    <td><strong>{{ b.codigo_produto }}</strong></td>
+                    <td><code>{{ b.posicao.label_coletor }}</code></td>
+                    <td>{{ b.quantidade|floatformat:"-2" }}</td>
+                    <td><span class="nf-chip">{{ b.fifo_nf }}</span></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="empty-state">Nenhuma linha bloqueada.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if aba == 'auditoria' %}
+<div class="metrics-grid">
+    {% for item in auditoria_itens %}
+    <div class="metric-card metric-card--{% if item.nivel == 'danger' %}danger{% elif item.nivel == 'warning' %}accent{% elif item.nivel == 'success' %}success{% else %}info{% endif %}">
+        <span class="metric-card__label">{{ item.titulo }}</span>
+        <div class="metric-card__value" style="font-size:1rem;line-height:1.3;">{{ item.detalhe }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if aba == 'historico' %}
+<form method="get" class="card" style="margin-bottom:12px;padding:12px;">
+    <input type="hidden" name="aba" value="historico">
+    <label for="busca_hist">Buscar produto</label>
+    <div class="actions-row">
+        <input id="busca_hist" name="busca_hist" type="search" value="{{ busca_hist }}">
+        <button type="submit" class="btn btn-light">Filtrar</button>
+    </div>
+</form>
+<div class="card table-card">
+    <div class="table-wrap table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Usuário</th>
+                    <th>Tipo</th>
+                    <th>Produto</th>
+                    <th>Origem</th>
+                    <th>Destino</th>
+                    <th>Qtd</th>
+                    <th>FIFO</th>
+                    <th>NF</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for h in historico %}
+                <tr>
+                    <td>{{ h.data|date:"d/m/Y H:i" }}</td>
+                    <td>{{ h.usuario }}</td>
+                    <td><span class="status-badge status-badge--info">{{ h.tipo }}</span></td>
+                    <td><strong>{{ h.produto }}</strong></td>
+                    <td>{{ h.origem }}</td>
+                    <td>{{ h.destino }}</td>
+                    <td>{{ h.qtd|floatformat:"-2" }}</td>
+                    <td><span class="nf-chip">{{ h.fifo }}</span></td>
+                    <td>{{ h.nf }}</td>
+                    <td>{{ h.status }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="10" class="empty-state">Nenhuma movimentação registrada.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include 'partials/pagination_controls.html' with page_obj=page_hist pagination_query=pagination_query_hist is_paginated=is_paginated_hist %}
+{% endif %}
 {% endblock %}
