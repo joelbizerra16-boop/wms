@@ -6,6 +6,7 @@ from django.db import connection
 from django.db.models import Q
 from django.db.utils import ProgrammingError
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from apps.estoque.db_schema import aplicar_schema_estoque_brownfield, tabelas_estoque_existem
 from apps.estoque.models import EstoqueFisico, PosicaoEstoque
@@ -199,25 +200,41 @@ def estoque_armazenagem_web(request):
             estoque = armazenar_item_temp(
                 temp_id=int(request.POST.get('temp_id')),
                 posicao_entrada=posicao_entrada,
+                quantidade=request.POST.get('quantidade'),
                 usuario=request.user,
             )
-            messages.success(
-                request,
-                f'Armazenado: {estoque.codigo_produto} → {estoque.posicao.label_coletor} (FIFO {estoque.fifo_nf}).',
+            temp_pos = EstoqueTemporario.objects.filter(pk=request.POST.get('temp_id')).first()
+            saldo = getattr(temp_pos, 'quantidade', None)
+            msg = (
+                f'Armazenado {estoque.quantidade} un: {estoque.codigo_produto} → '
+                f'{estoque.posicao.label_coletor} (FIFO {estoque.fifo_nf}).'
             )
+            if saldo is not None and saldo > 0:
+                msg += f' Saldo TEMP restante: {saldo}.'
+            else:
+                msg += ' TEMP finalizado.'
+            messages.success(request, msg)
+            redirect_temp = request.POST.get('temp_id')
+            if saldo is not None and saldo > 0:
+                return redirect(f'{reverse("web-estoque-armazenagem")}?temp={redirect_temp}')
             return redirect('web-estoque-armazenagem')
         except (ArmazenagemError, ValueError) as exc:
             messages.error(request, str(exc))
 
     itens_temp = (
-        EstoqueTemporario.objects.filter(status=EstoqueTemporario.Status.TEMP)
+        EstoqueTemporario.objects.filter(
+            status=EstoqueTemporario.Status.TEMP,
+            quantidade__gt=0,
+        )
         .select_related('usuario_recebimento')
         .order_by('data_recebimento', 'nf_numero')[:100]
     )
     item_selecionado = None
     if temp_id:
         item_selecionado = EstoqueTemporario.objects.filter(
-            pk=temp_id, status=EstoqueTemporario.Status.TEMP
+            pk=temp_id,
+            status=EstoqueTemporario.Status.TEMP,
+            quantidade__gt=0,
         ).first()
     return _render(
         request,
@@ -225,7 +242,10 @@ def estoque_armazenagem_web(request):
         {
             'itens_temp': itens_temp,
             'item_selecionado': item_selecionado,
-            'total_temp': EstoqueTemporario.objects.filter(status=EstoqueTemporario.Status.TEMP).count(),
+            'total_temp': EstoqueTemporario.objects.filter(
+                status=EstoqueTemporario.Status.TEMP,
+                quantidade__gt=0,
+            ).count(),
         },
     )
 

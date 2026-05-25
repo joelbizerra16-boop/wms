@@ -8,7 +8,7 @@
     <div>
         <span class="section-label">Estoque</span>
         <h1>Armazenagem</h1>
-        <p>Mover itens do <strong>TEMP</strong> (doca/recebimento) para posição endereçada.</p>
+        <p>Mover <strong>quantidade parcial</strong> do TEMP para posição endereçada. Múltiplas posições permitidas.</p>
     </div>
     <div class="actions-row">
         <a href="{% url 'web-recebimento-estoque-temp' %}" class="btn btn-light">TEMP</a>
@@ -23,23 +23,47 @@
 
 <div class="card" style="margin-bottom:16px;">
     <h2 class="section-title">Confirmar armazenagem</h2>
-    <form method="post">
+    <form method="post" id="form-armazenagem">
         {% csrf_token %}
         <label for="temp_id">Item TEMP</label>
         <select id="temp_id" name="temp_id" required>
             <option value="">— Selecione —</option>
             {% for t in itens_temp %}
-            <option value="{{ t.id }}" {% if item_selecionado and item_selecionado.id == t.id %}selected{% endif %}>
+            <option value="{{ t.id }}"
+                    data-qtd="{{ t.quantidade }}"
+                    data-produto="{{ t.produto_codigo }}"
+                    data-descricao="{{ t.descricao }}"
+                    {% if item_selecionado and item_selecionado.id == t.id %}selected{% endif %}>
                 NF {{ t.nf_numero }} · {{ t.produto_codigo }} · {{ t.quantidade|floatformat:"-2" }} un
             </option>
             {% endfor %}
         </select>
 
+        {% if item_selecionado %}
+        <p style="margin-top:10px;margin-bottom:0;">
+            <strong>{{ item_selecionado.descricao }}</strong>
+            <span class="text-muted">({{ item_selecionado.produto_codigo }})</span>
+        </p>
+        {% else %}
+        <p id="produto-resumo" class="text-muted" style="margin-top:10px;display:none;"></p>
+        {% endif %}
+
+        <label for="qtd_disponivel" style="margin-top:12px;">Qtd disponível (TEMP)</label>
+        <input id="qtd_disponivel" type="text" readonly
+               value="{% if item_selecionado %}{{ item_selecionado.quantidade|floatformat:"-2" }}{% endif %}"
+               placeholder="Selecione um item">
+
         <label for="posicao" style="margin-top:12px;">Posição (código ou bipagem)</label>
         <input id="posicao" name="posicao" type="text" required
                placeholder="Ex.: 1 1 2 1 ou PULMAO"
                autocomplete="off" inputmode="text" class="input-scan">
-        <small class="text-muted">Leia no coletor: RUA POSIÇÃO ANDAR LADO (espaços). Andar 1 = pulmão.</small>
+
+        <label for="quantidade" style="margin-top:12px;">Qtd para armazenar</label>
+        <input id="quantidade" name="quantidade" type="number" inputmode="decimal" step="any" min="0.01" required
+               {% if item_selecionado %}max="{{ item_selecionado.quantidade }}" value="{{ item_selecionado.quantidade|floatformat:"-2" }}"{% endif %}
+               placeholder="Ex.: 200">
+
+        <small class="text-muted">Leia no coletor: RUA POSIÇÃO ANDAR LADO (espaços). Andar 1 = pulmão. Não ultrapasse o saldo TEMP.</small>
 
         <div class="actions-row" style="margin-top:14px;">
             <button type="submit" class="btn-warning">Confirmar armazenagem</button>
@@ -80,4 +104,26 @@
         </table>
     </div>
 </div>
+<script>
+(function () {
+    var sel = document.getElementById('temp_id');
+    if (!sel) return;
+    sel.addEventListener('change', function () {
+        if (this.value) {
+            window.location = '{% url "web-estoque-armazenagem" %}?temp=' + encodeURIComponent(this.value);
+        }
+    });
+    var opt = sel.options[sel.selectedIndex];
+    if (opt && opt.value) {
+        var qtd = opt.getAttribute('data-qtd');
+        var disp = document.getElementById('qtd_disponivel');
+        var qtdInput = document.getElementById('quantidade');
+        if (disp && qtd) disp.value = qtd;
+        if (qtdInput && qtd) {
+            qtdInput.max = qtd;
+            if (!qtdInput.value) qtdInput.value = qtd;
+        }
+    }
+})();
+</script>
 {% endblock %}

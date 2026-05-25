@@ -75,23 +75,61 @@ class EstoqueArmazenagemTestCase(TestCase):
             status=EstoqueTemporario.Status.TEMP,
         )
 
-    def test_armazenagem_move_temp_para_fisico(self):
-        estoque = armazenar_item_temp(
+    def test_armazenagem_parcial_duas_posicoes(self):
+        pos2 = PosicaoEstoque.objects.create(
+            codigo_posicao='1-1-3-1',
+            rua='1',
+            posicao='1',
+            andar='3',
+            lado='1',
+        )
+        e1 = armazenar_item_temp(
             temp_id=self.temp.id,
             posicao_entrada='1 1 2 1',
+            quantidade=Decimal('200'),
+            usuario=self.gestor,
+        )
+        self.temp.refresh_from_db()
+        self.assertEqual(self.temp.status, EstoqueTemporario.Status.TEMP)
+        self.assertEqual(self.temp.quantidade, Decimal('340'))
+        self.assertEqual(e1.quantidade, Decimal('200'))
+
+        e2 = armazenar_item_temp(
+            temp_id=self.temp.id,
+            posicao_entrada='1 1 3 1',
+            quantidade=Decimal('340'),
             usuario=self.gestor,
         )
         self.temp.refresh_from_db()
         self.assertEqual(self.temp.status, EstoqueTemporario.Status.RESGATADO)
-        self.assertEqual(estoque.codigo_produto, '20005')
-        self.assertEqual(estoque.posicao_id, self.pos.id)
-        self.assertIn('377439', estoque.fifo_nf)
-        self.assertEqual(EstoqueFisico.objects.count(), 1)
+        self.assertEqual(self.temp.quantidade, Decimal('0'))
+        self.assertEqual(e2.quantidade, Decimal('340'))
+        self.assertEqual(EstoqueFisico.objects.count(), 2)
+        self.assertEqual(e2.posicao_id, pos2.id)
 
-    def test_nao_rearmazena_temp_resgatado(self):
-        armazenar_item_temp(temp_id=self.temp.id, posicao_entrada='1 1 2 1', usuario=self.gestor)
+    def test_rejeita_quantidade_maior_que_temp(self):
         with self.assertRaises(ArmazenagemError):
-            armazenar_item_temp(temp_id=self.temp.id, posicao_entrada='1 1 2 1', usuario=self.gestor)
+            armazenar_item_temp(
+                temp_id=self.temp.id,
+                posicao_entrada='1 1 2 1',
+                quantidade=Decimal('541'),
+                usuario=self.gestor,
+            )
+
+    def test_nao_rearmazena_temp_finalizado(self):
+        armazenar_item_temp(
+            temp_id=self.temp.id,
+            posicao_entrada='1 1 2 1',
+            quantidade=Decimal('540'),
+            usuario=self.gestor,
+        )
+        with self.assertRaises(ArmazenagemError):
+            armazenar_item_temp(
+                temp_id=self.temp.id,
+                posicao_entrada='1 1 2 1',
+                quantidade=Decimal('1'),
+                usuario=self.gestor,
+            )
 
 
 class EstoqueViewsWebTestCase(TestCase):
