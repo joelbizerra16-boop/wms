@@ -206,50 +206,23 @@
             color: var(--muted);
         }
 
-        .posicao-card { display: grid; gap: 10px; }
-        .posicao-titulo { margin: 0; }
-        .posicao-grid {
-            display: grid;
-            grid-template-columns: 1fr auto;
-            gap: 10px;
-            align-items: stretch;
-        }
-        .posicao-blocos {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 6px;
-            align-items: center;
-        }
-        .posicao-box {
-            min-height: 52px;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            background: #f8fafc;
-            display: grid;
-            place-items: center;
-            font-size: clamp(1.2rem, 5vw, 1.55rem);
-            font-weight: 800;
-            color: var(--text);
-        }
-        .posicao-sep {
-            display: none;
-            color: var(--muted);
-            font-weight: 700;
+        .posicao-card {
+            padding: 10px 12px;
             text-align: center;
         }
-        .qtd-disponivel {
-            border-left: 1px solid var(--line);
-            padding-left: 10px;
-            display: grid;
-            align-content: center;
-            gap: 4px;
-            min-width: 88px;
-        }
-        .qtd-disponivel-valor {
-            font-size: clamp(1.5rem, 6vw, 2rem);
+        .posicao-linha {
+            margin: 0;
+            font-size: clamp(1.35rem, 6.5vw, 1.85rem);
             font-weight: 800;
+            line-height: 1.15;
+            letter-spacing: 0.02em;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .posicao-linha .pos-qtd {
             color: var(--info);
-            line-height: 1;
         }
 
         .mode-toggle {
@@ -379,16 +352,6 @@
             transition: width 0.15s linear;
         }
 
-        @media (max-width: 380px) {
-            .posicao-blocos { grid-template-columns: repeat(2, 1fr); }
-            .posicao-grid { grid-template-columns: 1fr; }
-            .qtd-disponivel {
-                border-left: 0;
-                border-top: 1px solid var(--line);
-                padding-left: 0;
-                padding-top: 8px;
-            }
-        }
         @media (min-width: 520px) {
             .op-main { padding-left: 16px; padding-right: 16px; }
         }
@@ -443,20 +406,11 @@
             </div>
         </section>
 
-        <section class="card posicao-card">
-            <div class="lbl posicao-titulo">Posição (rua - posição - altura - lado)</div>
-            <div class="posicao-grid">
-                <div class="posicao-blocos" aria-label="Coordenadas de estoque">
-                    <div class="posicao-box" id="pos-rua">{{ item_atual.rua|default:"-" }}</div>
-                    <div class="posicao-box" id="pos-posicao">{{ item_atual.posicao|default:"-" }}</div>
-                    <div class="posicao-box" id="pos-altura">{{ item_atual.altura|default:"-" }}</div>
-                    <div class="posicao-box" id="pos-lado">{{ item_atual.lado|default:"-" }}</div>
-                </div>
-                <div class="qtd-disponivel">
-                    <div class="lbl">Qtd. disponível</div>
-                    <div class="qtd-disponivel-valor" id="item-qtd-disponivel">{{ item_atual.quantidade_total|floatformat:0 }}</div>
-                </div>
-            </div>
+        <section class="card posicao-card" aria-label="Posição operacional">
+            <p class="posicao-linha" id="posicao-operacional-linha">
+                {{ item_atual.rua|default:"-" }}-{{ item_atual.posicao|default:"-" }}-{{ item_atual.altura|default:"-" }}-{{ item_atual.lado|default:"-" }}
+                | <span class="pos-qtd">QTD {{ item_atual.quantidade_total|floatformat:0 }}</span>
+            </p>
         </section>
 
         {% if tarefa.status != 'ABERTO' %}
@@ -528,11 +482,7 @@
         const itemAtualProgressoEl = document.getElementById('item-atual-progresso');
         const itemAtualDescricaoEl = document.getElementById('item-atual-descricao');
         const itemAtualSetorEl = document.getElementById('item-atual-setor');
-        const itemQtdDisponivelEl = document.getElementById('item-qtd-disponivel');
-        const posRuaEl = document.getElementById('pos-rua');
-        const posPosicaoEl = document.getElementById('pos-posicao');
-        const posAlturaEl = document.getElementById('pos-altura');
-        const posLadoEl = document.getElementById('pos-lado');
+        const posicaoOperacionalEl = document.getElementById('posicao-operacional-linha');
         const btnModoScanner = document.getElementById('btn-modo-scanner');
         const btnModoManual = document.getElementById('btn-modo-manual');
         const progressTextEl = document.getElementById('progress-text');
@@ -574,6 +524,24 @@
         function formatNumber(value) {
             return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value || 0));
         }
+        function formatPosicaoLinha(item) {
+            const rua = item.rua || item.posicao_rua || '-';
+            const posicao = item.posicao || item.posicao_numero || '-';
+            const altura = item.altura || '-';
+            const lado = item.lado || '-';
+            const qtd = formatNumber(item.quantidade_total);
+            return `${rua}-${posicao}-${altura}-${lado} | QTD ${qtd}`;
+        }
+        function renderPosicaoLinha(item) {
+            if (!posicaoOperacionalEl || !item) return;
+            const texto = formatPosicaoLinha(item);
+            const partes = texto.split(' | QTD ');
+            if (partes.length === 2) {
+                posicaoOperacionalEl.innerHTML = `${partes[0]} | <span class="pos-qtd">QTD ${partes[1]}</span>`;
+            } else {
+                posicaoOperacionalEl.textContent = texto;
+            }
+        }
         function updateItemDisplay(item) {
             if (!item) return;
             if (itemAtualCodigoEl) itemAtualCodigoEl.textContent = item.produto || '';
@@ -582,11 +550,7 @@
             }
             if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = item.descricao || '';
             if (itemAtualSetorEl) itemAtualSetorEl.textContent = item.setor || '-';
-            if (itemQtdDisponivelEl) itemQtdDisponivelEl.textContent = formatNumber(item.quantidade_total);
-            if (posRuaEl) posRuaEl.textContent = item.rua || item.posicao_rua || '-';
-            if (posPosicaoEl) posPosicaoEl.textContent = item.posicao || item.posicao_numero || '-';
-            if (posAlturaEl) posAlturaEl.textContent = item.altura || '-';
-            if (posLadoEl) posLadoEl.textContent = item.lado || '-';
+            renderPosicaoLinha(item);
         }
         function setStatusBadge(status) {
             if (!statusEl) return;
