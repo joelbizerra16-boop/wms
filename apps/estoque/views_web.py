@@ -2,9 +2,12 @@ import logging
 
 from django.contrib import messages
 from django.core.paginator import Paginator
+from django.db import connection
 from django.db.models import Q
+from django.db.utils import ProgrammingError
 from django.shortcuts import get_object_or_404, redirect, render
 
+from apps.estoque.db_schema import aplicar_schema_estoque_brownfield, tabelas_estoque_existem
 from apps.estoque.models import EstoqueFisico, PosicaoEstoque
 from apps.estoque.services.armazenagem import ArmazenagemError, armazenar_item_temp
 from apps.estoque.services.posicao import montar_codigo_posicao
@@ -15,6 +18,27 @@ from apps.usuarios.models import Usuario
 logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
+
+MSG_SCHEMA_PENDENTE = (
+    'Tabelas do estoque ainda não existem no banco. '
+    'No servidor, execute: python manage.py migrate estoque --noinput'
+)
+
+
+def _garantir_schema_estoque():
+    if tabelas_estoque_existem(connection):
+        return True
+    return aplicar_schema_estoque_brownfield(connection)
+
+
+def _paginar(qs, request, page_size=PAGE_SIZE):
+    paginator = Paginator(qs, page_size)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    try:
+        total = paginator.count
+    except ProgrammingError:
+        total = len(page_obj.object_list)
+    return page_obj, total
 
 
 def _render(request, template_name, context=None):
@@ -27,6 +51,10 @@ def _render(request, template_name, context=None):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def estoque_posicoes_web(request):
+    if not _garantir_schema_estoque():
+        messages.error(request, MSG_SCHEMA_PENDENTE)
+        return _render(request, 'estoque/schema_pendente.html', {'comando': 'migrate estoque --noinput'})
+
     if request.method == 'POST':
         acao = request.POST.get('acao', 'criar')
         rua = (request.POST.get('rua') or '').strip()
@@ -79,8 +107,13 @@ def estoque_posicoes_web(request):
             | Q(posicao__icontains=busca)
             | Q(setor__icontains=busca)
         )
-    paginator = Paginator(qs, PAGE_SIZE)
-    page_obj = paginator.get_page(request.GET.get('page'))
+    try:
+        page_obj, total_posicoes = _paginar(qs, request)
+    except ProgrammingError as exc:
+        logger.exception('ESTOQUE_POSICOES_QUERY_ERRO: %s', exc)
+        messages.error(request, MSG_SCHEMA_PENDENTE)
+        return _render(request, 'estoque/schema_pendente.html', {'comando': 'migrate estoque --noinput'})
+
     return _render(
         request,
         'estoque/posicoes.html',
@@ -91,13 +124,17 @@ def estoque_posicoes_web(request):
             'pagination_query': f'busca={busca}' if busca else '',
             'busca': busca,
             'status_choices': PosicaoEstoque.Status.choices,
-            'total_posicoes': paginator.count,
+            'total_posicoes': total_posicoes,
         },
     )
 
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def estoque_lista_web(request):
+    if not _garantir_schema_estoque():
+        messages.error(request, MSG_SCHEMA_PENDENTE)
+        return _render(request, 'estoque/schema_pendente.html', {'comando': 'migrate estoque --noinput'})
+
     qs = (
         EstoqueFisico.objects.filter(status=EstoqueFisico.Status.ATIVO)
         .select_related('posicao', 'produto')
@@ -112,8 +149,13 @@ def estoque_lista_web(request):
             | Q(nf_entrada__icontains=busca)
             | Q(posicao__codigo_posicao__icontains=busca)
         )
-    paginator = Paginator(qs, PAGE_SIZE)
-    page_obj = paginator.get_page(request.GET.get('page'))
+    try:
+        page_obj, total_itens = _paginar(qs, request)
+    except ProgrammingError as exc:
+        logger.exception('ESTOQUE_LISTA_QUERY_ERRO: %s', exc)
+        messages.error(request, MSG_SCHEMA_PENDENTE)
+        return _render(request, 'estoque/schema_pendente.html', {'comando': 'migrate estoque --noinput'})
+
     itens = []
     for row in page_obj.object_list:
         itens.append(
@@ -139,13 +181,17 @@ def estoque_lista_web(request):
             'is_paginated': page_obj.has_other_pages(),
             'pagination_query': f'busca={busca}' if busca else '',
             'busca': busca,
-            'total_itens': paginator.count,
+            'total_itens': total_itens,
         },
     )
 
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def estoque_armazenagem_web(request):
+    if not _garantir_schema_estoque() and request.method != 'GET':
+        messages.error(request, MSG_SCHEMA_PENDENTE)
+        return redirect('web-estoque-armazenagem')
+
     temp_id = request.GET.get('temp') or request.POST.get('temp_id')
     if request.method == 'POST':
         posicao_entrada = (request.POST.get('posicao') or '').strip()

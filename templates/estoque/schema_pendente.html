@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+
+{% block title %}Estoque — Configuração pendente | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Estoque</span>
+        <h1>Schema pendente</h1>
+        <p>As tabelas do módulo de estoque endereçado ainda não estão disponíveis neste banco.</p>
+    </div>
+</div>
+<div class="card">
+    <p>Execute no servidor (Render Shell ou pre-deploy):</p>
+    <pre style="margin:12px 0;padding:12px;background:#f5f5f5;border-radius:8px;">python manage.py {{ comando|default:"migrate estoque --noinput" }}
+python manage.py ensure_estoque_schema</pre>
+    <p class="text-muted">Depois disso, recarregue esta página. Separação, conferência e recebimento TEMP não são afetados.</p>
+    <div class="actions-row">
+        <a href="{% url 'web-estoque-armazenagem' %}" class="btn btn-light">Armazenagem TEMP</a>
+        <a href="{% url 'home' %}" class="btn btn-light">Início</a>
+    </div>
+</div>
+{% endblock %}

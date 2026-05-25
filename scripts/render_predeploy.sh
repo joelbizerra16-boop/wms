@@ -6,6 +6,8 @@ python manage.py showmigrations core
 python manage.py migrate core --fake-initial --noinput
 python manage.py migrate core --noinput
 python manage.py migrate --noinput
+python manage.py migrate estoque --noinput
+python manage.py ensure_estoque_schema
 python manage.py ensure_minuta_brownfield_schema
 python manage.py ensure_onda_brownfield_schema
 python manage.py create_render_superuser

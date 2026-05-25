@@ -38,6 +38,8 @@ if 'postgresql' in _engine:
 	DATABASES['default'].setdefault('OPTIONS', {})
 	DATABASES['default']['OPTIONS'].setdefault('sslmode', 'require')
 	DATABASES['default']['CONN_HEALTH_CHECKS'] = True
+	# Pooler Supabase/PgBouncer: evita "no results to fetch" em COUNT/paginação.
+	DATABASES['default']['DISABLE_SERVER_SIDE_CURSORS'] = True
 
 _csrf_origins = config(
 	'CSRF_TRUSTED_ORIGINS',
