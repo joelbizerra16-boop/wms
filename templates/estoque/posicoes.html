@@ -81,8 +81,8 @@
 </form>
 
 <div class="card table-card">
-    <div class="table-wrap">
-        <table>
+    <div class="table-wrap table-container">
+        <table class="table-posicoes">
             <thead>
                 <tr>
                     <th>Cód.</th>
@@ -94,6 +94,7 @@
                     <th>Setor</th>
                     <th>Status</th>
                     <th>Sep.</th>
+                    <th class="th-acoes">Ações</th>
                 </tr>
             </thead>
             <tbody>
@@ -114,13 +115,167 @@
                         <span class="status-badge status-badge--warning" title="Pulmão / reserva">Não</span>
                         {% endif %}
                     </td>
+                    <td>
+                        <div class="table-actions">
+                            <button type="button"
+                                    class="table-action-btn table-action-btn--edit js-editar-posicao"
+                                    title="Editar"
+                                    aria-label="Editar posição {{ p.codigo_posicao }}"
+                                    data-id="{{ p.id }}"
+                                    data-codigo="{{ p.codigo_posicao }}"
+                                    data-rua="{{ p.rua }}"
+                                    data-posicao="{{ p.posicao }}"
+                                    data-andar="{{ p.andar }}"
+                                    data-lado="{{ p.lado }}"
+                                    data-setor="{{ p.setor }}"
+                                    data-status="{{ p.status }}"
+                                    data-observacao="{{ p.observacao }}">
+                                <i data-lucide="pencil"></i>
+                            </button>
+                            <form method="post" class="table-action-form js-excluir-posicao-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="acao" value="excluir">
+                                <input type="hidden" name="posicao_id" value="{{ p.id }}">
+                                <button type="submit"
+                                        class="table-action-btn table-action-btn--delete"
+                                        title="Excluir"
+                                        aria-label="Excluir posição {{ p.codigo_posicao }}"
+                                        data-codigo="{{ p.codigo_posicao }}">
+                                    <i data-lucide="trash-2"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="9" class="empty-state">Nenhuma posição cadastrada.</td></tr>
+                <tr><td colspan="10" class="empty-state">Nenhuma posição cadastrada.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
 {% include 'partials/pagination_controls.html' %}
+
+<div class="modal" id="modal-editar-posicao" aria-hidden="true">
+    <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="modal-editar-titulo">
+        <div class="modal__header">
+            <h3 class="modal__title" id="modal-editar-titulo">Editar posição</h3>
+            <button type="button" class="modal__close" id="modal-editar-fechar" aria-label="Fechar">×</button>
+        </div>
+        <form method="post" class="modal__body cadastro-form-grid">
+            {% csrf_token %}
+            <input type="hidden" name="acao" value="editar">
+            <input type="hidden" name="posicao_id" id="edit_posicao_id">
+            <div>
+                <label for="edit_codigo_posicao">Cód. posição</label>
+                <input id="edit_codigo_posicao" name="codigo_posicao" type="text" required>
+            </div>
+            <div>
+                <label for="edit_rua">Rua</label>
+                <input id="edit_rua" name="rua" type="text" required>
+            </div>
+            <div>
+                <label for="edit_posicao">Posição</label>
+                <input id="edit_posicao" name="posicao" type="text" required>
+            </div>
+            <div>
+                <label for="edit_andar">Andar</label>
+                <input id="edit_andar" name="andar" type="text" required>
+            </div>
+            <div>
+                <label for="edit_lado">Lado</label>
+                <input id="edit_lado" name="lado" type="text" required>
+            </div>
+            <div>
+                <label for="edit_setor">Setor</label>
+                <input id="edit_setor" name="setor" type="text">
+            </div>
+            <div>
+                <label for="edit_status">Status</label>
+                <select id="edit_status" name="status">
+                    {% for val, label in status_choices %}
+                    <option value="{{ val }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="edit_observacao">Observação</label>
+                <input id="edit_observacao" name="observacao" type="text">
+            </div>
+            <p class="text-muted form-grid__full">Separação ativa quando andar ≥ 2 (calculado automaticamente).</p>
+            <div class="modal__actions form-grid__full">
+                <button type="button" class="btn btn-light" id="modal-editar-cancelar">Cancelar</button>
+                <button type="submit" class="btn-warning">Salvar alterações</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.table-posicoes .th-acoes { text-align: center; white-space: nowrap; width: 88px; }
+.table-actions { display: flex; gap: 6px; justify-content: center; align-items: center; }
+.table-action-form { display: inline; margin: 0; }
+.table-action-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; padding: 0; border: 1px solid #e2e8f0;
+    border-radius: 8px; background: #fff; cursor: pointer;
+}
+.table-action-btn svg { width: 16px; height: 16px; }
+.table-action-btn--edit { color: #2563eb; border-color: #bfdbfe; }
+.table-action-btn--edit:hover { background: #eff6ff; }
+.table-action-btn--delete { color: #dc2626; border-color: #fecaca; }
+.table-action-btn--delete:hover { background: #fef2f2; }
+.form-grid__full { grid-column: 1 / -1; }
+#modal-editar-posicao .modal__body { display: grid; gap: 12px; }
+</style>
+
+<script>
+(function () {
+    var modal = document.getElementById('modal-editar-posicao');
+    if (!modal) return;
+
+    function abrirModal() {
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+        if (window.lucide) window.lucide.createIcons();
+    }
+    function fecharModal() {
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+    }
+
+    document.querySelectorAll('.js-editar-posicao').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.getElementById('edit_posicao_id').value = btn.dataset.id || '';
+            document.getElementById('edit_codigo_posicao').value = btn.dataset.codigo || '';
+            document.getElementById('edit_rua').value = btn.dataset.rua || '';
+            document.getElementById('edit_posicao').value = btn.dataset.posicao || '';
+            document.getElementById('edit_andar').value = btn.dataset.andar || '';
+            document.getElementById('edit_lado').value = btn.dataset.lado || '';
+            document.getElementById('edit_setor').value = btn.dataset.setor || '';
+            document.getElementById('edit_status').value = btn.dataset.status || 'ATIVA';
+            document.getElementById('edit_observacao').value = btn.dataset.observacao || '';
+            abrirModal();
+        });
+    });
+
+    ['modal-editar-fechar', 'modal-editar-cancelar'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('click', fecharModal);
+    });
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) fecharModal();
+    });
+
+    document.querySelectorAll('.js-excluir-posicao-form').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            var btn = form.querySelector('[data-codigo]');
+            var codigo = btn ? btn.dataset.codigo : 'esta posição';
+            if (!window.confirm('Deseja realmente excluir a posição ' + codigo + '?')) {
+                e.preventDefault();
+            }
+        });
+    });
+})();
+</script>
 {% endblock %}

@@ -8,7 +8,12 @@ from django.utils import timezone
 from apps.estoque.models import EstoqueFisico, PosicaoEstoque
 from apps.estoque.services.armazenagem import ArmazenagemError, armazenar_item_temp
 from apps.estoque.services.fifo import formatar_fifo_nf
-from apps.estoque.services.posicao import resolver_posicao
+from apps.estoque.services.posicao import (
+    MSG_EXCLUSAO_COM_SALDO,
+    PosicaoEstoqueError,
+    inativar_posicao,
+    resolver_posicao,
+)
 from apps.recebimento.models import EstoqueTemporario
 
 User = get_user_model()
@@ -22,6 +27,13 @@ class EstoqueFifoTestCase(TestCase):
 
 class EstoquePosicaoTestCase(TestCase):
     def setUp(self):
+        self.gestor = User.objects.create_user(
+            username='gestor_pos',
+            password='x',
+            nome='Gestor',
+            perfil=User.Perfil.GESTOR,
+            setor=User.Setor.FILTROS,
+        )
         self.pos = PosicaoEstoque.objects.create(
             codigo_posicao='RUA-1-POS-1-A2-L1',
             rua='1',
@@ -47,6 +59,28 @@ class EstoquePosicaoTestCase(TestCase):
     def test_resolver_por_coletor(self):
         encontrada = resolver_posicao('1 1 2 1')
         self.assertEqual(encontrada.pk, self.pos.pk)
+
+    def test_inativar_posicao_sem_saldo(self):
+        inativar_posicao(self.pos)
+        self.pos.refresh_from_db()
+        self.assertFalse(self.pos.ativo)
+
+    def test_inativar_posicao_com_saldo_bloqueia(self):
+        EstoqueFisico.objects.create(
+            codigo_produto='20005',
+            descricao='ARLA',
+            quantidade=Decimal('10'),
+            posicao=self.pos,
+            fifo_nf='05/26-1',
+            data_entrada=timezone.now(),
+            nf_entrada='1',
+            usuario_armazenagem=self.gestor,
+        )
+        with self.assertRaises(PosicaoEstoqueError) as ctx:
+            inativar_posicao(self.pos)
+        self.assertEqual(str(ctx.exception), MSG_EXCLUSAO_COM_SALDO)
+        self.pos.refresh_from_db()
+        self.assertTrue(self.pos.ativo)
 
 
 class EstoqueArmazenagemTestCase(TestCase):
@@ -152,3 +186,51 @@ class EstoqueViewsWebTestCase(TestCase):
             'web-estoque-movimentacoes',
         ):
             self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
+
+    def test_posicoes_coluna_acoes_e_excluir(self):
+        pos = PosicaoEstoque.objects.create(
+            codigo_posicao='9-9-9-9',
+            rua='9',
+            posicao='9',
+            andar='9',
+            lado='9',
+        )
+        html = self.client.get(reverse('web-estoque-posicoes')).content.decode()
+        self.assertIn('Ações', html)
+        self.assertIn('js-editar-posicao', html)
+        self.assertIn('js-excluir-posicao-form', html)
+
+        resp = self.client.post(
+            reverse('web-estoque-posicoes'),
+            {'acao': 'excluir', 'posicao_id': pos.pk},
+        )
+        self.assertEqual(resp.status_code, 302)
+        pos.refresh_from_db()
+        self.assertFalse(pos.ativo)
+
+    def test_editar_posicao_via_post(self):
+        pos = PosicaoEstoque.objects.create(
+            codigo_posicao='8-8-8-8',
+            rua='8',
+            posicao='8',
+            andar='2',
+            lado='8',
+        )
+        self.client.post(
+            reverse('web-estoque-posicoes'),
+            {
+                'acao': 'editar',
+                'posicao_id': pos.pk,
+                'codigo_posicao': '8-8-8-8',
+                'rua': '8',
+                'posicao': '8',
+                'andar': '3',
+                'lado': '8',
+                'setor': 'B',
+                'status': PosicaoEstoque.Status.ATIVA,
+                'observacao': 'ok',
+            },
+        )
+        pos.refresh_from_db()
+        self.assertEqual(pos.andar, '3')
+        self.assertEqual(pos.setor, 'B')

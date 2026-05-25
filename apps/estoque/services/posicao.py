@@ -2,11 +2,32 @@
 
 from __future__ import annotations
 
-from apps.estoque.models import PosicaoEstoque
+from decimal import Decimal
+
+from apps.estoque.models import EstoqueFisico, PosicaoEstoque
 
 
 class PosicaoEstoqueError(Exception):
     pass
+
+
+MSG_EXCLUSAO_COM_SALDO = 'Não é possível excluir posição com saldo em estoque.'
+
+
+def posicao_tem_saldo(posicao: PosicaoEstoque) -> bool:
+    return EstoqueFisico.objects.filter(
+        posicao=posicao,
+        quantidade__gt=Decimal('0'),
+    ).exists()
+
+
+def inativar_posicao(posicao: PosicaoEstoque) -> None:
+    if posicao_tem_saldo(posicao):
+        raise PosicaoEstoqueError(MSG_EXCLUSAO_COM_SALDO)
+    if posicao.status == PosicaoEstoque.Status.BLOQUEADA:
+        raise PosicaoEstoqueError('Não é possível excluir posição bloqueada.')
+    posicao.ativo = False
+    posicao.save(update_fields=['ativo', 'updated_at'])
 
 
 def montar_codigo_posicao(*, rua: str, posicao: str, andar: str, lado: str) -> str:

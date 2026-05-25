@@ -11,7 +11,11 @@ from django.urls import reverse
 from apps.estoque.db_schema import aplicar_schema_estoque_brownfield, tabelas_estoque_existem
 from apps.estoque.models import EstoqueFisico, PosicaoEstoque
 from apps.estoque.services.armazenagem import ArmazenagemError, armazenar_item_temp
-from apps.estoque.services.posicao import montar_codigo_posicao
+from apps.estoque.services.posicao import (
+    PosicaoEstoqueError,
+    inativar_posicao,
+    montar_codigo_posicao,
+)
 from apps.recebimento.models import EstoqueTemporario
 from apps.usuarios.access import build_access_context, require_profiles
 from apps.usuarios.models import Usuario
@@ -69,7 +73,14 @@ def estoque_posicoes_web(request):
             rua=rua, posicao=posicao, andar=andar, lado=lado
         )
 
-        if not all([rua, posicao, andar, lado, codigo]):
+        if acao == 'excluir':
+            pos = get_object_or_404(PosicaoEstoque, pk=request.POST.get('posicao_id'), ativo=True)
+            try:
+                inativar_posicao(pos)
+                messages.success(request, f'Posição {pos.codigo_posicao} removida do cadastro.')
+            except PosicaoEstoqueError as exc:
+                messages.error(request, str(exc))
+        elif not all([rua, posicao, andar, lado, codigo]):
             messages.error(request, 'Preencha rua, posição, andar, lado e código.')
         elif acao == 'editar':
             pos = get_object_or_404(PosicaoEstoque, pk=request.POST.get('posicao_id'))
