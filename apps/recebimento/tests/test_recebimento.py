@@ -8,7 +8,11 @@ from django.urls import reverse
 from apps.nf.models import NotaFiscal
 from apps.recebimento.models import EstoqueTemporario
 from apps.recebimento.services.importador_recebimento import importar_xml_recebimento
-from apps.recebimento.services.validacao_recebimento import MENSAGEM_NF_VENDA, validar_documento_recebimento
+from apps.recebimento.services.validacao_recebimento import (
+    MENSAGEM_NF_VENDA,
+    identificar_tipo_operacao,
+    validar_documento_recebimento,
+)
 from apps.recebimento.services.xml_parser import DocumentoRecebimentoXML, ItemRecebimentoXML, RecebimentoXMLError
 
 User = get_user_model()
@@ -51,14 +55,15 @@ def _xml_nfe(*, tp_nf='0', nat_op='COMPRA', emit_nome='FORNECEDOR LTDA', emit_cn
 
 
 class RecebimentoValidacaoTestCase(TestCase):
-    def test_bloqueia_tp_nf_saida(self):
+    @override_settings(WMS_EMPRESA_CNPJ='00846804000106')
+    def test_bloqueia_brida_saida_para_cliente_tp_nf_1(self):
         doc = DocumentoRecebimentoXML(
             chave_nfe='1' * 44,
             numero='145877',
             tp_nf='1',
             nat_op='VENDA',
             emit_nome='BRIDA LUBRIFICANTES LTDA',
-            emit_cnpj='33333333000133',
+            emit_cnpj='00846804000106',
             dest_nome='CLIENTE',
             dest_cnpj='44444444000144',
             status_fiscal_cstat='100',
@@ -98,6 +103,26 @@ class RecebimentoValidacaoTestCase(TestCase):
         )
         validar_documento_recebimento(doc)
 
+    @override_settings(WMS_EMPRESA_CNPJ='00846804000106')
+    def test_aceita_fornecedor_venda_para_brida_tp_nf_1(self):
+        """Caso PETROCAMP: tpNF=1 e natOp com VENDA — entrada válida para a BRIDA."""
+        doc = DocumentoRecebimentoXML(
+            chave_nfe='35260502684965000176550000003774391802212025',
+            numero='377439',
+            tp_nf='1',
+            nat_op='VENDA DE PRODUCAO DO ESTABELECIMENTO',
+            emit_nome='PETROCAMP DERIVADOS DE PETROLEO LTDA',
+            emit_cnpj='02684965000176',
+            dest_nome='BRIDA LUBRIFICANTES LTDA',
+            dest_cnpj='00846804000106',
+            status_fiscal_cstat='100',
+            itens=[ItemRecebimentoXML('20005', 'ARLA 32', Decimal('540'))],
+        )
+        info = identificar_tipo_operacao(doc)
+        self.assertTrue(info['entrada_valida'])
+        self.assertEqual(info['decisao'], 'PERMITIDO')
+        validar_documento_recebimento(doc)
+
 
 class RecebimentoImportacaoTestCase(TestCase):
     def setUp(self):
@@ -120,13 +145,30 @@ class RecebimentoImportacaoTestCase(TestCase):
         self.assertEqual(item.produto_codigo, '123573')
         self.assertEqual(NotaFiscal.objects.count(), 0)
 
+    @override_settings(WMS_EMPRESA_CNPJ='00846804000106')
+    def test_importacao_aceita_fornecedor_tp_nf_1(self):
+        arquivo = BytesIO(
+            _xml_nfe(
+                tp_nf='1',
+                nat_op='VENDA DE PRODUCAO DO ESTABELECIMENTO',
+                emit_nome='PETROCAMP DERIVADOS DE PETROLEO LTDA',
+                emit_cnpj='02684965000176',
+                dest_cnpj='00846804000106',
+            ).encode('utf-8')
+        )
+        arquivo.name = 'petrocamp.xml'
+        resultado = importar_xml_recebimento(arquivo, usuario=self.gestor)
+        self.assertTrue(resultado['sucesso'])
+        self.assertEqual(EstoqueTemporario.objects.count(), 1)
+
+    @override_settings(WMS_EMPRESA_CNPJ='00846804000106')
     def test_importacao_bloqueia_venda(self):
         arquivo = BytesIO(
             _xml_nfe(
                 tp_nf='1',
                 nat_op='VENDA',
                 emit_nome='BRIDA LUBRIFICANTES LTDA',
-                emit_cnpj='99999999000199',
+                emit_cnpj='00846804000106',
                 dest_cnpj='10101010000101',
             ).encode('utf-8')
         )
