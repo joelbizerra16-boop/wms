@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+
+{% block title %}Ativação por Scan | Recebimento | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Recebimento</span>
+        <h1>Ativação por Scan</h1>
+        <p>Módulo em preparação para ativação de itens do estoque temporário.</p>
+    </div>
+</div>
+<div class="card">
+    <p class="text-muted">Em breve: bipagem para mover itens de <strong>TEMP</strong> para o estoque operacional.</p>
+    <a href="{% url 'web-recebimento-estoque-temp' %}" class="btn btn-light">Voltar ao estoque temporário</a>
+</div>
+{% endblock %}

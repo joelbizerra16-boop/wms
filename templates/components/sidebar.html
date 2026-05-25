@@ -74,7 +74,7 @@
                 <span>Importar</span>
             </button>
             <div class="nav-group__menu dropdown-menu" id="submenu-importar">
-                <a href="{% url 'web-importar-xml' %}" class="{% if '/importar/' in request.path %}active{% endif %}">
+                <a href="{% url 'web-importar-xml' %}" class="{% if request.path == '/importar/' %}active{% endif %}">
                     <i data-lucide="upload"></i>
                     <span>Importar XML</span>
                 </a>
@@ -83,6 +83,27 @@
                     <span>Fila de NFs</span>
                 </a>
                 <a href="{% url 'web-ativacao-scan-nf' %}" class="{% if request.path == '/importar/ativacao-scan/' %}active{% endif %}">
+                    <i data-lucide="scan-barcode"></i>
+                    <span>Ativação por Scan</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="nav-group nav-item dropdown {% if '/recebimento/' in request.path %}nav-group--open{% endif %}">
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/recebimento/' in request.path %}active{% endif %}" data-submenu-toggle aria-label="Abrir submenu Recebimento" aria-controls="submenu-recebimento" aria-expanded="{% if '/recebimento/' in request.path %}true{% else %}false{% endif %}">
+                <i data-lucide="package-check"></i>
+                <span>Recebimento</span>
+            </button>
+            <div class="nav-group__menu dropdown-menu" id="submenu-recebimento">
+                <a href="{% url 'web-recebimento-importar-xml' %}" class="{% if request.path == '/recebimento/' %}active{% endif %}">
+                    <i data-lucide="upload"></i>
+                    <span>Importar XML</span>
+                </a>
+                <a href="{% url 'web-recebimento-estoque-temp' %}" class="{% if '/recebimento/estoque-temporario/' in request.path %}active{% endif %}">
+                    <i data-lucide="warehouse"></i>
+                    <span>Estoque Temporário</span>
+                </a>
+                <a href="{% url 'web-recebimento-ativacao-scan' %}" class="{% if '/recebimento/ativacao-scan/' in request.path %}active{% endif %}">
                     <i data-lucide="scan-barcode"></i>
                     <span>Ativação por Scan</span>
                 </a>

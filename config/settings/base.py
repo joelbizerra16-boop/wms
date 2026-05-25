@@ -43,7 +43,11 @@ LOCAL_APPS = [
     'apps.tarefas',
     'apps.conferencia',
     'apps.logs',
+    'apps.recebimento',
 ]
+
+# CNPJ da empresa (destinatário em NF de entrada). Usado no módulo de recebimento.
+WMS_EMPRESA_CNPJ = config('WMS_EMPRESA_CNPJ', default='')
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 

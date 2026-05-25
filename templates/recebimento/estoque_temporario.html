@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+
+{% block title %}Estoque Temporário | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Recebimento</span>
+        <h1>Estoque Temporário</h1>
+        <p>Itens recebidos aguardando ativação. Canal <strong>TEMP</strong> — fora do estoque operacional.</p>
+    </div>
+    <div class="actions-row">
+        <a href="{% url 'web-recebimento-importar-xml' %}" class="btn btn-warning">Importar XML</a>
+        <button type="button" class="btn btn-light" disabled title="Em breve">Resgatar para estoque</button>
+    </div>
+</div>
+
+<div class="metric-card metric-card--accent" style="margin-bottom:12px;">
+    <span class="metric-card__label">Itens em TEMP</span>
+    <div class="metric-card__value">{{ total_temp }}</div>
+</div>
+
+<div class="card table-card">
+    <div class="table-wrap table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>NF</th>
+                    <th>Produto</th>
+                    <th>Descrição</th>
+                    <th>Qtd</th>
+                    <th>Canal</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in itens %}
+                <tr>
+                    <td>{{ item.data_recebimento|date:"d/m/Y H:i" }}</td>
+                    <td><span class="nf-chip">{{ item.nf_numero }}</span></td>
+                    <td><strong>{{ item.produto_codigo }}</strong></td>
+                    <td>{{ item.descricao }}</td>
+                    <td>{{ item.quantidade|floatformat:"-2" }}</td>
+                    <td><span class="status-badge status-badge--info">{{ item.canal }}</span></td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="empty-state">Nenhum item no estoque temporário.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include 'partials/pagination_controls.html' %}
+{% endblock %}

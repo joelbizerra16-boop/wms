@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}Recebimento — Importar XML | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Recebimento</span>
+        <h1>Importar XML</h1>
+        <p>Entrada de mercadoria para <strong>estoque temporário (TEMP)</strong>. Não alimenta separação nem conferência.</p>
+    </div>
+    <div class="actions-row">
+        <a href="{% url 'web-recebimento-estoque-temp' %}" class="btn btn-light">Estoque temporário</a>
+    </div>
+</div>
+
+<div class="card">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="xml_files">Arquivos XML (NF de entrada / compra)</label>
+        <input id="xml_files" name="xml_files" type="file" accept=".xml,text/xml" multiple required>
+        <small class="text-muted">NF de venda/saída são bloqueadas automaticamente.</small>
+        <div class="actions-row" style="margin-top:14px;">
+            <button type="submit" class="btn-warning">Importar para TEMP</button>
+        </div>
+    </form>
+</div>
+
+{% if resultados %}
+<div class="metrics-grid">
+    <div class="metric-card metric-card--success">
+        <span class="metric-card__label">Recebidos</span>
+        <div class="metric-card__value">{{ resultados.sucesso }}</div>
+    </div>
+    <div class="metric-card metric-card--danger">
+        <span class="metric-card__label">Erros</span>
+        <div class="metric-card__value">{{ resultados.erros }}</div>
+    </div>
+</div>
+<div class="card table-card">
+    <h2 class="section-title">Resultado</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Arquivo</th>
+                    <th>NF</th>
+                    <th>Status</th>
+                    <th>Mensagem</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for detalhe in resultados.detalhes %}
+                <tr>
+                    <td>{{ detalhe.arquivo }}</td>
+                    <td>{{ detalhe.nf|default:'-' }}</td>
+                    <td>
+                        <span class="status-badge {% if detalhe.status == 'sucesso' %}status-badge--success{% else %}status-badge--danger{% endif %}">
+                            {{ detalhe.status }}
+                        </span>
+                    </td>
+                    <td>{{ detalhe.mensagem }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

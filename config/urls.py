@@ -14,6 +14,11 @@ from apps.core.views_liberacao import (
     liberar_nf_divergencia_view,
     liberar_tarefa_divergencia_view,
 )
+from apps.recebimento.views_web import (
+    recebimento_ativacao_scan_web,
+    recebimento_estoque_temporario_web,
+    recebimento_importar_xml_web,
+)
 from apps.core.views_web import (
     ativacao_scan_nfs_web,
     clientes_web,
@@ -60,6 +65,9 @@ urlpatterns = [
     path('home/', home, name='home'),
     path('minuta/', minuta, name='web-minuta'),
     path('minuta/pdf/', minuta_pdf, name='web-minuta-pdf'),
+    path('recebimento/', recebimento_importar_xml_web, name='web-recebimento-importar-xml'),
+    path('recebimento/estoque-temporario/', recebimento_estoque_temporario_web, name='web-recebimento-estoque-temp'),
+    path('recebimento/ativacao-scan/', recebimento_ativacao_scan_web, name='web-recebimento-ativacao-scan'),
     path('importar/', importar_xml_web, name='web-importar-xml'),
     path('importar/fila/', fila_entradas_nf_web, name='web-fila-entradas-nf'),
     path('importar/fila/limpeza/', limpar_dados_importacao_web, name='web-limpar-dados-importacao'),
