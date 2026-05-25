@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+
+{% block title %}Cadastro de Posições | Estoque | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Estoque</span>
+        <h1>Cadastro de Posições</h1>
+        <p>Endereços físicos do armazém. Coletor: <strong>RUA POSIÇÃO ANDAR LADO</strong> (sem traços).</p>
+    </div>
+    <div class="actions-row">
+        <a href="{% url 'web-estoque-lista' %}" class="btn btn-light">Estoque</a>
+        <a href="{% url 'web-estoque-armazenagem' %}" class="btn btn-warning">Armazenagem</a>
+    </div>
+</div>
+
+<div class="metrics-grid" style="margin-bottom:12px;">
+    <div class="metric-card metric-card--accent">
+        <span class="metric-card__label">Posições ativas</span>
+        <div class="metric-card__value">{{ total_posicoes }}</div>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <h2 class="section-title">Nova posição</h2>
+    <form method="post" class="cadastro-form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="acao" value="criar">
+        <div>
+            <label for="codigo_posicao">Cód. posição</label>
+            <input id="codigo_posicao" name="codigo_posicao" type="text" placeholder="Opcional — ex.: PULMAO, BOX-A">
+            <small class="text-muted">Vazio = monta a partir de rua/posição/andar/lado</small>
+        </div>
+        <div>
+            <label for="rua">Rua</label>
+            <input id="rua" name="rua" type="text" required placeholder="1 ou A">
+        </div>
+        <div>
+            <label for="posicao">Posição</label>
+            <input id="posicao" name="posicao" type="text" required>
+        </div>
+        <div>
+            <label for="andar">Andar</label>
+            <input id="andar" name="andar" type="text" required>
+            <small class="text-muted">Andar 1 = pulmão (não usado na separação)</small>
+        </div>
+        <div>
+            <label for="lado">Lado</label>
+            <input id="lado" name="lado" type="text" required>
+        </div>
+        <div>
+            <label for="setor">Setor</label>
+            <input id="setor" name="setor" type="text">
+        </div>
+        <div>
+            <label for="status">Status</label>
+            <select id="status" name="status">
+                {% for val, label in status_choices %}
+                <option value="{{ val }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="observacao">Observação</label>
+            <input id="observacao" name="observacao" type="text">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn-warning">Salvar posição</button>
+        </div>
+    </form>
+</div>
+
+<form method="get" class="card" style="margin-bottom:12px;padding:12px;">
+    <label for="busca">Buscar</label>
+    <div class="actions-row">
+        <input id="busca" name="busca" type="search" value="{{ busca }}" placeholder="Código, rua, setor…">
+        <button type="submit" class="btn btn-light">Filtrar</button>
+    </div>
+</form>
+
+<div class="card table-card">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Cód.</th>
+                    <th>Coletor</th>
+                    <th>Rua</th>
+                    <th>Pos.</th>
+                    <th>Andar</th>
+                    <th>Lado</th>
+                    <th>Setor</th>
+                    <th>Status</th>
+                    <th>Sep.</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in posicoes %}
+                <tr>
+                    <td><strong>{{ p.codigo_posicao }}</strong></td>
+                    <td><code>{{ p.label_coletor }}</code></td>
+                    <td>{{ p.rua }}</td>
+                    <td>{{ p.posicao }}</td>
+                    <td>{{ p.andar }}</td>
+                    <td>{{ p.lado }}</td>
+                    <td>{{ p.setor|default:'-' }}</td>
+                    <td><span class="status-badge status-badge--info">{{ p.get_status_display }}</span></td>
+                    <td>
+                        {% if p.apta_para_separacao %}
+                        <span class="status-badge status-badge--success">Sim</span>
+                        {% else %}
+                        <span class="status-badge status-badge--warning" title="Pulmão / reserva">Não</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="9" class="empty-state">Nenhuma posição cadastrada.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include 'partials/pagination_controls.html' %}
+{% endblock %}

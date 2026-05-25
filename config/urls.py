@@ -14,6 +14,12 @@ from apps.core.views_liberacao import (
     liberar_nf_divergencia_view,
     liberar_tarefa_divergencia_view,
 )
+from apps.estoque.views_web import (
+    estoque_armazenagem_web,
+    estoque_lista_web,
+    estoque_movimentacoes_web,
+    estoque_posicoes_web,
+)
 from apps.recebimento.views_web import (
     recebimento_ativacao_scan_web,
     recebimento_estoque_temporario_web,
@@ -68,6 +74,10 @@ urlpatterns = [
     path('recebimento/', recebimento_importar_xml_web, name='web-recebimento-importar-xml'),
     path('recebimento/estoque-temporario/', recebimento_estoque_temporario_web, name='web-recebimento-estoque-temp'),
     path('recebimento/ativacao-scan/', recebimento_ativacao_scan_web, name='web-recebimento-ativacao-scan'),
+    path('estoque/', estoque_lista_web, name='web-estoque-lista'),
+    path('estoque/posicoes/', estoque_posicoes_web, name='web-estoque-posicoes'),
+    path('estoque/armazenagem/', estoque_armazenagem_web, name='web-estoque-armazenagem'),
+    path('estoque/movimentacoes/', estoque_movimentacoes_web, name='web-estoque-movimentacoes'),
     path('importar/', importar_xml_web, name='web-importar-xml'),
     path('importar/fila/', fila_entradas_nf_web, name='web-fila-entradas-nf'),
     path('importar/fila/limpeza/', limpar_dados_importacao_web, name='web-limpar-dados-importacao'),

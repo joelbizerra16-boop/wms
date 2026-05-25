@@ -89,6 +89,31 @@
             </div>
         </div>
 
+        <div class="nav-group nav-item dropdown {% if '/estoque/' in request.path %}nav-group--open{% endif %}">
+            <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/estoque/' in request.path %}active{% endif %}" data-submenu-toggle aria-label="Abrir submenu Estoque" aria-controls="submenu-estoque" aria-expanded="{% if '/estoque/' in request.path %}true{% else %}false{% endif %}">
+                <i data-lucide="boxes"></i>
+                <span>Estoque</span>
+            </button>
+            <div class="nav-group__menu dropdown-menu" id="submenu-estoque">
+                <a href="{% url 'web-estoque-posicoes' %}" class="{% if '/estoque/posicoes/' in request.path %}active{% endif %}">
+                    <i data-lucide="map-pin"></i>
+                    <span>Cadastro de posições</span>
+                </a>
+                <a href="{% url 'web-estoque-lista' %}" class="{% if request.path == '/estoque/' %}active{% endif %}">
+                    <i data-lucide="warehouse"></i>
+                    <span>Estoque</span>
+                </a>
+                <a href="{% url 'web-estoque-armazenagem' %}" class="{% if '/estoque/armazenagem/' in request.path %}active{% endif %}">
+                    <i data-lucide="forklift"></i>
+                    <span>Armazenagem TEMP</span>
+                </a>
+                <a href="{% url 'web-estoque-movimentacoes' %}" class="{% if '/estoque/movimentacoes/' in request.path %}active{% endif %}">
+                    <i data-lucide="arrow-left-right"></i>
+                    <span>Movimentações</span>
+                </a>
+            </div>
+        </div>
+
         <div class="nav-group nav-item dropdown {% if '/recebimento/' in request.path %}nav-group--open{% endif %}">
             <button type="button" class="nav-group__toggle dropdown-toggle menu-link {% if '/recebimento/' in request.path %}active{% endif %}" data-submenu-toggle aria-label="Abrir submenu Recebimento" aria-controls="submenu-recebimento" aria-expanded="{% if '/recebimento/' in request.path %}true{% else %}false{% endif %}">
                 <i data-lucide="package-check"></i>

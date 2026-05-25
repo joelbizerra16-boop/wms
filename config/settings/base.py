@@ -44,6 +44,7 @@ LOCAL_APPS = [
     'apps.conferencia',
     'apps.logs',
     'apps.recebimento',
+    'apps.estoque',
 ]
 
 # CNPJ da empresa (destinatário em NF de entrada). Usado no módulo de recebimento.

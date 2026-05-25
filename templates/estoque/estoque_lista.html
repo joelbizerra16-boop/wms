@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+
+{% block title %}Estoque Endereçado | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Estoque</span>
+        <h1>Estoque</h1>
+        <p>Visão física: produto + posição + FIFO por NF/data. Cada linha = uma armazenagem.</p>
+    </div>
+    <div class="actions-row">
+        <a href="{% url 'web-estoque-posicoes' %}" class="btn btn-light">Posições</a>
+        <a href="{% url 'web-estoque-armazenagem' %}" class="btn btn-warning">Armazenagem TEMP</a>
+    </div>
+</div>
+
+<div class="metric-card metric-card--accent" style="margin-bottom:12px;">
+    <span class="metric-card__label">Registros ativos</span>
+    <div class="metric-card__value">{{ total_itens }}</div>
+</div>
+
+<form method="get" class="card" style="margin-bottom:12px;padding:12px;">
+    <label for="busca">Buscar produto, FIFO, NF ou posição</label>
+    <div class="actions-row">
+        <input id="busca" name="busca" type="search" value="{{ busca }}" class="flex-grow-1">
+        <button type="submit" class="btn btn-light">Filtrar</button>
+    </div>
+</form>
+
+<div class="card table-card">
+    <div class="table-wrap table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>COD</th>
+                    <th>RUA</th>
+                    <th>POSIÇÃO</th>
+                    <th>PRODUTO</th>
+                    <th>DESCRIÇÃO</th>
+                    <th>QTD</th>
+                    <th>FIFO</th>
+                    <th>DIAS</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in itens %}
+                <tr>
+                    <td><span class="text-muted">{{ item.id }}</span></td>
+                    <td>{{ item.rua }}</td>
+                    <td><strong>{{ item.label_posicao }}</strong></td>
+                    <td><strong>{{ item.produto }}</strong></td>
+                    <td>{{ item.descricao }}</td>
+                    <td>{{ item.quantidade|floatformat:"-2" }}</td>
+                    <td><span class="nf-chip">{{ item.fifo }}</span></td>
+                    <td>{{ item.dias }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" class="empty-state">Nenhum item no estoque físico.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include 'partials/pagination_controls.html' %}
+{% endblock %}

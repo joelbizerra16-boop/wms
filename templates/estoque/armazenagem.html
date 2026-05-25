@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+
+{% block title %}Armazenagem TEMP → Estoque | WMS{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <span class="section-label">Estoque</span>
+        <h1>Armazenagem</h1>
+        <p>Mover itens do <strong>TEMP</strong> (doca/recebimento) para posição endereçada.</p>
+    </div>
+    <div class="actions-row">
+        <a href="{% url 'web-recebimento-estoque-temp' %}" class="btn btn-light">TEMP</a>
+        <a href="{% url 'web-estoque-lista' %}" class="btn btn-light">Estoque</a>
+    </div>
+</div>
+
+<div class="metric-card metric-card--accent" style="margin-bottom:12px;">
+    <span class="metric-card__label">Aguardando armazenagem (TEMP)</span>
+    <div class="metric-card__value">{{ total_temp }}</div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <h2 class="section-title">Confirmar armazenagem</h2>
+    <form method="post">
+        {% csrf_token %}
+        <label for="temp_id">Item TEMP</label>
+        <select id="temp_id" name="temp_id" required>
+            <option value="">— Selecione —</option>
+            {% for t in itens_temp %}
+            <option value="{{ t.id }}" {% if item_selecionado and item_selecionado.id == t.id %}selected{% endif %}>
+                NF {{ t.nf_numero }} · {{ t.produto_codigo }} · {{ t.quantidade|floatformat:"-2" }} un
+            </option>
+            {% endfor %}
+        </select>
+
+        <label for="posicao" style="margin-top:12px;">Posição (código ou bipagem)</label>
+        <input id="posicao" name="posicao" type="text" required
+               placeholder="Ex.: 1 1 2 1 ou PULMAO"
+               autocomplete="off" inputmode="text" class="input-scan">
+        <small class="text-muted">Leia no coletor: RUA POSIÇÃO ANDAR LADO (espaços). Andar 1 = pulmão.</small>
+
+        <div class="actions-row" style="margin-top:14px;">
+            <button type="submit" class="btn-warning">Confirmar armazenagem</button>
+        </div>
+    </form>
+</div>
+
+<div class="card table-card">
+    <h2 class="section-title">Fila TEMP</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>NF</th>
+                    <th>Produto</th>
+                    <th>Descrição</th>
+                    <th>Qtd</th>
+                    <th>Recebido</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in itens_temp %}
+                <tr>
+                    <td><span class="nf-chip">{{ t.nf_numero }}</span></td>
+                    <td><strong>{{ t.produto_codigo }}</strong></td>
+                    <td>{{ t.descricao }}</td>
+                    <td>{{ t.quantidade|floatformat:"-2" }}</td>
+                    <td>{{ t.data_recebimento|date:"d/m/Y H:i" }}</td>
+                    <td>
+                        <a href="{% url 'web-estoque-armazenagem' %}?temp={{ t.id }}" class="btn btn-sm btn-warning">Armazenar</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="empty-state">Nenhum item em TEMP.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
