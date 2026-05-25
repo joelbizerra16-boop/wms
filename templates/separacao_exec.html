@@ -224,27 +224,9 @@
         .posicao-linha .pos-qtd {
             color: var(--info);
         }
-
-        .mode-toggle {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-        }
-        .mode-btn {
-            min-height: 44px;
-            border: 1px solid var(--line);
-            border-radius: 10px;
-            background: #f8fafc;
-            color: var(--text);
-            font-size: 0.82rem;
-            font-weight: 700;
-            cursor: pointer;
-            touch-action: manipulation;
-        }
-        .mode-btn.active {
-            border-color: #93c5fd;
-            background: var(--info-soft);
-            color: var(--info);
+        .posicao-linha.pos-placeholder .pos-endereco {
+            color: var(--muted);
+            letter-spacing: 0.08em;
         }
 
         .scan-wrap {
@@ -407,18 +389,13 @@
         </section>
 
         <section class="card posicao-card" aria-label="Posição operacional">
-            <p class="posicao-linha" id="posicao-operacional-linha">
-                {{ item_atual.rua|default:"-" }}-{{ item_atual.posicao|default:"-" }}-{{ item_atual.altura|default:"-" }}-{{ item_atual.lado|default:"-" }}
+            <p class="posicao-linha {% if not item_atual.rua or not item_atual.posicao or not item_atual.altura or not item_atual.lado %}pos-placeholder{% endif %}" id="posicao-operacional-linha">
+                <span class="pos-endereco" id="posicao-endereco">{% if item_atual.rua and item_atual.posicao and item_atual.altura and item_atual.lado %}{{ item_atual.rua }}-{{ item_atual.posicao }}-{{ item_atual.altura }}-{{ item_atual.lado }}{% else %}*-*-*-*{% endif %}</span>
                 | <span class="pos-qtd">QTD {{ item_atual.quantidade_total|floatformat:0 }}</span>
             </p>
         </section>
 
         {% if tarefa.status != 'ABERTO' %}
-        <div class="mode-toggle" role="group" aria-label="Modo de bipagem">
-            <button type="button" class="mode-btn active" id="btn-modo-scanner">Scanner automático</button>
-            <button type="button" class="mode-btn" id="btn-modo-manual">Digitação manual</button>
-        </div>
-
         <section class="card">
             <div class="lbl">Bipagem</div>
             <form method="post" id="bipagem-separacao-form" class="scan-form">
@@ -483,8 +460,7 @@
         const itemAtualDescricaoEl = document.getElementById('item-atual-descricao');
         const itemAtualSetorEl = document.getElementById('item-atual-setor');
         const posicaoOperacionalEl = document.getElementById('posicao-operacional-linha');
-        const btnModoScanner = document.getElementById('btn-modo-scanner');
-        const btnModoManual = document.getElementById('btn-modo-manual');
+        const posicaoEnderecoEl = document.getElementById('posicao-endereco');
         const progressTextEl = document.getElementById('progress-text');
         const progressPercentEl = document.getElementById('progress-percent');
         const progressFillEl = document.getElementById('progress-fill');
@@ -524,23 +500,31 @@
         function formatNumber(value) {
             return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value || 0));
         }
-        function formatPosicaoLinha(item) {
-            const rua = item.rua || item.posicao_rua || '-';
-            const posicao = item.posicao || item.posicao_numero || '-';
-            const altura = item.altura || '-';
-            const lado = item.lado || '-';
-            const qtd = formatNumber(item.quantidade_total);
-            return `${rua}-${posicao}-${altura}-${lado} | QTD ${qtd}`;
+        function valorPosicaoCampo(valor) {
+            const texto = (valor == null ? '' : String(valor)).trim();
+            if (!texto || texto === '-') return '';
+            return texto;
+        }
+        function enderecoPosicao(item) {
+            const rua = valorPosicaoCampo(item.rua || item.posicao_rua);
+            const posicao = valorPosicaoCampo(item.posicao || item.posicao_numero);
+            const altura = valorPosicaoCampo(item.altura);
+            const lado = valorPosicaoCampo(item.lado);
+            if (rua && posicao && altura && lado) {
+                return { texto: `${rua}-${posicao}-${altura}-${lado}`, placeholder: false };
+            }
+            return { texto: '*-*-*-*', placeholder: true };
         }
         function renderPosicaoLinha(item) {
             if (!posicaoOperacionalEl || !item) return;
-            const texto = formatPosicaoLinha(item);
-            const partes = texto.split(' | QTD ');
-            if (partes.length === 2) {
-                posicaoOperacionalEl.innerHTML = `${partes[0]} | <span class="pos-qtd">QTD ${partes[1]}</span>`;
-            } else {
-                posicaoOperacionalEl.textContent = texto;
+            const endereco = enderecoPosicao(item);
+            const qtd = formatNumber(item.quantidade_total);
+            if (posicaoEnderecoEl) {
+                posicaoEnderecoEl.textContent = endereco.texto;
             }
+            posicaoOperacionalEl.classList.toggle('pos-placeholder', endereco.placeholder);
+            const qtdEl = posicaoOperacionalEl.querySelector('.pos-qtd');
+            if (qtdEl) qtdEl.textContent = `QTD ${qtd}`;
         }
         function updateItemDisplay(item) {
             if (!item) return;
@@ -565,12 +549,6 @@
             feedbackEl.className = `feedback ${type === 'erro' ? 'error' : 'ok'}`;
             feedbackEl.textContent = message;
         }
-        function syncModeButtons() {
-            if (!btnModoScanner || !btnModoManual || !scannerCtrl) return;
-            const manual = scannerCtrl.isManualMode();
-            btnModoScanner.classList.toggle('active', !manual);
-            btnModoManual.classList.toggle('active', manual);
-        }
         function setScannerStatus(mode) {
             if (!scannerStatusEl) return;
             scannerStatusEl.classList.remove('manual', 'offline', 'waiting', 'ready');
@@ -591,7 +569,6 @@
             }
             scannerStatusEl.classList.add('ready');
             scannerStatusEl.textContent = 'Scanner pronto';
-            syncModeButtons();
         }
         function updateProgress(separado, total) {
             const s = Number(separado || 0);
@@ -670,8 +647,6 @@
             scannerCtrl = null;
             document.body.classList.remove('scanner-mode-active');
             setScannerStatus('offline');
-            if (btnModoScanner) btnModoScanner.disabled = true;
-            if (btnModoManual) btnModoManual.disabled = true;
             stopPolling();
         }
 
@@ -747,23 +722,6 @@
             });
         }
 
-        if (btnModoScanner) {
-            btnModoScanner.addEventListener('click', function () {
-                if (!scannerCtrl) return;
-                scannerCtrl.ativarScannerMode(false);
-                syncModeButtons();
-                scheduleInputFocus();
-            });
-        }
-        if (btnModoManual) {
-            btnModoManual.addEventListener('click', function () {
-                if (!scannerCtrl) return;
-                scannerCtrl.ativarModoDigitacao('toggle');
-                syncModeButtons();
-                codigoInput.focus();
-            });
-        }
-
         document.addEventListener('visibilitychange', function () {
             if (document.hidden) {
                 stopPolling();
@@ -820,7 +778,6 @@
         setScannerStatus('offline');
         {% elif tarefa.status != 'ABERTO' %}
         setScannerStatus('scanner');
-        syncModeButtons();
         {% endif %}
         refreshTaskStatus().catch(function () {});
         startPolling();
