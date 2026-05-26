@@ -9,25 +9,121 @@
         <span class="section-label">Estoque</span>
         <h1>SAP vs WMS</h1>
         <div class="sap-vs-wms-header-row">
-            <p class="sap-vs-wms-header-row__text">Conciliação de estoque entre SAP e WMS — módulo em evolução.</p>
-            <a href="#"
-               class="btn btn-light btn-sm sap-vs-wms-upload"
-               id="sap-vs-wms-upload"
-               role="button"
-               title="Upload planilha SAP (em breve)"
-               aria-label="Upload conciliação SAP vs WMS">
+            <p class="sap-vs-wms-header-row__text">
+                Conciliação de estoque entre SAP e WMS — módulo em evolução.
+                {% if ultimo_upload %}
+                <span class="sap-vs-wms-meta">Último upload: {{ ultimo_upload|date:"d/m/Y H:i" }} · {{ total_sap }} SKU(s) SAP</span>
+                {% endif %}
+            </p>
+            <button type="button"
+                    class="btn btn-light btn-sm sap-vs-wms-upload"
+                    id="sap-vs-wms-upload-btn"
+                    title="Importar planilha SAP">
                 <i data-lucide="upload"></i>
                 <span>Upload</span>
-            </a>
+            </button>
         </div>
     </div>
 </div>
 
-<div class="card" style="padding: 24px;">
-    <p class="text-muted" style="margin: 0;">
-        Em breve: comparativo de saldos, divergências e sincronização entre o ERP (SAP) e o WMS.
-    </p>
+<form id="sap-upload-form" method="post" enctype="multipart/form-data" class="visually-hidden">
+    {% csrf_token %}
+    <input type="hidden" name="acao" value="upload">
+    <input type="file" name="arquivo" id="sap-upload-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
+</form>
+
+<div class="metrics-grid sap-vs-wms-metrics">
+    <div class="metric-card metric-card--accent">
+        <span class="metric-card__label">Total de litros (WMS)</span>
+        <div class="metric-card__value">{{ metricas.total_litros_wms|floatformat:"-2" }}</div>
+    </div>
+    <div class="metric-card metric-card--success">
+        <span class="metric-card__label">Acuracidade SAP vs WMS</span>
+        <div class="metric-card__value">{{ metricas.acuracidade_pct }}%</div>
+    </div>
+    <div class="metric-card metric-card--warning">
+        <span class="metric-card__label">Produtos divergentes</span>
+        <div class="metric-card__value">{{ metricas.total_divergentes }}</div>
+    </div>
 </div>
+
+<form method="get" class="card sap-vs-wms-filters">
+    <div class="sap-vs-wms-filters__grid">
+        <div>
+            <label for="busca">Pesquisar</label>
+            <input id="busca" name="busca" type="search" value="{{ busca }}" placeholder="Código ou descrição">
+        </div>
+        <div>
+            <label for="setor">Setor</label>
+            <select id="setor" name="setor">
+                <option value="">Todos</option>
+                {% for s in setores %}
+                <option value="{{ s }}" {% if setor == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="sap-vs-wms-filters__actions">
+            <button type="submit" class="btn btn-light">Filtrar</button>
+            {% if busca or setor %}
+            <a href="{% url 'web-estoque-sap-vs-wms' %}" class="btn btn-light">Limpar</a>
+            {% endif %}
+        </div>
+    </div>
+</form>
+
+<div class="card table-card">
+    <div class="table-wrap table-container">
+        <table class="table-sap-wms">
+            <thead>
+                <tr>
+                    <th>CodProd</th>
+                    <th>Descrição</th>
+                    <th class="num">WMS</th>
+                    <th class="num">SAP</th>
+                    <th class="num">Diferença</th>
+                    <th>Status</th>
+                    <th>Setor</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for linha in linhas %}
+                <tr>
+                    <td><strong>{{ linha.codigo_produto }}</strong></td>
+                    <td>{{ linha.descricao }}</td>
+                    <td class="num">{{ linha.quantidade_wms|floatformat:"-2" }}</td>
+                    <td class="num">{{ linha.quantidade_sap|floatformat:"-2" }}</td>
+                    <td class="num {% if linha.diferenca > 0 %}diff-pos{% elif linha.diferenca < 0 %}diff-neg{% endif %}">
+                        {{ linha.diferenca|floatformat:"-2" }}
+                    </td>
+                    <td>
+                        {% if linha.status == 'OK' %}
+                        <span class="status-badge status-badge--success">{{ linha.status }}</span>
+                        {% elif linha.status == 'DIVERGENTE' %}
+                        <span class="status-badge status-badge--danger">{{ linha.status }}</span>
+                        {% elif linha.status == 'SEM SAP' %}
+                        <span class="status-badge status-badge--warning">{{ linha.status }}</span>
+                        {% else %}
+                        <span class="status-badge sap-status--sem-wms">{{ linha.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ linha.setor }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="empty-state">
+                        {% if total_sap %}
+                        Nenhum produto encontrado com os filtros atuais.
+                        {% else %}
+                        Importe a planilha SAP para iniciar a conciliação.
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include 'partials/pagination_controls.html' %}
 
 <style>
 .sap-vs-wms-header-row {
@@ -44,6 +140,12 @@
     flex: 1 1 12rem;
     min-width: 0;
 }
+.sap-vs-wms-meta {
+    display: block;
+    font-size: 0.82rem;
+    margin-top: 4px;
+    color: var(--muted);
+}
 .sap-vs-wms-upload {
     display: inline-flex;
     align-items: center;
@@ -52,27 +154,62 @@
     white-space: nowrap;
     margin-top: 6px;
 }
-.sap-vs-wms-upload svg {
-    width: 16px;
-    height: 16px;
+.sap-vs-wms-upload svg { width: 16px; height: 16px; }
+.sap-vs-wms-metrics { margin-bottom: 12px; }
+.sap-vs-wms-filters { margin-bottom: 12px; padding: 12px; }
+.sap-vs-wms-filters__grid {
+    display: grid;
+    grid-template-columns: 1fr 200px auto;
+    gap: 12px;
+    align-items: end;
 }
-@media (max-width: 640px) {
-    .sap-vs-wms-header-row {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    .sap-vs-wms-upload {
-        margin-top: 0;
-    }
+.sap-vs-wms-filters__actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.table-sap-wms .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.table-sap-wms th.num { text-align: right; }
+.diff-pos { color: #15803d; font-weight: 600; }
+.diff-neg { color: #dc2626; font-weight: 600; }
+.status-badge--danger {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+.sap-status--sem-wms {
+    background: #ffedd5;
+    color: #c2410c;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+@media (max-width: 768px) {
+    .sap-vs-wms-header-row { flex-direction: column; align-items: flex-start; }
+    .sap-vs-wms-upload { margin-top: 0; }
+    .sap-vs-wms-filters__grid { grid-template-columns: 1fr; }
 }
 </style>
 
 <script>
 (function () {
-    var btn = document.getElementById('sap-vs-wms-upload');
-    if (!btn) return;
-    btn.addEventListener('click', function (e) {
-        e.preventDefault();
+    var btn = document.getElementById('sap-vs-wms-upload-btn');
+    var input = document.getElementById('sap-upload-file');
+    var form = document.getElementById('sap-upload-form');
+    if (!btn || !input || !form) return;
+    btn.addEventListener('click', function () { input.click(); });
+    input.addEventListener('change', function () {
+        if (input.files && input.files.length) form.submit();
     });
 })();
 </script>

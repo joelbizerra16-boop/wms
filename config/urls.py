@@ -15,11 +15,11 @@ from apps.core.views_liberacao import (
     liberar_tarefa_divergencia_view,
 )
 from apps.estoque.views_movimentacoes import estoque_movimentacoes_web
+from apps.estoque.views_sap_vs_wms import estoque_sap_vs_wms_web
 from apps.estoque.views_web import (
     estoque_armazenagem_web,
     estoque_lista_web,
     estoque_posicoes_web,
-    estoque_sap_vs_wms_web,
 )
 from apps.recebimento.views_web import (
     recebimento_ativacao_scan_web,

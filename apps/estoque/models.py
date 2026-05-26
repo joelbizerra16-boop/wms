@@ -226,3 +226,31 @@ class MovimentacaoEstoque(BaseModel):
 
     def __str__(self):
         return f'{self.tipo} {self.codigo_produto} {self.quantidade}'
+
+
+class SapVsWmsUpload(BaseModel):
+    """Snapshot SAP mais recente — substituído integralmente a cada upload."""
+
+    codigo_produto = models.CharField(max_length=50, db_index=True, verbose_name='código produto')
+    descricao = models.CharField(max_length=255, verbose_name='descrição')
+    quantidade_sap = models.DecimalField(max_digits=14, decimal_places=2, verbose_name='quantidade SAP')
+    setor = models.CharField(max_length=50, blank=True, default='', db_index=True, verbose_name='setor')
+    usuario_upload = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='sap_vs_wms_uploads',
+        verbose_name='usuário upload',
+    )
+
+    class Meta:
+        verbose_name = 'upload SAP vs WMS'
+        verbose_name_plural = 'uploads SAP vs WMS'
+        ordering = ('codigo_produto',)
+        indexes = [
+            models.Index(fields=['codigo_produto'], name='sap_wms_cod_prod_ix'),
+            models.Index(fields=['setor'], name='sap_wms_setor_ix'),
+            models.Index(fields=['created_at'], name='sap_wms_created_ix'),
+        ]
+
+    def __str__(self):
+        return f'{self.codigo_produto} SAP={self.quantidade_sap}'
