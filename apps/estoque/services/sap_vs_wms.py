@@ -14,6 +14,7 @@ from django.db.models import Max, Q, Sum
 
 from apps.estoque.models import EstoqueFisico, SapVsWmsUpload
 from apps.produtos.models import Produto
+from apps.recebimento.models import EstoqueTemporario
 
 
 class SapVsWmsError(Exception):
@@ -293,12 +294,23 @@ def _calcular_status(sap: Decimal, wms: Decimal) -> str:
 
 
 def montar_linhas_conciliacao(*, busca: str = '', setor: str = '') -> list[LinhaConciliacao]:
-    wms_rows = (
+    wms_fisico_rows = (
         EstoqueFisico.objects.filter(status=EstoqueFisico.Status.ATIVO)
         .values('codigo_produto')
         .annotate(
             quantidade_wms=Sum('quantidade'),
             descricao_wms=Max('descricao'),
+        )
+    )
+    wms_temp_rows = (
+        EstoqueTemporario.objects.filter(
+            status=EstoqueTemporario.Status.TEMP,
+            quantidade__gt=0,
+        )
+        .values('produto_codigo')
+        .annotate(
+            quantidade_temp=Sum('quantidade'),
+            descricao_temp=Max('descricao'),
         )
     )
     sap_rows = SapVsWmsUpload.objects.values('codigo_produto').annotate(
@@ -308,15 +320,20 @@ def montar_linhas_conciliacao(*, busca: str = '', setor: str = '') -> list[Linha
 
     wms_map = {
         normalizar_codigo_produto(r['codigo_produto']): r
-        for r in wms_rows
+        for r in wms_fisico_rows
         if r['codigo_produto']
+    }
+    temp_map = {
+        normalizar_codigo_produto(r['produto_codigo']): r
+        for r in wms_temp_rows
+        if r['produto_codigo']
     }
     sap_map = {
         normalizar_codigo_produto(r['codigo_produto']): r
         for r in sap_rows
         if r['codigo_produto']
     }
-    codigos = set(wms_map) | set(sap_map)
+    codigos = set(wms_map) | set(temp_map) | set(sap_map)
     setores_map = _mapa_setores_produtos(codigos)
 
     busca_l = (busca or '').strip().lower()
@@ -325,13 +342,17 @@ def montar_linhas_conciliacao(*, busca: str = '', setor: str = '') -> list[Linha
     linhas: list[LinhaConciliacao] = []
     for codigo in sorted(codigos):
         wms_row = wms_map.get(codigo, {})
+        temp_row = temp_map.get(codigo, {})
         sap_row = sap_map.get(codigo, {})
-        qtd_wms = _parse_decimal(wms_row.get('quantidade_wms'))
+        qtd_fisico = _parse_decimal(wms_row.get('quantidade_wms'))
+        qtd_temp = _parse_decimal(temp_row.get('quantidade_temp'))
+        qtd_wms = qtd_fisico + qtd_temp
         qtd_sap = _parse_decimal(sap_row.get('quantidade_sap'))
 
         descricao = (
             (sap_row.get('descricao_sap') or '').strip()
             or (wms_row.get('descricao_wms') or '').strip()
+            or (temp_row.get('descricao_temp') or '').strip()
             or codigo
         )
         setor_prod = setores_map.get(codigo, '')

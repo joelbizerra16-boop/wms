@@ -43,6 +43,24 @@ def resolver_posicao(entrada: str) -> PosicaoEstoque:
     if not texto:
         raise PosicaoEstoqueError('Informe o código ou endereço da posição.')
 
+    codigo_especial = texto.strip().upper()
+    if codigo_especial in ('TEMP', 'PULMAO', 'PULMÃO'):
+        codigo_especial = 'PULMAO' if codigo_especial == 'PULMÃO' else codigo_especial
+        pos, _ = PosicaoEstoque.objects.get_or_create(
+            codigo_posicao=codigo_especial,
+            defaults={
+                'rua': codigo_especial,
+                'posicao': '1',
+                'andar': '1',
+                'lado': '1',
+                'setor': 'TEMP',
+                'status': PosicaoEstoque.Status.ATIVA,
+                'observacao': 'Posição logística (TEMP/PULMÃO) criada automaticamente.',
+                'ativo': True,
+            },
+        )
+        return _validar_posicao_operacional(pos)
+
     por_codigo = PosicaoEstoque.objects.filter(codigo_posicao__iexact=texto, ativo=True).first()
     if por_codigo:
         return _validar_posicao_operacional(por_codigo)

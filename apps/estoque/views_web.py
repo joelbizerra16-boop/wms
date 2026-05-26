@@ -204,7 +204,32 @@ def estoque_armazenagem_web(request):
         messages.error(request, MSG_SCHEMA_PENDENTE)
         return redirect('web-estoque-armazenagem')
 
+    lookup = (request.GET.get('lookup') or '').strip()
     temp_id = request.GET.get('temp') or request.POST.get('temp_id')
+    if lookup and not temp_id and request.method == 'GET':
+        qs_lookup = EstoqueTemporario.objects.filter(
+            status=EstoqueTemporario.Status.TEMP,
+            quantidade__gt=0,
+        )
+        lookup_norm = lookup.replace('·', '-').replace(' ', '').strip()
+        encontrado = None
+        if lookup_norm.isdigit():
+            encontrado = qs_lookup.filter(pk=int(lookup_norm)).first()
+            if not encontrado:
+                encontrado = qs_lookup.filter(nf_numero__iexact=lookup_norm).first()
+            if not encontrado:
+                encontrado = qs_lookup.filter(produto_codigo__iexact=lookup_norm).first()
+        if not encontrado and '-' in lookup_norm:
+            partes = [p for p in lookup_norm.split('-') if p]
+            if len(partes) >= 2:
+                nf = partes[0]
+                prod = partes[1]
+                encontrado = qs_lookup.filter(nf_numero__iexact=nf, produto_codigo__iexact=prod).first()
+        if not encontrado:
+            encontrado = qs_lookup.filter(chave_nfe__iexact=lookup_norm).first()
+        if encontrado:
+            return redirect(f'{reverse("web-estoque-armazenagem")}?temp={encontrado.id}')
+        messages.error(request, f'Item TEMP não encontrado para: {lookup}')
     if request.method == 'POST':
         posicao_entrada = (request.POST.get('posicao') or '').strip()
         try:
@@ -253,6 +278,7 @@ def estoque_armazenagem_web(request):
         {
             'itens_temp': itens_temp,
             'item_selecionado': item_selecionado,
+            'lookup': lookup,
             'total_temp': EstoqueTemporario.objects.filter(
                 status=EstoqueTemporario.Status.TEMP,
                 quantidade__gt=0,

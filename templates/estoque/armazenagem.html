@@ -25,6 +25,19 @@
     <h2 class="section-title">Confirmar armazenagem</h2>
     <form method="post" id="form-armazenagem">
         {% csrf_token %}
+        <label for="temp_lookup">Buscar Item TEMP (digitar / bipar)</label>
+        <div class="actions-row" style="gap:8px; align-items: end;">
+            <input id="temp_lookup"
+                   type="text"
+                   value="{{ lookup }}"
+                   placeholder="Ex.: 377439 | 20005 | 377439-20005 | ID | chave NFe"
+                   autocomplete="off"
+                   inputmode="text"
+                   class="input-scan flex-grow-1">
+            <button type="button" class="btn btn-light btn-sm" id="btn-buscar-temp">Buscar</button>
+        </div>
+        <small class="text-muted">Dica: cole/bipe e pressione Enter. Mantém o select abaixo como fallback visual.</small>
+
         <label for="temp_id">Item TEMP</label>
         <select id="temp_id" name="temp_id" required>
             <option value="">— Selecione —</option>
@@ -123,6 +136,26 @@
             qtdInput.max = qtd;
             if (!qtdInput.value) qtdInput.value = qtd;
         }
+    }
+
+    function buscarTemp() {
+        var input = document.getElementById('temp_lookup');
+        if (!input) return;
+        var val = (input.value || '').trim();
+        if (!val) return;
+        window.location = '{% url "web-estoque-armazenagem" %}?lookup=' + encodeURIComponent(val);
+    }
+
+    var btnBusca = document.getElementById('btn-buscar-temp');
+    if (btnBusca) btnBusca.addEventListener('click', buscarTemp);
+    var inputBusca = document.getElementById('temp_lookup');
+    if (inputBusca) {
+        inputBusca.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                buscarTemp();
+            }
+        });
     }
 })();
 </script>
