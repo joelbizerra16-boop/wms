@@ -57,17 +57,22 @@ def normalizar_codigo_produto(valor) -> str:
     return texto
 
 
+def _normalizar_nome_coluna(coluna) -> str:
+    return str(coluna).strip().lower().replace(' ', '')
+
+
 def _coluna_codigo(colunas: list[str]) -> str | None:
     aliases = {
         'codproduto',
+        'codprodut',
         'cod_produto',
         'codigo',
         'codigo_produto',
-        'cod produto',
         'codprod',
     }
     for col in colunas:
-        if col.strip().lower().replace(' ', '') in aliases or col.strip().lower() in aliases:
+        nome = _normalizar_nome_coluna(col)
+        if nome in aliases:
             return col
     return colunas[0] if colunas else None
 
@@ -80,10 +85,65 @@ def _coluna_descricao(colunas: list[str]) -> str | None:
 
 
 def _coluna_total(colunas: list[str]) -> str | None:
+    """
+    Saldo SAP oficial: coluna TOTAL apenas.
+    Não usar fallback na última coluna (pode ser depósito numérico, ex.: 99).
+    """
     for col in colunas:
-        if col.strip().lower() == 'total':
+        if _normalizar_nome_coluna(col) == 'total':
             return col
-    return colunas[-1] if colunas else None
+    return None
+
+
+def _mapa_codigo_produto_numerico() -> dict[int, str]:
+    mapa: dict[int, str] = {}
+    for cod_prod, codigo in Produto.objects.values_list('cod_prod', 'codigo'):
+        for valor in (cod_prod, codigo):
+            if not valor:
+                continue
+            texto = str(valor).strip()
+            if texto.isdigit():
+                mapa[int(texto)] = texto
+    return mapa
+
+
+def alinhar_codigo_cadastro_wms(codigo: str, mapa_numerico: dict[int, str] | None = None) -> str:
+    """Alinha código da planilha ao cadastro WMS (ex.: Excel 2005 → 20005)."""
+    if not codigo:
+        return codigo
+    if (
+        Produto.objects.filter(Q(cod_prod=codigo) | Q(codigo=codigo)).exists()
+        or EstoqueFisico.objects.filter(codigo_produto=codigo).exists()
+    ):
+        return codigo
+    if not codigo.isdigit():
+        return codigo
+
+    candidatos_wms = sorted(
+        {
+            str(cp)
+            for cp in EstoqueFisico.objects.filter(
+                status=EstoqueFisico.Status.ATIVO,
+                quantidade__gt=0,
+                codigo_produto__startswith=codigo,
+            )
+            .exclude(codigo_produto=codigo)
+            .values_list('codigo_produto', flat=True)
+        },
+        key=len,
+    )
+    if len(candidatos_wms) == 1:
+        return candidatos_wms[0]
+    if candidatos_wms:
+        menor = candidatos_wms[0]
+        if sum(1 for cp in candidatos_wms if len(cp) == len(menor)) == 1:
+            return menor
+
+    mapa = mapa_numerico if mapa_numerico is not None else _mapa_codigo_produto_numerico()
+    candidato = mapa.get(int(codigo))
+    if candidato and candidato == codigo:
+        return candidato
+    return codigo
 
 
 def _parse_decimal(valor) -> Decimal:
@@ -109,20 +169,24 @@ def importar_planilha_sap(arquivo: BinaryIO, usuario) -> int:
     cod_col = _coluna_codigo(list(df.columns))
     desc_col = _coluna_descricao(list(df.columns))
     total_col = _coluna_total(list(df.columns))
-    if not cod_col or not total_col:
-        raise SapVsWmsError('Colunas obrigatórias não encontradas (código produto e Total).')
+    if not cod_col:
+        raise SapVsWmsError('Coluna de código do produto não encontrada (ex.: CodProduto).')
+    if not total_col:
+        raise SapVsWmsError('Coluna TOTAL não encontrada. O saldo SAP deve estar na coluna "Total".')
 
+    mapa_codigos = _mapa_codigo_produto_numerico()
     agregado: dict[str, dict] = {}
     for _, row in df.iterrows():
         codigo = normalizar_codigo_produto(row.get(cod_col))
         if not codigo:
             continue
+        codigo = alinhar_codigo_cadastro_wms(codigo, mapa_codigos)
         quantidade = _parse_decimal(row.get(total_col))
         descricao = ''
         if desc_col is not None:
             descricao = str(row.get(desc_col) or '').strip()[:255]
         if codigo in agregado:
-            agregado[codigo]['quantidade_sap'] += quantidade
+            agregado[codigo]['quantidade_sap'] = quantidade
             if descricao and not agregado[codigo]['descricao']:
                 agregado[codigo]['descricao'] = descricao
         else:

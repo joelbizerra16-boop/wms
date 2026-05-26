@@ -31,6 +31,24 @@ def _planilha_sap_bytes(linhas):
     return buf
 
 
+def _planilha_layout_depositos(codigo, descricao, total, deposito_110=0, deposito_99=0):
+    """Layout real SAP: depósitos numéricos + coluna Total consolidada."""
+    return {
+        'CodProduto': codigo,
+        'Descricao': descricao,
+        0: 0,
+        1: 0,
+        2: 0,
+        110: deposito_110,
+        66: 0,
+        80: 0,
+        81: 0,
+        82: 0,
+        99: deposito_99,
+        'Total': total,
+    }
+
+
 class SapVsWmsImportTestCase(TestCase):
     def setUp(self):
         self.gestor = User.objects.create_user(
@@ -40,6 +58,17 @@ class SapVsWmsImportTestCase(TestCase):
             perfil=User.Perfil.GESTOR,
             setor=User.Setor.FILTROS,
         )
+
+    def test_import_usa_coluna_total_nao_deposito_99(self):
+        df = pd.DataFrame(
+            [_planilha_layout_depositos(20005, 'ARLA 32 GRANEL', 99, deposito_110=99, deposito_99=0)],
+        )
+        buf = BytesIO()
+        df.to_excel(buf, index=False, engine='openpyxl')
+        buf.seek(0)
+        importar_planilha_sap(buf, self.gestor)
+        registro = SapVsWmsUpload.objects.get(codigo_produto='20005')
+        self.assertEqual(registro.quantidade_sap, Decimal('99'))
 
     def test_import_substituir_upload_anterior(self):
         buf1 = _planilha_sap_bytes([(20005, 'ARLA', 500)])
