@@ -8,7 +8,18 @@
     <div>
         <span class="section-label">Estoque</span>
         <h1>SAP vs WMS</h1>
-        <p>Conciliação de estoque entre SAP e WMS — módulo em evolução.</p>
+        <div class="sap-vs-wms-header-row">
+            <p class="sap-vs-wms-header-row__text">Conciliação de estoque entre SAP e WMS — módulo em evolução.</p>
+            <a href="#"
+               class="btn btn-light btn-sm sap-vs-wms-download"
+               id="sap-vs-wms-download"
+               role="button"
+               title="Download (em breve)"
+               aria-label="Download conciliação SAP vs WMS">
+                <i data-lucide="download"></i>
+                <span>Download</span>
+            </a>
+        </div>
     </div>
 </div>
 
@@ -17,4 +28,52 @@
         Em breve: comparativo de saldos, divergências e sincronização entre o ERP (SAP) e o WMS.
     </p>
 </div>
+
+<style>
+.sap-vs-wms-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.sap-vs-wms-header-row__text {
+    margin: 6px 0 0;
+    color: var(--muted);
+    line-height: 1.5;
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+.sap-vs-wms-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    margin-top: 6px;
+}
+.sap-vs-wms-download svg {
+    width: 16px;
+    height: 16px;
+}
+@media (max-width: 640px) {
+    .sap-vs-wms-header-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .sap-vs-wms-download {
+        margin-top: 0;
+    }
+}
+</style>
+
+<script>
+(function () {
+    var btn = document.getElementById('sap-vs-wms-download');
+    if (!btn) return;
+    btn.addEventListener('click', function (e) {
+        e.preventDefault();
+    });
+})();
+</script>
 {% endblock %}
