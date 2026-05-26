@@ -11,6 +11,8 @@ from django.utils import timezone
 from apps.estoque.models import EstoqueFisico, PosicaoEstoque, SapVsWmsUpload
 from apps.estoque.services.sap_vs_wms import (
     StatusConciliacao,
+    _carregar_dataframe_planilha_sap,
+    _normalizar_header,
     calcular_metricas,
     importar_planilha_sap,
     montar_linhas_conciliacao,
@@ -57,6 +59,29 @@ class SapVsWmsImportTestCase(TestCase):
             nome='Gestor',
             perfil=User.Perfil.GESTOR,
             setor=User.Setor.FILTROS,
+        )
+
+    def test_normalizar_header_total_com_espacos(self):
+        self.assertEqual(_normalizar_header(' Total '), 'TOTAL')
+        self.assertEqual(_normalizar_header('total'), 'TOTAL')
+        self.assertEqual(_normalizar_header('TOTAL'), 'TOTAL')
+
+    def test_import_aba_correta_em_workbook_multipagina(self):
+        df_export = pd.DataFrame({'ID': [1], 'Total da linha': [999]})
+        df_sap = pd.DataFrame([_planilha_layout_depositos(20005, 'ARLA 32', 99, deposito_110=99)])
+        buf = BytesIO()
+        with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+            df_export.to_excel(writer, sheet_name='ExportSAP', index=False)
+            df_sap.to_excel(writer, sheet_name='Conciliacao', index=False)
+        buf.seek(0)
+        df = _carregar_dataframe_planilha_sap(buf)
+        self.assertIn('TOTAL', df.columns)
+        self.assertIn('CODPRODUTO', df.columns)
+        buf.seek(0)
+        importar_planilha_sap(buf, self.gestor)
+        self.assertEqual(
+            SapVsWmsUpload.objects.get(codigo_produto='20005').quantidade_sap,
+            Decimal('99'),
         )
 
     def test_import_usa_coluna_total_nao_deposito_99(self):

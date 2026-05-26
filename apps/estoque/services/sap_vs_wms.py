@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import BinaryIO
@@ -57,42 +59,90 @@ def normalizar_codigo_produto(valor) -> str:
     return texto
 
 
-def _normalizar_nome_coluna(coluna) -> str:
-    return str(coluna).strip().lower().replace(' ', '')
+COLUNA_CODIGO_ALIASES = frozenset(
+    {'CODPRODUTO', 'CODPRODUT', 'COD_PRODUTO', 'CODIGO', 'CODIGO_PRODUTO', 'CODPROD'}
+)
+COLUNA_DESCRICAO_ALIASES = frozenset({'DESCRICAO', 'DESC'})
+COLUNA_TOTAL_OFICIAL = 'TOTAL'
+
+
+def _normalizar_header(coluna) -> str:
+    """Normaliza cabeçalho: strip, upper, sem espaços extras/caracteres invisíveis."""
+    if coluna is None or (isinstance(coluna, float) and pd.isna(coluna)):
+        texto = ''
+    else:
+        texto = str(coluna)
+    texto = unicodedata.normalize('NFKD', texto)
+    texto = ''.join(ch for ch in texto if not unicodedata.combining(ch))
+    texto = texto.replace('\ufeff', '').replace('\n', '').replace('\r', '').replace('\t', ' ')
+    texto = re.sub(r'[\u200b-\u200d\ufeff]', '', texto)
+    texto = ' '.join(texto.split())
+    return texto.strip().upper()
+
+
+def _normalizar_colunas_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [_normalizar_header(col) for col in df.columns]
+    return df
+
+
+def _planilha_conciliacao_valida(colunas: list[str]) -> bool:
+    """Aba válida: coluna TOTAL exata (não 'Total da linha') + código produto."""
+    cols = set(colunas)
+    if COLUNA_TOTAL_OFICIAL not in cols:
+        return False
+    return any(col in cols for col in COLUNA_CODIGO_ALIASES)
 
 
 def _coluna_codigo(colunas: list[str]) -> str | None:
-    aliases = {
-        'codproduto',
-        'codprodut',
-        'cod_produto',
-        'codigo',
-        'codigo_produto',
-        'codprod',
-    }
     for col in colunas:
-        nome = _normalizar_nome_coluna(col)
-        if nome in aliases:
+        if col in COLUNA_CODIGO_ALIASES:
             return col
     return colunas[0] if colunas else None
 
 
 def _coluna_descricao(colunas: list[str]) -> str | None:
     for col in colunas:
-        if col.strip().lower() in ('descricao', 'descrição', 'desc'):
+        if col in COLUNA_DESCRICAO_ALIASES:
             return col
-    return colunas[1] if len(colunas) > 1 else None
+    return None
 
 
 def _coluna_total(colunas: list[str]) -> str | None:
-    """
-    Saldo SAP oficial: coluna TOTAL apenas.
-    Não usar fallback na última coluna (pode ser depósito numérico, ex.: 99).
-    """
-    for col in colunas:
-        if _normalizar_nome_coluna(col) == 'total':
-            return col
+    """Saldo SAP oficial: somente coluna TOTAL (nome exato após normalização)."""
+    if COLUNA_TOTAL_OFICIAL in colunas:
+        return COLUNA_TOTAL_OFICIAL
     return None
+
+
+def _carregar_dataframe_planilha_sap(arquivo: BinaryIO) -> pd.DataFrame:
+    """
+    Carrega a aba de conciliação (CodProduto + Total).
+    Planilhas com várias abas: ignora export SAP e usa a aba correta.
+    """
+    try:
+        excel = pd.ExcelFile(arquivo)
+    except Exception as exc:
+        raise SapVsWmsError(f'Não foi possível ler a planilha: {exc}') from exc
+
+    candidatos: list[pd.DataFrame] = []
+    for nome_aba in excel.sheet_names:
+        bruta = pd.read_excel(excel, sheet_name=nome_aba, dtype=object)
+        if bruta.empty:
+            continue
+        normalizada = _normalizar_colunas_dataframe(bruta)
+        if _planilha_conciliacao_valida(list(normalizada.columns)):
+            return normalizada
+        candidatos.append(normalizada)
+
+    if candidatos:
+        for df in candidatos:
+            if COLUNA_TOTAL_OFICIAL in df.columns:
+                return df
+
+    if excel.sheet_names:
+        return _normalizar_colunas_dataframe(pd.read_excel(excel, sheet_name=0, dtype=object))
+    raise SapVsWmsError('Planilha vazia.')
 
 
 def _mapa_codigo_produto_numerico() -> dict[int, str]:
@@ -157,31 +207,30 @@ def _parse_decimal(valor) -> Decimal:
 
 def importar_planilha_sap(arquivo: BinaryIO, usuario) -> int:
     """Substitui integralmente o snapshot SAP anterior."""
-    try:
-        df = pd.read_excel(arquivo, dtype=object)
-    except Exception as exc:
-        raise SapVsWmsError(f'Não foi possível ler a planilha: {exc}') from exc
-
+    df = _carregar_dataframe_planilha_sap(arquivo)
     if df.empty:
         raise SapVsWmsError('Planilha vazia.')
 
-    df.columns = [str(c).strip() for c in df.columns]
-    cod_col = _coluna_codigo(list(df.columns))
-    desc_col = _coluna_descricao(list(df.columns))
-    total_col = _coluna_total(list(df.columns))
+    colunas = list(df.columns)
+    cod_col = _coluna_codigo(colunas)
+    desc_col = _coluna_descricao(colunas)
+    total_col = _coluna_total(colunas)
     if not cod_col:
         raise SapVsWmsError('Coluna de código do produto não encontrada (ex.: CodProduto).')
     if not total_col:
-        raise SapVsWmsError('Coluna TOTAL não encontrada. O saldo SAP deve estar na coluna "Total".')
+        raise SapVsWmsError(
+            'Coluna TOTAL não encontrada. O saldo SAP deve estar na coluna "Total" '
+            '(aba com CodProduto e Total, não export SAP genérico).'
+        )
 
     mapa_codigos = _mapa_codigo_produto_numerico()
     agregado: dict[str, dict] = {}
     for _, row in df.iterrows():
-        codigo = normalizar_codigo_produto(row.get(cod_col))
+        codigo = normalizar_codigo_produto(row[cod_col])
         if not codigo:
             continue
         codigo = alinhar_codigo_cadastro_wms(codigo, mapa_codigos)
-        quantidade = _parse_decimal(row.get(total_col))
+        quantidade = _parse_decimal(row[total_col])
         descricao = ''
         if desc_col is not None:
             descricao = str(row.get(desc_col) or '').strip()[:255]
