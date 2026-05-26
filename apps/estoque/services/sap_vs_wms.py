@@ -328,8 +328,6 @@ def montar_linhas_conciliacao(*, busca: str = '', setor: str = '') -> list[Linha
         sap_row = sap_map.get(codigo, {})
         qtd_wms = _parse_decimal(wms_row.get('quantidade_wms'))
         qtd_sap = _parse_decimal(sap_row.get('quantidade_sap'))
-        if qtd_wms == 0 and qtd_sap == 0:
-            continue
 
         descricao = (
             (sap_row.get('descricao_sap') or '').strip()

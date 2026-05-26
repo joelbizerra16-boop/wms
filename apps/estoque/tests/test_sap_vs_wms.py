@@ -164,6 +164,13 @@ class SapVsWmsConciliacaoTestCase(TestCase):
             setor='',
             usuario_upload=self.gestor,
         )
+        SapVsWmsUpload.objects.create(
+            codigo_produto='8',
+            descricao='KIT MOD MOBIL TROCA DE OLEO',
+            quantidade_sap=Decimal('0'),
+            setor='',
+            usuario_upload=self.gestor,
+        )
 
     def test_soma_wms_por_produto(self):
         linhas = montar_linhas_conciliacao()
@@ -180,6 +187,13 @@ class SapVsWmsConciliacaoTestCase(TestCase):
         self.assertEqual(linha.status, StatusConciliacao.DIVERGENTE)
         metricas = calcular_metricas(linhas)
         self.assertEqual(metricas.total_divergentes, 1)
+
+    def test_exibe_produto_zerado_sap_e_wms(self):
+        linhas = montar_linhas_conciliacao()
+        linha = next(l for l in linhas if l.codigo_produto == '8')
+        self.assertEqual(linha.quantidade_wms, Decimal('0'))
+        self.assertEqual(linha.quantidade_sap, Decimal('0'))
+        self.assertEqual(linha.status, StatusConciliacao.OK)
 
 
 class SapVsWmsViewTestCase(TestCase):
