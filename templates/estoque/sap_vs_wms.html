@@ -11,13 +11,13 @@
         <div class="sap-vs-wms-header-row">
             <p class="sap-vs-wms-header-row__text">Conciliação de estoque entre SAP e WMS — módulo em evolução.</p>
             <a href="#"
-               class="btn btn-light btn-sm sap-vs-wms-download"
-               id="sap-vs-wms-download"
+               class="btn btn-light btn-sm sap-vs-wms-upload"
+               id="sap-vs-wms-upload"
                role="button"
-               title="Download (em breve)"
-               aria-label="Download conciliação SAP vs WMS">
-                <i data-lucide="download"></i>
-                <span>Download</span>
+               title="Upload planilha SAP (em breve)"
+               aria-label="Upload conciliação SAP vs WMS">
+                <i data-lucide="upload"></i>
+                <span>Upload</span>
             </a>
         </div>
     </div>
@@ -44,7 +44,7 @@
     flex: 1 1 12rem;
     min-width: 0;
 }
-.sap-vs-wms-download {
+.sap-vs-wms-upload {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -52,7 +52,7 @@
     white-space: nowrap;
     margin-top: 6px;
 }
-.sap-vs-wms-download svg {
+.sap-vs-wms-upload svg {
     width: 16px;
     height: 16px;
 }
@@ -61,7 +61,7 @@
         flex-direction: column;
         align-items: flex-start;
     }
-    .sap-vs-wms-download {
+    .sap-vs-wms-upload {
         margin-top: 0;
     }
 }
@@ -69,7 +69,7 @@
 
 <script>
 (function () {
-    var btn = document.getElementById('sap-vs-wms-download');
+    var btn = document.getElementById('sap-vs-wms-upload');
     if (!btn) return;
     btn.addEventListener('click', function (e) {
         e.preventDefault();
