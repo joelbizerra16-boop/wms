@@ -17,8 +17,11 @@
 </div>
 
 <div class="metric-card metric-card--accent" style="margin-bottom:12px;">
-    <span class="metric-card__label">Registros ativos</span>
-    <div class="metric-card__value">{{ total_itens }}</div>
+    <span class="metric-card__label">Total físico no CD (endereçado + TEMP)</span>
+    <div class="metric-card__value">{{ total_qtd_wms|floatformat:"-2" }}</div>
+    <div class="metric-card__meta text-muted" style="margin-top:6px;">
+        Endereçado: {{ total_qtd_enderecado|floatformat:"-2" }} · TEMP: {{ total_qtd_temp|floatformat:"-2" }}
+    </div>
 </div>
 
 <form method="get" class="card" style="margin-bottom:12px;padding:12px;">
@@ -34,6 +37,7 @@
         <table>
             <thead>
                 <tr>
+                    <th>TIPO</th>
                     <th>COD</th>
                     <th>RUA</th>
                     <th>POSIÇÃO</th>
@@ -45,8 +49,9 @@
                 </tr>
             </thead>
             <tbody>
-                {% for item in itens %}
+                {% for item in itens_enderecados %}
                 <tr>
+                    <td><span class="text-muted">ENDEREÇADO</span></td>
                     <td><span class="text-muted">{{ item.id }}</span></td>
                     <td>{{ item.rua }}</td>
                     <td><strong>{{ item.label_posicao }}</strong></td>
@@ -57,8 +62,24 @@
                     <td>{{ item.dias }}</td>
                 </tr>
                 {% empty %}
+                {% if not itens_temp %}
                 <tr>
-                    <td colspan="8" class="empty-state">Nenhum item no estoque físico.</td>
+                    <td colspan="9" class="empty-state">Nenhum item no estoque físico.</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+
+                {% for item in itens_temp %}
+                <tr>
+                    <td><span class="status-badge status-badge--warning">TEMP</span></td>
+                    <td><span class="text-muted">—</span></td>
+                    <td>—</td>
+                    <td><strong>PULMÃO</strong></td>
+                    <td><strong>{{ item.produto }}</strong></td>
+                    <td>{{ item.descricao }}</td>
+                    <td>{{ item.quantidade|floatformat:"-2" }}</td>
+                    <td><span class="text-muted">—</span></td>
+                    <td><span class="text-muted">—</span></td>
                 </tr>
                 {% endfor %}
             </tbody>

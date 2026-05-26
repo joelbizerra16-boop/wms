@@ -3,7 +3,7 @@ import logging
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db import connection
-from django.db.models import Q
+from django.db.models import Max, Q, Sum
 from django.db.utils import ProgrammingError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -147,11 +147,12 @@ def estoque_lista_web(request):
         messages.error(request, MSG_SCHEMA_PENDENTE)
         return _render(request, 'estoque/schema_pendente.html', {'comando': 'migrate estoque --noinput'})
 
-    qs = (
+    qs_base = (
         EstoqueFisico.objects.filter(status=EstoqueFisico.Status.ATIVO)
         .select_related('posicao', 'produto')
         .order_by('data_entrada', 'codigo_produto')
     )
+    qs = qs_base
     busca = (request.GET.get('busca') or '').strip()
     if busca:
         qs = qs.filter(
@@ -168,9 +169,9 @@ def estoque_lista_web(request):
         messages.error(request, MSG_SCHEMA_PENDENTE)
         return _render(request, 'estoque/schema_pendente.html', {'comando': 'migrate estoque --noinput'})
 
-    itens = []
+    itens_enderecados = []
     for row in page_obj.object_list:
-        itens.append(
+        itens_enderecados.append(
             {
                 'id': row.id,
                 'codigo_posicao': row.posicao.codigo_posicao,
@@ -184,16 +185,55 @@ def estoque_lista_web(request):
                 'apta_separacao': row.posicao.apta_para_separacao(),
             }
         )
+
+    # TEMP/PULMÃO também é estoque físico: saldo aguardando armazenagem
+    temp_base = EstoqueTemporario.objects.filter(
+        status=EstoqueTemporario.Status.TEMP,
+        quantidade__gt=0,
+    )
+    temp_qs = temp_base
+    if busca:
+        temp_qs = temp_qs.filter(
+            Q(produto_codigo__icontains=busca) | Q(descricao__icontains=busca) | Q(nf_numero__icontains=busca)
+        )
+    temp_rows = temp_qs.values('produto_codigo').annotate(
+        quantidade=Sum('quantidade'),
+        descricao=Max('descricao'),
+    )
+    itens_temp = []
+    for row in temp_rows:
+        codigo = row['produto_codigo']
+        itens_temp.append(
+            {
+                'tipo': 'TEMP',
+                'posicao': 'PULMÃO',
+                'rua': '-',
+                'label_posicao': 'PULMÃO',
+                'produto': codigo,
+                'descricao': row.get('descricao') or '',
+                'quantidade': row['quantidade'],
+                'fifo': '-',
+                'dias': '-',
+            }
+        )
+
+    total_qtd_end = qs_base.aggregate(total=Sum('quantidade')).get('total') or 0
+    total_qtd_temp = temp_base.aggregate(total=Sum('quantidade')).get('total') or 0
+    total_qtd_wms = total_qtd_end + total_qtd_temp
     return _render(
         request,
         'estoque/estoque_lista.html',
         {
             'page_obj': page_obj,
-            'itens': itens,
+            'itens_enderecados': itens_enderecados,
+            'itens_temp': itens_temp,
             'is_paginated': page_obj.has_other_pages(),
             'pagination_query': f'busca={busca}' if busca else '',
             'busca': busca,
             'total_itens': total_itens,
+            'total_qtd_wms': total_qtd_wms,
+            'total_qtd_enderecado': total_qtd_end,
+            'total_qtd_temp': total_qtd_temp,
         },
     )
 
