@@ -243,6 +243,17 @@ a {
     display: block;
 }
 
+/* Estoque: 5 itens — evita corte do último (SAP vs WMS) na sidebar */
+#submenu-estoque {
+    overflow-y: auto;
+    max-height: min(280px, 42vh);
+    -webkit-overflow-scrolling: touch;
+}
+
+#submenu-estoque a {
+    padding: 10px 12px;
+}
+
 .nav-group__menu a {
     display: flex;
     align-items: center;
