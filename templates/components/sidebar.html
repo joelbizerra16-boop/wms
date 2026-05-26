@@ -111,6 +111,10 @@
                     <i data-lucide="arrow-left-right"></i>
                     <span>Movimentações</span>
                 </a>
+                <a href="{% url 'web-estoque-sap-vs-wms' %}" class="{% if '/estoque/sap-vs-wms/' in request.path %}active{% endif %}">
+                    <i data-lucide="git-compare"></i>
+                    <span>SAP vs WMS</span>
+                </a>
             </div>
         </div>
 

@@ -19,6 +19,7 @@ from apps.estoque.views_web import (
     estoque_armazenagem_web,
     estoque_lista_web,
     estoque_posicoes_web,
+    estoque_sap_vs_wms_web,
 )
 from apps.recebimento.views_web import (
     recebimento_ativacao_scan_web,
@@ -78,6 +79,7 @@ urlpatterns = [
     path('estoque/posicoes/', estoque_posicoes_web, name='web-estoque-posicoes'),
     path('estoque/armazenagem/', estoque_armazenagem_web, name='web-estoque-armazenagem'),
     path('estoque/movimentacoes/', estoque_movimentacoes_web, name='web-estoque-movimentacoes'),
+    path('estoque/sap-vs-wms/', estoque_sap_vs_wms_web, name='web-estoque-sap-vs-wms'),
     path('importar/', importar_xml_web, name='web-importar-xml'),
     path('importar/fila/', fila_entradas_nf_web, name='web-fila-entradas-nf'),
     path('importar/fila/limpeza/', limpar_dados_importacao_web, name='web-limpar-dados-importacao'),

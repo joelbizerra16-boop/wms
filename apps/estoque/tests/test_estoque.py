@@ -184,6 +184,7 @@ class EstoqueViewsWebTestCase(TestCase):
             'web-estoque-posicoes',
             'web-estoque-armazenagem',
             'web-estoque-movimentacoes',
+            'web-estoque-sap-vs-wms',
         ):
             self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
 
