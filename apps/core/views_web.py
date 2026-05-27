@@ -35,7 +35,7 @@ from apps.conferencia.services.conferencia_service import (
     iniciar_conferencia,
     listar_nfs_disponiveis,
 )
-from apps.nf.models import EntradaNF, NotaFiscal
+from apps.nf.models import EntradaNF, NotaFiscal, entrada_nf_rota_disponivel
 from apps.nf.services.status_service import atualizar_status_nf
 from apps.nf.services.importador_xml import (
     ImportacaoXMLError,
@@ -780,18 +780,24 @@ def importar_xml_web(request):
 @require_profiles(Usuario.Perfil.GESTOR)
 def fila_entradas_nf_web(request):
     date_from, date_to, busca = resolver_periodo_operacional_request(request)
+    rota_disponivel = entrada_nf_rota_disponivel()
     entradas = filtrar_queryset_created_at(
         EntradaNF.objects.order_by('-data_importacao', '-id'),
         date_from,
         date_to,
         campo='data_importacao',
     )
+    if not rota_disponivel:
+        # Compatibilidade com ambientes onde a migration da rota ainda não foi aplicada.
+        entradas = entradas.defer('rota')
     if busca:
-        entradas = entradas.filter(
+        filtros_busca = (
             Q(numero_nf__icontains=busca)
             | Q(chave_nf__icontains=busca)
-            | Q(rota__icontains=busca)
         )
+        if rota_disponivel:
+            filtros_busca |= Q(rota__icontains=busca)
+        entradas = entradas.filter(filtros_busca)
     pode_limpar = bool(getattr(request.user, 'is_superuser', False))
     paginacao = _paginar_lista(request, entradas)
     return _render(

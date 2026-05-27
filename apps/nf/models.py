@@ -19,8 +19,19 @@ def _nota_fiscal_colunas(alias):
 		}
 
 
+@lru_cache(maxsize=None)
+def _entrada_nf_colunas(alias):
+	connection = connections[alias]
+	with connection.cursor() as cursor:
+		return {
+			coluna.name
+			for coluna in connection.introspection.get_table_description(cursor, 'nf_entradanf')
+		}
+
+
 def invalidar_cache_colunas_nota_fiscal():
 	_nota_fiscal_colunas.cache_clear()
+	_entrada_nf_colunas.cache_clear()
 
 
 def nota_fiscal_bairro_disponivel(alias='default'):
@@ -35,6 +46,13 @@ def nota_fiscal_bairro_valor(nf):
 		return ''
 	bairro = nf.__dict__.get('bairro', '')
 	return (bairro or '').strip()
+
+
+def entrada_nf_rota_disponivel(alias='default'):
+	try:
+		return 'rota' in _entrada_nf_colunas(alias)
+	except (OperationalError, ProgrammingError):
+		return False
 
 
 class NotaFiscalQuerySet(models.QuerySet):
@@ -195,3 +213,8 @@ class EntradaNF(BaseModel):
 	def __str__(self):
 		numero = self.numero_nf or '-'
 		return f'Entrada NF {numero} ({self.chave_nf})'
+
+	@property
+	def rota_exibicao(self):
+		rota = (self.__dict__.get('rota') or '').strip()
+		return rota or 'SEM ROTA'
