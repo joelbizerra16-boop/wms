@@ -179,22 +179,62 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
     antes_insert = EntradaNF.objects.count()
     logger.warning('ANTES INSERT count=%s', antes_insert)
 
-    features_class = type(connection.features)
-    original_can_return_rows_attr = features_class.__dict__.get('can_return_rows_from_bulk_insert')
-    try:
-        setattr(features_class, 'can_return_rows_from_bulk_insert', False)
-        EntradaNF.objects.bulk_create(entradas, batch_size=100)
-    finally:
-        if original_can_return_rows_attr is None:
-            delattr(features_class, 'can_return_rows_from_bulk_insert')
-        else:
-            setattr(features_class, 'can_return_rows_from_bulk_insert', original_can_return_rows_attr)
+    insert_sql = """
+        INSERT INTO nf_entradanf (
+            created_at,
+            updated_at,
+            chave_nf,
+            numero_nf,
+            rota,
+            xml,
+            xml_backup_gzip,
+            status,
+            tipo,
+            data_importacao
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    chaves_salvas = []
+    with connection.cursor() as cursor:
+        for entrada in entradas:
+            cursor.execute(
+                insert_sql,
+                [
+                    entrada.created_at,
+                    entrada.updated_at,
+                    entrada.chave_nf,
+                    entrada.numero_nf,
+                    entrada.rota,
+                    str(entrada.xml),
+                    entrada.xml_backup_gzip,
+                    entrada.status,
+                    entrada.tipo,
+                    entrada.data_importacao,
+                ],
+            )
+            if cursor.rowcount != 1:
+                raise IntegrityError(
+                    f'Insert sem persistencia para chave {entrada.chave_nf}. rowcount={cursor.rowcount}'
+                )
+            chaves_salvas.append(entrada.chave_nf)
+
+    registros_persistidos = list(
+        EntradaNF.objects.filter(chave_nf__in=chaves_salvas)
+        .order_by('-id')
+        .values('id', 'numero_nf', 'chave_nf', 'status', 'data_importacao')
+    )
+    if len(registros_persistidos) != len(chaves_salvas):
+        raise IntegrityError(
+            'Persistencia inconsistente na fila de entradas. '
+            f'esperados={len(chaves_salvas)} encontrados={len(registros_persistidos)} '
+            f'chaves={chaves_salvas}'
+        )
 
     def _registrar_diagnostico_pos_insert():
         try:
-            close_old_connections()
             depois_insert = EntradaNF.objects.count()
             logger.warning('DEPOIS INSERT count=%s', depois_insert)
+            logger.warning('REGISTROS_SALVOS=%s', registros_persistidos)
             ultimo = EntradaNF.objects.order_by('-id').values(
                 'id',
                 'numero_nf',
@@ -207,7 +247,7 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
 
     transaction.on_commit(_registrar_diagnostico_pos_insert)
 
-    logger.info('Persistencia entradas lote: criadas=%s modo=orm_bulk_create_sem_returning', len(entradas))
+    logger.info('Persistencia entradas lote: criadas=%s modo=insert_validado_sem_returning', len(chaves_salvas))
     return entradas
 
 
@@ -782,48 +822,8 @@ def importar_xml_web(request):
                             chaves_notas_existentes,
                         )
                     except IntegrityError:
-                        entradas_criadas = []
-                        for item in lote_novas_entradas:
-                            chave_nfe = item['chave_nfe']
-                            numero_nf = item['numero_nf']
-                            nome_arquivo = item['arquivo']
-                            xml_name = EntradaNF._meta.get_field('xml').generate_filename(EntradaNF(), nome_arquivo)
-                            xml_name = EntradaNF._meta.get_field('xml').storage.save(
-                                xml_name,
-                                ContentFile(item['xml_content']),
-                            )
-                            try:
-                                entrada = EntradaNF.objects.create(
-                                    chave_nf=chave_nfe,
-                                    numero_nf=numero_nf,
-                                    rota=item.get('rota_nf') or 'SEM ROTA',
-                                    xml=xml_name,
-                                    xml_backup_gzip=gzip.compress(item['xml_content']),
-                                    status=(
-                                        EntradaNF.Status.PROCESSADO
-                                        if chave_nfe in chaves_notas_existentes
-                                        else EntradaNF.Status.AGUARDANDO
-                                    ),
-                                    tipo=tipo_entrada,
-                                )
-                                entradas_criadas.append(entrada)
-                            except IntegrityError:
-                                entrada_existente_numero = (
-                                    EntradaNF.objects.filter(chave_nf=chave_nfe)
-                                    .values_list('numero_nf', flat=True)
-                                    .first()
-                                )
-                                entradas_existentes[chave_nfe] = entrada_existente_numero or ''
-                                resultados['duplicadas'] += 1
-                                resultados['detalhes'].append(
-                                    {
-                                        'status': 'duplicada',
-                                        'mensagem': 'Chave já cadastrada na fila de entradas.',
-                                        'nf': (entrada_existente_numero or numero_nf) or '-',
-                                        'chave_nfe': chave_nfe,
-                                        'arquivo': nome_arquivo,
-                                    }
-                                )
+                        logger.exception('ERRO REAL INSERT NF')
+                        raise
 
                     for entrada, item in zip(entradas_criadas, lote_novas_entradas):
                         chave_nfe = item['chave_nfe']
