@@ -212,10 +212,14 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
                     entrada.data_importacao,
                 ],
             )
-            if cursor.rowcount != 1:
-                raise IntegrityError(
-                    f'Insert sem persistencia para chave {entrada.chave_nf}. rowcount={cursor.rowcount}'
-                )
+            validacao = EntradaNF.objects.filter(chave_nf=entrada.chave_nf).exists()
+            logger.warning(
+                'VALIDACAO POS INSERT chave=%s exists=%s',
+                entrada.chave_nf,
+                validacao,
+            )
+            if not validacao:
+                raise IntegrityError(f'NF nao encontrada apos insert: {entrada.chave_nf}')
             chaves_salvas.append(entrada.chave_nf)
 
     registros_persistidos = list(
