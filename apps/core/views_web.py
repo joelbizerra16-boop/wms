@@ -179,6 +179,20 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
         )
     try:
         chaves_lote = [item.get('chave_nfe') for item in lote_novas_entradas if item.get('chave_nfe')]
+        for entrada in (
+            EntradaNF.objects.filter(chave_nf__in=chaves_lote)
+            .order_by('-id')
+            .values('id', 'numero_nf', 'status', 'created_at', 'data_importacao', 'chave_nf')
+        ):
+            logger.warning(
+                'NF SALVA id=%s nf=%s status=%s created=%s data_importacao=%s chave=%s',
+                entrada['id'],
+                entrada['numero_nf'],
+                entrada['status'],
+                entrada['created_at'],
+                entrada['data_importacao'],
+                entrada['chave_nf'],
+            )
         logger.warning(
             'IMPORTACAO POS-PERSIST count_lote=%s ultimo=%s',
             len(chaves_lote),
@@ -864,9 +878,22 @@ def fila_entradas_nf_web(request):
             entradas = entradas.filter(filtros_busca)
         try:
             logger.warning('FILA QUERYSET COUNT=%s', entradas.count())
+            logger.warning('FILA SQL=%s', str(entradas.query))
             logger.warning(
-                'ULTIMO REGISTRO=%s',
-                entradas.order_by('-id').values('id', 'numero_nf', 'created_at', 'data_importacao', 'status').first(),
+                'FILA STATUSES=%s',
+                list(entradas.values_list('status', flat=True).distinct()),
+            )
+            logger.warning(
+                'FILA ULTIMOS=%s',
+                list(
+                    entradas.order_by('-id').values(
+                        'id',
+                        'numero_nf',
+                        'status',
+                        'created_at',
+                        'data_importacao',
+                    )[:10]
+                ),
             )
         except Exception:
             logger.exception('Falha ao gerar diagnostico de queryset da fila.')
