@@ -12,7 +12,7 @@ from django.core.files.base import ContentFile
 from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import IntegrityError, close_old_connections, transaction
+from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.utils import ProgrammingError as DBProgrammingError
 from django.db.models import Prefetch, Q
 import json
@@ -170,21 +170,57 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             )
         )
 
-    entradas_salvas = []
+    insert_sql = """
+        INSERT INTO nf_entradanf (
+            created_at,
+            updated_at,
+            chave_nf,
+            numero_nf,
+            rota,
+            xml,
+            xml_backup_gzip,
+            status,
+            tipo,
+            data_importacao
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
+    chaves_salvas = []
     with transaction.atomic():
-        for entrada in entradas:
-            entrada.pk = None
-            entrada.save(force_insert=True)
-            entradas_salvas.append(entrada)
+        with connection.cursor() as cursor:
+            for entrada in entradas:
+                agora = timezone.now()
+                entrada.created_at = agora
+                entrada.updated_at = agora
+                entrada.data_importacao = agora
+
+                cursor.execute(
+                    insert_sql,
+                    [
+                        entrada.created_at,
+                        entrada.updated_at,
+                        entrada.chave_nf,
+                        entrada.numero_nf,
+                        entrada.rota,
+                        str(entrada.xml),
+                        entrada.xml_backup_gzip,
+                        entrada.status,
+                        entrada.tipo,
+                        entrada.data_importacao,
+                    ],
+                )
+                chaves_salvas.append(entrada.chave_nf)
 
         transaction.on_commit(
-            lambda ids=[e.id for e in entradas_salvas]: logger.warning(
-                'IMPORTACAO COMMIT CONCLUIDO ids=%s',
-                ids,
+            lambda chaves=list(chaves_salvas): logger.warning(
+                'IMPORTACAO COMMIT CONCLUIDO chaves=%s total=%s',
+                chaves,
+                len(chaves),
             )
         )
 
-    logger.info('Persistencia entradas lote: criadas=%s modo=save_individual', len(entradas_salvas))
+    logger.info('Persistencia entradas lote: criadas=%s modo=sql_manual_sem_returning', len(chaves_salvas))
     return entradas
 
 
