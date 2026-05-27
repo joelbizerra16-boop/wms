@@ -170,58 +170,22 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             )
         )
 
-    insert_sql = """
-        INSERT INTO nf_entradanf (
-            created_at,
-            updated_at,
-            chave_nf,
-            numero_nf,
-            rota,
-            xml,
-            xml_backup_gzip,
-            status,
-            tipo,
-            data_importacao
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """
-
-    chaves_salvas = []
+    entradas_salvas = []
     with transaction.atomic():
-        with connection.cursor() as cursor:
-            for entrada in entradas:
-                agora = timezone.now()
-                entrada.created_at = agora
-                entrada.updated_at = agora
-                entrada.data_importacao = agora
-
-                cursor.execute(
-                    insert_sql,
-                    [
-                        entrada.created_at,
-                        entrada.updated_at,
-                        entrada.chave_nf,
-                        entrada.numero_nf,
-                        entrada.rota,
-                        str(entrada.xml),
-                        entrada.xml_backup_gzip,
-                        entrada.status,
-                        entrada.tipo,
-                        entrada.data_importacao,
-                    ],
-                )
-                chaves_salvas.append(entrada.chave_nf)
+        for entrada in entradas:
+            entrada.pk = None
+            entrada.save(force_insert=True)
+            entradas_salvas.append(entrada)
 
         transaction.on_commit(
-            lambda chaves=list(chaves_salvas): logger.warning(
-                'IMPORTACAO COMMIT CONCLUIDO chaves=%s total=%s',
-                chaves,
-                len(chaves),
+            lambda ids=[entrada.id for entrada in entradas_salvas]: logger.warning(
+                'IMPORTACAO COMMIT OK ids=%s',
+                ids,
             )
         )
 
-    logger.info('Persistencia entradas lote: criadas=%s modo=sql_manual_sem_returning', len(chaves_salvas))
-    return entradas
+    logger.info('Persistencia entradas lote: criadas=%s modo=orm_force_insert', len(entradas_salvas))
+    return entradas_salvas
 
 
 def _normalizar_campo(valor):
@@ -871,6 +835,65 @@ def importar_xml_web(request):
 
 @require_profiles(Usuario.Perfil.GESTOR)
 def fila_entradas_nf_web(request):
+    from django.db import connection
+    from apps.nf.models import EntradaNF
+
+    tabela_entrada_nf = EntradaNF._meta.db_table
+    diagnostico_conexao = {
+        'alias': getattr(connection, 'alias', 'default'),
+        'vendor': connection.vendor,
+        'database': connection.settings_dict.get('NAME'),
+        'host': connection.settings_dict.get('HOST'),
+        'port': connection.settings_dict.get('PORT'),
+        'table': tabela_entrada_nf,
+    }
+    try:
+        if connection.vendor == 'postgresql':
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f'''
+                    SELECT current_database(),
+                           current_schema(),
+                           current_setting('search_path'),
+                           to_regclass(%s)::text,
+                           COUNT(*)
+                    FROM {tabela_entrada_nf}
+                    ''',
+                    [tabela_entrada_nf],
+                )
+                database_atual, schema_atual, search_path, regclass_tabela, total_sql = cursor.fetchone()
+                diagnostico_conexao.update(
+                    {
+                        'current_database': database_atual,
+                        'current_schema': schema_atual,
+                        'search_path': search_path,
+                        'regclass_table': regclass_tabela,
+                        'raw_count': total_sql,
+                    }
+                )
+                cursor.execute(
+                    f'''
+                    SELECT id, numero_nf, chave_nf, status, data_importacao
+                    FROM {tabela_entrada_nf}
+                    ORDER BY id DESC
+                    LIMIT 5
+                    '''
+                )
+                diagnostico_conexao['raw_latest'] = cursor.fetchall()
+        diagnostico_conexao['orm_count_total'] = EntradaNF.objects.count()
+        diagnostico_conexao['orm_latest_total'] = list(
+            EntradaNF.objects.order_by('-id').values(
+                'id',
+                'numero_nf',
+                'chave_nf',
+                'status',
+                'data_importacao',
+            )[:5]
+        )
+        logger.warning('FILA DIAGNOSTICO CONEXAO=%s', diagnostico_conexao)
+    except Exception:
+        logger.exception('Falha ao gerar diagnostico de conexao/tabela da fila de entradas.')
+
     date_from, date_to, busca = resolver_periodo_operacional_request(request)
     rota_disponivel = entrada_nf_rota_disponivel()
     try:
