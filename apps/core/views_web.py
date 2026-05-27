@@ -12,7 +12,7 @@ from django.core.files.base import ContentFile
 from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import IntegrityError, close_old_connections, transaction
+from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.utils import ProgrammingError as DBProgrammingError
 from django.db.models import Prefetch, Q
 import json
@@ -94,22 +94,35 @@ def _chaves_lote_validas(lote_preparado):
 def _mapear_entradas_existentes_por_chave(chaves_lote):
     if not chaves_lote:
         return {}
+    connection.close_if_unusable_or_obsolete()
     try:
-        entradas = list(EntradaNF.objects.filter(chave_nf__in=chaves_lote))
+        entradas = list(
+            EntradaNF.objects.filter(chave_nf__in=chaves_lote)
+            .values_list('chave_nf', 'numero_nf')
+        )
     except DBProgrammingError:
-        # Ambiente com pooler PostgreSQL pode exigir novo cursor após erro transitório.
+        logger.exception('Falha ao consultar entradas existentes; reiniciando conexão e repetindo.')
         close_old_connections()
-        entradas = list(EntradaNF.objects.filter(chave_nf__in=chaves_lote))
-    return {entrada.chave_nf: entrada for entrada in entradas}
+        connection.close()
+        connection.close_if_unusable_or_obsolete()
+        entradas = list(
+            EntradaNF.objects.filter(chave_nf__in=chaves_lote)
+            .values_list('chave_nf', 'numero_nf')
+        )
+    return {chave_nf: (numero_nf or '') for chave_nf, numero_nf in entradas}
 
 
 def _consultar_chaves_notas_existentes(chaves_lote):
     if not chaves_lote:
         return set()
+    connection.close_if_unusable_or_obsolete()
     try:
         return set(NotaFiscal.objects.filter(chave_nfe__in=chaves_lote).values_list('chave_nfe', flat=True))
     except DBProgrammingError:
+        logger.exception('Falha ao consultar chaves de NF existentes; reiniciando conexão e repetindo.')
         close_old_connections()
+        connection.close()
+        connection.close_if_unusable_or_obsolete()
         return set(NotaFiscal.objects.filter(chave_nfe__in=chaves_lote).values_list('chave_nfe', flat=True))
 
 
@@ -710,9 +723,9 @@ def importar_xml_web(request):
                     numero_nf = item['numero_nf']
                     nome_arquivo = item['arquivo']
 
-                    entrada_existente = entradas_existentes.get(chave_nfe)
-                    if entrada_existente is not None or chave_nfe in chaves_novas_lote:
-                        referencia = entrada_existente.numero_nf if entrada_existente is not None else numero_nf
+                    numero_existente = entradas_existentes.get(chave_nfe)
+                    if numero_existente is not None or chave_nfe in chaves_novas_lote:
+                        referencia = numero_existente if numero_existente else numero_nf
                         resultados['duplicadas'] += 1
                         resultados['detalhes'].append(
                             {
@@ -762,14 +775,18 @@ def importar_xml_web(request):
                                 )
                                 entradas_criadas.append(entrada)
                             except IntegrityError:
-                                entrada_existente = EntradaNF.objects.filter(chave_nf=chave_nfe).first()
-                                entradas_existentes[chave_nfe] = entrada_existente
+                                entrada_existente_numero = (
+                                    EntradaNF.objects.filter(chave_nf=chave_nfe)
+                                    .values_list('numero_nf', flat=True)
+                                    .first()
+                                )
+                                entradas_existentes[chave_nfe] = entrada_existente_numero or ''
                                 resultados['duplicadas'] += 1
                                 resultados['detalhes'].append(
                                     {
                                         'status': 'duplicada',
                                         'mensagem': 'Chave já cadastrada na fila de entradas.',
-                                        'nf': (entrada_existente.numero_nf if entrada_existente else numero_nf) or '-',
+                                        'nf': (entrada_existente_numero or numero_nf) or '-',
                                         'chave_nfe': chave_nfe,
                                         'arquivo': nome_arquivo,
                                     }
@@ -779,7 +796,7 @@ def importar_xml_web(request):
                         chave_nfe = item['chave_nfe']
                         numero_nf = item['numero_nf']
                         nome_arquivo = item['arquivo']
-                        entradas_existentes[chave_nfe] = entrada
+                        entradas_existentes[chave_nfe] = entrada.numero_nf or ''
                         resultados['sucesso'] += 1
                         resultados['detalhes'].append(
                             {
