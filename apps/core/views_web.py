@@ -170,57 +170,37 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             )
         )
 
-    insert_sql = """
-        INSERT INTO nf_entradanf (
-            created_at,
-            updated_at,
-            chave_nf,
-            numero_nf,
-            rota,
-            xml,
-            xml_backup_gzip,
-            status,
-            tipo,
-            data_importacao
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """
+    agora = timezone.now()
+    for entrada in entradas:
+        entrada.created_at = agora
+        entrada.updated_at = agora
+        entrada.data_importacao = agora
 
-    chaves_salvas = []
-    with transaction.atomic():
-        with connection.cursor() as cursor:
-            for entrada in entradas:
-                agora = timezone.now()
-                entrada.created_at = agora
-                entrada.updated_at = agora
-                entrada.data_importacao = agora
+    antes_insert = EntradaNF.objects.count()
+    logger.warning('ANTES INSERT count=%s', antes_insert)
 
-                cursor.execute(
-                    insert_sql,
-                    [
-                        entrada.created_at,
-                        entrada.updated_at,
-                        entrada.chave_nf,
-                        entrada.numero_nf,
-                        entrada.rota,
-                        str(entrada.xml),
-                        entrada.xml_backup_gzip,
-                        entrada.status,
-                        entrada.tipo,
-                        entrada.data_importacao,
-                    ],
-                )
-                chaves_salvas.append(entrada.chave_nf)
+    features_class = type(connection.features)
+    original_can_return_rows_attr = features_class.__dict__.get('can_return_rows_from_bulk_insert')
+    try:
+        setattr(features_class, 'can_return_rows_from_bulk_insert', False)
+        EntradaNF.objects.bulk_create(entradas, batch_size=100)
+    finally:
+        if original_can_return_rows_attr is None:
+            delattr(features_class, 'can_return_rows_from_bulk_insert')
+        else:
+            setattr(features_class, 'can_return_rows_from_bulk_insert', original_can_return_rows_attr)
 
-        transaction.on_commit(
-            lambda chaves=list(chaves_salvas): logger.warning(
-                'IMPORTACAO COMMIT OK chaves=%s total=%s',
-                chaves,
-                len(chaves),
-            )
-        )
+    depois_insert = EntradaNF.objects.count()
+    logger.warning('DEPOIS INSERT count=%s', depois_insert)
+    ultimo = EntradaNF.objects.order_by('-id').values(
+        'id',
+        'numero_nf',
+        'status',
+        'data_importacao',
+    ).first()
+    logger.warning('ULTIMO REGISTRO POS INSERT=%s', ultimo)
 
-    logger.info('Persistencia entradas lote: criadas=%s modo=insert_sem_returning', len(chaves_salvas))
+    logger.info('Persistencia entradas lote: criadas=%s modo=orm_bulk_create_sem_returning', len(entradas))
     return entradas
 
 
