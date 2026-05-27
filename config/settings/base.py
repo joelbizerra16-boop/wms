@@ -100,6 +100,8 @@ DATABASES = {
         },
         'CONN_MAX_AGE': config('DB_CONN_MAX_AGE', default=300, cast=int),
         'CONN_HEALTH_CHECKS': config('DB_CONN_HEALTH_CHECKS', default=True, cast=bool),
+        # Evita erro "no results to fetch" em ambientes com pooler PostgreSQL (Supabase/PgBouncer).
+        'DISABLE_SERVER_SIDE_CURSORS': config('DB_DISABLE_SERVER_SIDE_CURSORS', default=True, cast=bool),
     }
 }
 

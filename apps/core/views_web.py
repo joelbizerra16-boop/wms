@@ -12,7 +12,8 @@ from django.core.files.base import ContentFile
 from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, close_old_connections, transaction
+from django.db.utils import ProgrammingError as DBProgrammingError
 from django.db.models import Prefetch, Q
 import json
 
@@ -84,6 +85,32 @@ from apps.core.scan_store import clear_scan_entrada_ids, get_scan_entrada_ids, s
 logger = logging.getLogger(__name__)
 MAX_XML_FILES_POR_ENVIO = 700
 MAX_XML_FILES_POR_LOTE = 50
+
+
+def _chaves_lote_validas(lote_preparado):
+    return [chave for chave in (item.get('chave_nfe') for item in lote_preparado) if chave]
+
+
+def _mapear_entradas_existentes_por_chave(chaves_lote):
+    if not chaves_lote:
+        return {}
+    try:
+        entradas = list(EntradaNF.objects.filter(chave_nf__in=chaves_lote))
+    except DBProgrammingError:
+        # Ambiente com pooler PostgreSQL pode exigir novo cursor após erro transitório.
+        close_old_connections()
+        entradas = list(EntradaNF.objects.filter(chave_nf__in=chaves_lote))
+    return {entrada.chave_nf: entrada for entrada in entradas}
+
+
+def _consultar_chaves_notas_existentes(chaves_lote):
+    if not chaves_lote:
+        return set()
+    try:
+        return set(NotaFiscal.objects.filter(chave_nfe__in=chaves_lote).values_list('chave_nfe', flat=True))
+    except DBProgrammingError:
+        close_old_connections()
+        return set(NotaFiscal.objects.filter(chave_nfe__in=chaves_lote).values_list('chave_nfe', flat=True))
 
 
 def _bool_post(request, key, default=False):
@@ -664,14 +691,16 @@ def importar_xml_web(request):
                 if not lote_preparado:
                     continue
 
-                chaves_lote = [item['chave_nfe'] for item in lote_preparado]
-                entradas_existentes = {
-                    entrada.chave_nf: entrada
-                    for entrada in EntradaNF.objects.filter(chave_nf__in=chaves_lote)
-                }
-                chaves_notas_existentes = set(
-                    NotaFiscal.objects.filter(chave_nfe__in=chaves_lote).values_list('chave_nfe', flat=True)
-                )
+                chaves_lote = _chaves_lote_validas(lote_preparado)
+                if not chaves_lote:
+                    logger.warning('Importacao XML: lote sem chaves validas. arquivos=%s', len(lote_preparado))
+                    resultados['erros'] += len(lote_preparado)
+                    resultados['detalhes'].append(
+                        _resultado_erro_importacao('Lote ignorado: nenhuma chave NF válida encontrada.')
+                    )
+                    continue
+                entradas_existentes = _mapear_entradas_existentes_por_chave(chaves_lote)
+                chaves_notas_existentes = _consultar_chaves_notas_existentes(chaves_lote)
 
                 lote_novas_entradas = []
                 chaves_novas_lote = set()
@@ -781,25 +810,48 @@ def importar_xml_web(request):
 def fila_entradas_nf_web(request):
     date_from, date_to, busca = resolver_periodo_operacional_request(request)
     rota_disponivel = entrada_nf_rota_disponivel()
-    entradas = filtrar_queryset_created_at(
-        EntradaNF.objects.order_by('-data_importacao', '-id'),
-        date_from,
-        date_to,
-        campo='data_importacao',
-    )
-    if not rota_disponivel:
-        # Compatibilidade com ambientes onde a migration da rota ainda não foi aplicada.
-        entradas = entradas.defer('rota')
-    if busca:
-        filtros_busca = (
-            Q(numero_nf__icontains=busca)
-            | Q(chave_nf__icontains=busca)
+    try:
+        entradas = filtrar_queryset_created_at(
+            EntradaNF.objects.order_by('-data_importacao', '-id'),
+            date_from,
+            date_to,
+            campo='data_importacao',
         )
-        if rota_disponivel:
-            filtros_busca |= Q(rota__icontains=busca)
-        entradas = entradas.filter(filtros_busca)
+        if not rota_disponivel:
+            # Compatibilidade com ambientes onde a migration da rota ainda não foi aplicada.
+            entradas = entradas.defer('rota')
+        if busca:
+            filtros_busca = (
+                Q(numero_nf__icontains=busca)
+                | Q(chave_nf__icontains=busca)
+            )
+            if rota_disponivel:
+                filtros_busca |= Q(rota__icontains=busca)
+            entradas = entradas.filter(filtros_busca)
+    except DBProgrammingError:
+        logger.exception('Falha ao montar queryset da fila de entradas. Recriando conexão.')
+        close_old_connections()
+        entradas = filtrar_queryset_created_at(
+            EntradaNF.objects.order_by('-data_importacao', '-id'),
+            date_from,
+            date_to,
+            campo='data_importacao',
+        )
+        if busca:
+            entradas = entradas.filter(Q(numero_nf__icontains=busca) | Q(chave_nf__icontains=busca))
     pode_limpar = bool(getattr(request.user, 'is_superuser', False))
-    paginacao = _paginar_lista(request, entradas)
+    try:
+        paginacao = _paginar_lista(request, entradas)
+    except DBProgrammingError:
+        logger.exception('Falha de paginação da fila de entradas. Recriando conexão e repetindo consulta.')
+        close_old_connections()
+        entradas = filtrar_queryset_created_at(
+            EntradaNF.objects.order_by('-data_importacao', '-id'),
+            date_from,
+            date_to,
+            campo='data_importacao',
+        )
+        paginacao = _paginar_lista(request, entradas)
     return _render(
         request,
         'fila_nfs_importadas.html',
