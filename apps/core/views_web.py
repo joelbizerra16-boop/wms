@@ -175,7 +175,15 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             )
         )
 
-    return EntradaNF.objects.bulk_create(entradas, batch_size=MAX_XML_FILES_POR_LOTE)
+    # Supabase/PgBouncer pode falhar com RETURNING do bulk_create (no results to fetch).
+    # Persiste em modo compatível sem depender de IDs retornados pelo banco.
+    entradas_criadas = []
+    with transaction.atomic():
+        for entrada in entradas:
+            entrada.save(force_insert=True)
+            entradas_criadas.append(entrada)
+    logger.info('Persistencia entradas lote: criadas=%s modo=insert_individual', len(entradas_criadas))
+    return entradas_criadas
 
 
 def _normalizar_campo(valor):
