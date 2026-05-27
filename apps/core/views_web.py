@@ -190,15 +190,20 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
         else:
             setattr(features_class, 'can_return_rows_from_bulk_insert', original_can_return_rows_attr)
 
-    depois_insert = EntradaNF.objects.count()
-    logger.warning('DEPOIS INSERT count=%s', depois_insert)
-    ultimo = EntradaNF.objects.order_by('-id').values(
-        'id',
-        'numero_nf',
-        'status',
-        'data_importacao',
-    ).first()
-    logger.warning('ULTIMO REGISTRO POS INSERT=%s', ultimo)
+    try:
+        if connection.vendor == 'postgresql':
+            close_old_connections()
+        depois_insert = EntradaNF.objects.count()
+        logger.warning('DEPOIS INSERT count=%s', depois_insert)
+        ultimo = EntradaNF.objects.order_by('-id').values(
+            'id',
+            'numero_nf',
+            'status',
+            'data_importacao',
+        ).first()
+        logger.warning('ULTIMO REGISTRO POS INSERT=%s', ultimo)
+    except Exception:
+        logger.exception('Falha ao gerar diagnostico pos-insert da fila de entradas.')
 
     logger.info('Persistencia entradas lote: criadas=%s modo=orm_bulk_create_sem_returning', len(entradas))
     return entradas
