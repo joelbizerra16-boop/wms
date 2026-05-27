@@ -123,6 +123,7 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             EntradaNF(
                 chave_nf=item['chave_nfe'],
                 numero_nf=item['numero_nf'],
+                rota=item.get('rota_nf') or 'SEM ROTA',
                 xml=xml_name,
                 xml_backup_gzip=gzip.compress(xml_content),
                 status=(
@@ -645,6 +646,7 @@ def importar_xml_web(request):
                                 'arquivo': nome_arquivo,
                                 'chave_nfe': resumo_nfe['chave_nfe'],
                                 'numero_nf': resumo_nfe['numero_nf'],
+                                'rota_nf': resumo_nfe.get('rota_nf') or 'SEM ROTA',
                                 'xml_content': xml_content,
                             }
                         )
@@ -719,6 +721,7 @@ def importar_xml_web(request):
                                 entrada = EntradaNF.objects.create(
                                     chave_nf=chave_nfe,
                                     numero_nf=numero_nf,
+                                    rota=item.get('rota_nf') or 'SEM ROTA',
                                     xml=xml_name,
                                     xml_backup_gzip=gzip.compress(item['xml_content']),
                                     status=(
@@ -784,7 +787,11 @@ def fila_entradas_nf_web(request):
         campo='data_importacao',
     )
     if busca:
-        entradas = entradas.filter(Q(numero_nf__icontains=busca) | Q(chave_nf__icontains=busca))
+        entradas = entradas.filter(
+            Q(numero_nf__icontains=busca)
+            | Q(chave_nf__icontains=busca)
+            | Q(rota__icontains=busca)
+        )
     pode_limpar = bool(getattr(request.user, 'is_superuser', False))
     paginacao = _paginar_lista(request, entradas)
     return _render(

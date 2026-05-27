@@ -12,6 +12,7 @@ from apps.produtos.models import Produto
 from apps.rotas.models import Rota
 from apps.tarefas.models import Tarefa, TarefaItem
 from apps.usuarios.models import Setor, Usuario
+from apps.nf.services.importador_xml import extrair_resumo_nfe_xml
 
 
 @override_settings(ROOT_URLCONF='config.urls')
@@ -44,6 +45,41 @@ class ImportadorXMLAPITests(TestCase):
                 cadastrado_manual=True,
                 incompleto=False,
             )
+
+    def test_extrair_resumo_captura_rota_em_inf_cpl(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000465" versao="4.00">
+      <ide><nNF>465</nNF></ide>
+      <infAdic>
+        <infCpl>Vendedor: Fabio Rodrigues - Pedido: 4653 - Cliente: C003865 - Rota: ABCD</infCpl>
+      </infAdic>
+    </infNFe>
+  </NFe>
+</nfeProc>
+"""
+        arquivo = SimpleUploadedFile('rota.xml', xml.encode('utf-8'), content_type='text/xml')
+        resumo = extrair_resumo_nfe_xml(arquivo)
+
+        self.assertEqual(resumo['numero_nf'], '465')
+        self.assertEqual(resumo['rota_nf'], 'ABCD')
+
+    def test_extrair_resumo_define_sem_rota_quando_nao_encontra(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35111111111111111111550010000000011000000466" versao="4.00">
+      <ide><nNF>466</nNF></ide>
+      <infAdic><infCpl>Pedido: 4653 - Cliente: C003865</infCpl></infAdic>
+    </infNFe>
+  </NFe>
+</nfeProc>
+"""
+        arquivo = SimpleUploadedFile('sem_rota.xml', xml.encode('utf-8'), content_type='text/xml')
+        resumo = extrair_resumo_nfe_xml(arquivo)
+
+        self.assertEqual(resumo['rota_nf'], 'SEM ROTA')
 
     def test_importa_nfe_e_cria_nf_itens_tarefas(self):
         self._cadastrar_produtos(

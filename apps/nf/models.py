@@ -181,6 +181,7 @@ class EntradaNF(BaseModel):
 	xml_backup_gzip = models.BinaryField(null=True, blank=True, editable=False, verbose_name='backup XML compactado')
 	status = models.CharField(max_length=20, choices=Status.choices, default=Status.AGUARDANDO, db_index=True)
 	tipo = models.CharField(max_length=20, choices=Tipo.choices, default=Tipo.NORMAL, db_index=True)
+	rota = models.CharField(max_length=100, blank=True, null=True, verbose_name='rota extraida do XML')
 	data_importacao = models.DateTimeField(auto_now_add=True, db_index=True)
 
 	class Meta:

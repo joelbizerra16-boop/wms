@@ -31,6 +31,7 @@
                 <tr>
                     <th>Número NF</th>
                     <th>Chave NF</th>
+                    <th>Rota</th>
                     <th>Tipo</th>
                     <th>Status</th>
                     <th>Data</th>
@@ -42,6 +43,9 @@
                 <tr>
                     <td>{{ entrada.numero_nf|default:'-' }}</td>
                     <td>{{ entrada.chave_nf }}</td>
+                    <td>
+                        <span class="rota-badge">{{ entrada.rota|default:'SEM ROTA' }}</span>
+                    </td>
                     <td>{{ entrada.get_tipo_display }}</td>
                     <td>
                         <span class="status-badge {% if entrada.status == 'AGUARDANDO' %}status-badge--warning{% elif entrada.status == 'LIBERADO' %}status-badge--success{% else %}status-badge--info{% endif %}">
@@ -62,7 +66,7 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="6" class="empty-state">Nenhuma entrada de NF registrada.</td>
+                    <td colspan="7" class="empty-state">Nenhuma entrada de NF registrada.</td>
                 </tr>
                 {% endfor %}
             </tbody>

@@ -170,15 +170,25 @@ def extrair_resumo_nfe_xml(xml_file):
         chave_evento = _texto(root, './/nfe:infEvento/nfe:chNFe')
         if chave_evento:
             xml_file.seek(0)
-            return {'chave_nfe': chave_evento, 'numero_nf': chave_evento[-9:]}
+            return {
+                'chave_nfe': chave_evento,
+                'numero_nf': chave_evento[-9:],
+                'rota_nf': 'SEM ROTA',
+            }
         raise ImportacaoXMLError('Chave da NFe nao encontrada no XML.')
 
     chave = (inf_nfe.attrib.get('Id') or '').replace('NFe', '').strip()
     if not chave:
         raise ImportacaoXMLError('Chave da NFe nao encontrada no XML.')
     numero_nf = _texto(inf_nfe, './/nfe:ide/nfe:nNF') or chave[-9:]
+    inf_cpl = _texto(inf_nfe, './/nfe:infAdic/nfe:infCpl')
+    rota_nf = _extrair_rota_inf_cpl(inf_cpl)
     xml_file.seek(0)
-    return {'chave_nfe': chave, 'numero_nf': str(numero_nf)}
+    return {
+        'chave_nfe': chave,
+        'numero_nf': str(numero_nf),
+        'rota_nf': rota_nf,
+    }
 
 
 def importar_xml_nfe(xml_file, usuario=None, balcao=False, tarefas_lote_cache=None):
@@ -903,3 +913,17 @@ def _normalizar_cep(valor):
         return None
     digits = re.sub(r'\D', '', valor)
     return digits or None
+
+
+def _extrair_rota_inf_cpl(inf_cpl):
+    if not inf_cpl:
+        return 'SEM ROTA'
+    match = re.search(
+        r'rota\s*:\s*(.+?)(?=(?:\s*-\s*[A-Za-zÀ-ÿ0-9_/ ]{2,40}\s*:)|(?:\s*[;|]\s*)|$)',
+        inf_cpl,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return 'SEM ROTA'
+    rota = (match.group(1) or '').strip(' -\t\r\n')
+    return rota or 'SEM ROTA'
