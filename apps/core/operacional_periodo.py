@@ -6,7 +6,7 @@ Janelas operacionais por contexto.
 - Histórico: pesquisa avançada (query string manual).
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.utils import timezone
 
@@ -79,8 +79,11 @@ def filtros_template_periodo(date_from, date_to, busca=''):
 
 
 def filtrar_queryset_created_at(queryset, date_from, date_to, campo='created_at'):
+    tz_atual = timezone.get_current_timezone()
     if date_from is not None:
-        queryset = queryset.filter(**{f'{campo}__date__gte': date_from})
+        inicio = timezone.make_aware(datetime.combine(date_from, time.min), tz_atual)
+        queryset = queryset.filter(**{f'{campo}__gte': inicio})
     if date_to is not None:
-        queryset = queryset.filter(**{f'{campo}__date__lte': date_to})
+        fim = timezone.make_aware(datetime.combine(date_to, time.max), tz_atual)
+        queryset = queryset.filter(**{f'{campo}__lte': fim})
     return queryset
