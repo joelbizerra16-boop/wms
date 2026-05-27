@@ -170,22 +170,58 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             )
         )
 
-    entradas_salvas = []
+    insert_sql = """
+        INSERT INTO nf_entradanf (
+            created_at,
+            updated_at,
+            chave_nf,
+            numero_nf,
+            rota,
+            xml,
+            xml_backup_gzip,
+            status,
+            tipo,
+            data_importacao
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
+    chaves_salvas = []
     with transaction.atomic():
-        for entrada in entradas:
-            entrada.pk = None
-            entrada.save(force_insert=True)
-            entradas_salvas.append(entrada)
+        with connection.cursor() as cursor:
+            for entrada in entradas:
+                agora = timezone.now()
+                entrada.created_at = agora
+                entrada.updated_at = agora
+                entrada.data_importacao = agora
+
+                cursor.execute(
+                    insert_sql,
+                    [
+                        entrada.created_at,
+                        entrada.updated_at,
+                        entrada.chave_nf,
+                        entrada.numero_nf,
+                        entrada.rota,
+                        str(entrada.xml),
+                        entrada.xml_backup_gzip,
+                        entrada.status,
+                        entrada.tipo,
+                        entrada.data_importacao,
+                    ],
+                )
+                chaves_salvas.append(entrada.chave_nf)
 
         transaction.on_commit(
-            lambda ids=[entrada.id for entrada in entradas_salvas]: logger.warning(
-                'IMPORTACAO COMMIT OK ids=%s',
-                ids,
+            lambda chaves=list(chaves_salvas): logger.warning(
+                'IMPORTACAO COMMIT OK chaves=%s total=%s',
+                chaves,
+                len(chaves),
             )
         )
 
-    logger.info('Persistencia entradas lote: criadas=%s modo=orm_force_insert', len(entradas_salvas))
-    return entradas_salvas
+    logger.info('Persistencia entradas lote: criadas=%s modo=insert_sem_returning', len(chaves_salvas))
+    return entradas
 
 
 def _normalizar_campo(valor):
