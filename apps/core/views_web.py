@@ -170,61 +170,21 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             )
         )
 
+    entradas_salvas = []
     with transaction.atomic():
-        # ignore_conflicts evita fluxo de retorno de IDs em ambientes com PgBouncer/Supabase.
-        EntradaNF.objects.bulk_create(
-            entradas,
-            batch_size=100,
-            ignore_conflicts=True,
-        )
-    try:
-        chaves_lote = [item.get('chave_nfe') for item in lote_novas_entradas if item.get('chave_nfe')]
         for entrada in entradas:
-            persisted = (
-                EntradaNF.objects.filter(chave_nf=entrada.chave_nf)
-                .order_by('-id')
-                .values('id', 'numero_nf', 'status', 'created_at', 'data_importacao')
-                .first()
+            entrada.pk = None
+            entrada.save(force_insert=True)
+            entradas_salvas.append(entrada)
+
+        transaction.on_commit(
+            lambda ids=[e.id for e in entradas_salvas]: logger.warning(
+                'IMPORTACAO COMMIT CONCLUIDO ids=%s',
+                ids,
             )
-            exists_check = persisted is not None
-            logger.error(
-                'POS SAVE EXISTS chave=%s exists=%s id=%s',
-                entrada.chave_nf,
-                exists_check,
-                persisted.get('id') if persisted else None,
-            )
-        for entrada in (
-            EntradaNF.objects.filter(chave_nf__in=chaves_lote)
-            .order_by('-id')
-            .values('id', 'numero_nf', 'status', 'created_at', 'data_importacao', 'chave_nf')
-        ):
-            logger.warning(
-                'NF SALVA id=%s nf=%s status=%s created=%s data_importacao=%s chave=%s',
-                entrada['id'],
-                entrada['numero_nf'],
-                entrada['status'],
-                entrada['created_at'],
-                entrada['data_importacao'],
-                entrada['chave_nf'],
-            )
-        logger.warning(
-            'IMPORTACAO POS-PERSIST count_lote=%s ultimo=%s',
-            len(chaves_lote),
-            EntradaNF.objects.filter(chave_nf__in=chaves_lote)
-            .order_by('-id')
-            .values('id', 'chave_nf', 'numero_nf', 'status', 'data_importacao')
-            .first(),
         )
-        close_old_connections()
-        ultimo = (
-            EntradaNF.objects.order_by('-id')
-            .values('id', 'numero_nf', 'status', 'created_at', 'data_importacao')
-            .first()
-        )
-        logger.error('ULTIMO REGISTRO POS IMPORT=%s', ultimo)
-    except Exception:
-        logger.exception('Falha no diagnostico pos-persistencia da fila.')
-    logger.info('Persistencia entradas lote: criadas=%s modo=bulk_create', len(entradas))
+
+    logger.info('Persistencia entradas lote: criadas=%s modo=save_individual', len(entradas_salvas))
     return entradas
 
 
