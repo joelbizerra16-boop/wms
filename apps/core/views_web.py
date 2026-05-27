@@ -12,7 +12,7 @@ from django.core.files.base import ContentFile
 from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.db import IntegrityError, close_old_connections, transaction
 from django.db.utils import ProgrammingError as DBProgrammingError
 from django.db.models import Prefetch, Q
 import json
@@ -94,7 +94,6 @@ def _chaves_lote_validas(lote_preparado):
 def _mapear_entradas_existentes_por_chave(chaves_lote):
     if not chaves_lote:
         return {}
-    connection.close_if_unusable_or_obsolete()
     try:
         entradas = list(
             EntradaNF.objects.filter(chave_nf__in=chaves_lote)
@@ -103,8 +102,6 @@ def _mapear_entradas_existentes_por_chave(chaves_lote):
     except DBProgrammingError:
         logger.exception('Falha ao consultar entradas existentes; reiniciando conexão e repetindo.')
         close_old_connections()
-        connection.close()
-        connection.close_if_unusable_or_obsolete()
         entradas = list(
             EntradaNF.objects.filter(chave_nf__in=chaves_lote)
             .values_list('chave_nf', 'numero_nf')
@@ -115,14 +112,11 @@ def _mapear_entradas_existentes_por_chave(chaves_lote):
 def _consultar_chaves_notas_existentes(chaves_lote):
     if not chaves_lote:
         return set()
-    connection.close_if_unusable_or_obsolete()
     try:
         return set(NotaFiscal.objects.filter(chave_nfe__in=chaves_lote).values_list('chave_nfe', flat=True))
     except DBProgrammingError:
         logger.exception('Falha ao consultar chaves de NF existentes; reiniciando conexão e repetindo.')
         close_old_connections()
-        connection.close()
-        connection.close_if_unusable_or_obsolete()
         return set(NotaFiscal.objects.filter(chave_nfe__in=chaves_lote).values_list('chave_nfe', flat=True))
 
 
@@ -153,58 +147,32 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
 
     xml_field = EntradaNF._meta.get_field('xml')
     storage = xml_field.storage
-    agora = timezone.now()
-    tabela = connection.ops.quote_name(EntradaNF._meta.db_table)
-    sql_insert = (
-        f"INSERT INTO {tabela} "
-        "(created_at, updated_at, chave_nf, numero_nf, xml, xml_backup_gzip, status, tipo, rota, data_importacao) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-    )
     entradas_criadas = []
 
-    connection.close_if_unusable_or_obsolete()
     with transaction.atomic():
-        with connection.cursor() as cursor:
-            for item in lote_novas_entradas:
-                xml_content = item['xml_content']
-                xml_name = xml_field.generate_filename(EntradaNF(), item['arquivo'])
-                xml_name = storage.save(xml_name, ContentFile(xml_content))
-                chave_nf = item['chave_nfe']
-                numero_nf = item['numero_nf']
-                rota = item.get('rota_nf') or 'SEM ROTA'
-                status = (
+        for item in lote_novas_entradas:
+            xml_content = item['xml_content']
+            xml_name = xml_field.generate_filename(EntradaNF(), item['arquivo'])
+            xml_name = storage.save(xml_name, ContentFile(xml_content))
+
+            entrada = EntradaNF(
+                chave_nf=item['chave_nfe'],
+                numero_nf=item['numero_nf'],
+                rota=item.get('rota_nf') or 'SEM ROTA',
+                xml=xml_name,
+                xml_backup_gzip=gzip.compress(xml_content),
+                status=(
                     EntradaNF.Status.PROCESSADO
-                    if chave_nf in chaves_notas_existentes
+                    if item['chave_nfe'] in chaves_notas_existentes
                     else EntradaNF.Status.AGUARDANDO
-                )
-                cursor.execute(
-                    sql_insert,
-                    [
-                        agora,
-                        agora,
-                        chave_nf,
-                        numero_nf,
-                        xml_name,
-                        gzip.compress(xml_content),
-                        status,
-                        tipo_entrada,
-                        rota,
-                        agora,
-                    ],
-                )
-                entradas_criadas.append(
-                    EntradaNF(
-                        chave_nf=chave_nf,
-                        numero_nf=numero_nf,
-                        xml=xml_name,
-                        status=status,
-                        tipo=tipo_entrada,
-                        rota=rota,
-                        data_importacao=agora,
-                    )
-                )
-                logger.info('INSERT XML OK chave=%s', chave_nf)
-    logger.info('Persistencia entradas lote: criadas=%s modo=sql_insert_manual', len(entradas_criadas))
+                ),
+                tipo=tipo_entrada,
+            )
+            entrada.save(force_insert=True)
+            entradas_criadas.append(entrada)
+            logger.info('SAVE XML OK chave=%s', entrada.chave_nf)
+
+    logger.info('Persistencia entradas lote: criadas=%s modo=save_individual', len(entradas_criadas))
     return entradas_criadas
 
 
