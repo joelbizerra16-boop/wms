@@ -153,36 +153,58 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
 
     xml_field = EntradaNF._meta.get_field('xml')
     storage = xml_field.storage
-    entradas = []
-
-    for item in lote_novas_entradas:
-        xml_content = item['xml_content']
-        xml_name = xml_field.generate_filename(EntradaNF(), item['arquivo'])
-        xml_name = storage.save(xml_name, ContentFile(xml_content))
-        entradas.append(
-            EntradaNF(
-                chave_nf=item['chave_nfe'],
-                numero_nf=item['numero_nf'],
-                rota=item.get('rota_nf') or 'SEM ROTA',
-                xml=xml_name,
-                xml_backup_gzip=gzip.compress(xml_content),
-                status=(
-                    EntradaNF.Status.PROCESSADO
-                    if item['chave_nfe'] in chaves_notas_existentes
-                    else EntradaNF.Status.AGUARDANDO
-                ),
-                tipo=tipo_entrada,
-            )
-        )
-
-    # Supabase/PgBouncer pode falhar com RETURNING do bulk_create (no results to fetch).
-    # Persiste em modo compatível sem depender de IDs retornados pelo banco.
+    agora = timezone.now()
+    tabela = connection.ops.quote_name(EntradaNF._meta.db_table)
+    sql_insert = (
+        f"INSERT INTO {tabela} "
+        "(created_at, updated_at, chave_nf, numero_nf, xml, xml_backup_gzip, status, tipo, rota, data_importacao) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    )
     entradas_criadas = []
+
+    connection.close_if_unusable_or_obsolete()
     with transaction.atomic():
-        for entrada in entradas:
-            entrada.save(force_insert=True)
-            entradas_criadas.append(entrada)
-    logger.info('Persistencia entradas lote: criadas=%s modo=insert_individual', len(entradas_criadas))
+        with connection.cursor() as cursor:
+            for item in lote_novas_entradas:
+                xml_content = item['xml_content']
+                xml_name = xml_field.generate_filename(EntradaNF(), item['arquivo'])
+                xml_name = storage.save(xml_name, ContentFile(xml_content))
+                chave_nf = item['chave_nfe']
+                numero_nf = item['numero_nf']
+                rota = item.get('rota_nf') or 'SEM ROTA'
+                status = (
+                    EntradaNF.Status.PROCESSADO
+                    if chave_nf in chaves_notas_existentes
+                    else EntradaNF.Status.AGUARDANDO
+                )
+                cursor.execute(
+                    sql_insert,
+                    [
+                        agora,
+                        agora,
+                        chave_nf,
+                        numero_nf,
+                        xml_name,
+                        gzip.compress(xml_content),
+                        status,
+                        tipo_entrada,
+                        rota,
+                        agora,
+                    ],
+                )
+                entradas_criadas.append(
+                    EntradaNF(
+                        chave_nf=chave_nf,
+                        numero_nf=numero_nf,
+                        xml=xml_name,
+                        status=status,
+                        tipo=tipo_entrada,
+                        rota=rota,
+                        data_importacao=agora,
+                    )
+                )
+                logger.info('INSERT XML OK chave=%s', chave_nf)
+    logger.info('Persistencia entradas lote: criadas=%s modo=sql_insert_manual', len(entradas_criadas))
     return entradas_criadas
 
 
