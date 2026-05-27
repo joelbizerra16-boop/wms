@@ -212,32 +212,24 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
                     entrada.data_importacao,
                 ],
             )
-            validacao = EntradaNF.objects.filter(chave_nf=entrada.chave_nf).exists()
-            logger.warning(
-                'VALIDACAO POS INSERT chave=%s exists=%s',
-                entrada.chave_nf,
-                validacao,
-            )
-            if not validacao:
-                raise IntegrityError(f'NF nao encontrada apos insert: {entrada.chave_nf}')
             chaves_salvas.append(entrada.chave_nf)
-
-    registros_persistidos = list(
-        EntradaNF.objects.filter(chave_nf__in=chaves_salvas)
-        .order_by('-id')
-        .values('id', 'numero_nf', 'chave_nf', 'status', 'data_importacao')
-    )
-    if len(registros_persistidos) != len(chaves_salvas):
-        raise IntegrityError(
-            'Persistencia inconsistente na fila de entradas. '
-            f'esperados={len(chaves_salvas)} encontrados={len(registros_persistidos)} '
-            f'chaves={chaves_salvas}'
-        )
 
     def _registrar_diagnostico_pos_insert():
         try:
+            if connection.vendor == 'postgresql':
+                close_old_connections()
             depois_insert = EntradaNF.objects.count()
             logger.warning('DEPOIS INSERT count=%s', depois_insert)
+            registros_persistidos = list(
+                EntradaNF.objects.filter(chave_nf__in=chaves_salvas)
+                .order_by('-id')
+                .values('id', 'numero_nf', 'chave_nf', 'status', 'data_importacao')
+            )
+            logger.warning(
+                'VALIDACAO POS COMMIT chaves=%s encontrados=%s',
+                chaves_salvas,
+                len(registros_persistidos),
+            )
             logger.warning('REGISTROS_SALVOS=%s', registros_persistidos)
             ultimo = EntradaNF.objects.order_by('-id').values(
                 'id',
