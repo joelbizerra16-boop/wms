@@ -147,15 +147,14 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
 
     xml_field = EntradaNF._meta.get_field('xml')
     storage = xml_field.storage
-    entradas_criadas = []
+    entradas = []
 
-    with transaction.atomic():
-        for item in lote_novas_entradas:
-            xml_content = item['xml_content']
-            xml_name = xml_field.generate_filename(EntradaNF(), item['arquivo'])
-            xml_name = storage.save(xml_name, ContentFile(xml_content))
-
-            entrada = EntradaNF(
+    for item in lote_novas_entradas:
+        xml_content = item['xml_content']
+        xml_name = xml_field.generate_filename(EntradaNF(), item['arquivo'])
+        xml_name = storage.save(xml_name, ContentFile(xml_content))
+        entradas.append(
+            EntradaNF(
                 chave_nf=item['chave_nfe'],
                 numero_nf=item['numero_nf'],
                 rota=item.get('rota_nf') or 'SEM ROTA',
@@ -168,12 +167,17 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
                 ),
                 tipo=tipo_entrada,
             )
-            entrada.save(force_insert=True)
-            entradas_criadas.append(entrada)
-            logger.info('SAVE XML OK chave=%s', entrada.chave_nf)
+        )
 
-    logger.info('Persistencia entradas lote: criadas=%s modo=save_individual', len(entradas_criadas))
-    return entradas_criadas
+    with transaction.atomic():
+        # ignore_conflicts evita fluxo de retorno de IDs em ambientes com PgBouncer/Supabase.
+        EntradaNF.objects.bulk_create(
+            entradas,
+            batch_size=100,
+            ignore_conflicts=True,
+        )
+    logger.info('Persistencia entradas lote: criadas=%s modo=bulk_create', len(entradas))
+    return entradas
 
 
 def _normalizar_campo(valor):
