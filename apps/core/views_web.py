@@ -79,6 +79,7 @@ from apps.core.operacional_periodo import (
     filtrar_queryset_created_at,
     filtros_template_periodo,
     resolver_periodo_operacional_request,
+    usuario_informou_periodo,
 )
 from apps.core.scan_store import clear_scan_entrada_ids, get_scan_entrada_ids, set_scan_entrada_ids
 
@@ -176,6 +177,18 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             batch_size=100,
             ignore_conflicts=True,
         )
+    try:
+        chaves_lote = [item.get('chave_nfe') for item in lote_novas_entradas if item.get('chave_nfe')]
+        logger.warning(
+            'IMPORTACAO POS-PERSIST count_lote=%s ultimo=%s',
+            len(chaves_lote),
+            EntradaNF.objects.filter(chave_nf__in=chaves_lote)
+            .order_by('-id')
+            .values('id', 'chave_nf', 'numero_nf', 'status', 'data_importacao')
+            .first(),
+        )
+    except Exception:
+        logger.exception('Falha no diagnostico pos-persistencia da fila.')
     logger.info('Persistencia entradas lote: criadas=%s modo=bulk_create', len(entradas))
     return entradas
 
@@ -830,12 +843,14 @@ def fila_entradas_nf_web(request):
     date_from, date_to, busca = resolver_periodo_operacional_request(request)
     rota_disponivel = entrada_nf_rota_disponivel()
     try:
-        entradas = filtrar_queryset_created_at(
-            EntradaNF.objects.order_by('-data_importacao', '-id'),
-            date_from,
-            date_to,
-            campo='data_importacao',
-        )
+        entradas = EntradaNF.objects.order_by('-data_importacao', '-id')
+        if usuario_informou_periodo(request):
+            entradas = filtrar_queryset_created_at(
+                entradas,
+                date_from,
+                date_to,
+                campo='data_importacao',
+            )
         if not rota_disponivel:
             # Compatibilidade com ambientes onde a migration da rota ainda não foi aplicada.
             entradas = entradas.defer('rota')
@@ -847,15 +862,25 @@ def fila_entradas_nf_web(request):
             if rota_disponivel:
                 filtros_busca |= Q(rota__icontains=busca)
             entradas = entradas.filter(filtros_busca)
+        try:
+            logger.warning('FILA QUERYSET COUNT=%s', entradas.count())
+            logger.warning(
+                'ULTIMO REGISTRO=%s',
+                entradas.order_by('-id').values('id', 'numero_nf', 'created_at', 'data_importacao', 'status').first(),
+            )
+        except Exception:
+            logger.exception('Falha ao gerar diagnostico de queryset da fila.')
     except DBProgrammingError:
         logger.exception('Falha ao montar queryset da fila de entradas. Recriando conexão.')
         close_old_connections()
-        entradas = filtrar_queryset_created_at(
-            EntradaNF.objects.order_by('-data_importacao', '-id'),
-            date_from,
-            date_to,
-            campo='data_importacao',
-        )
+        entradas = EntradaNF.objects.order_by('-data_importacao', '-id')
+        if usuario_informou_periodo(request):
+            entradas = filtrar_queryset_created_at(
+                entradas,
+                date_from,
+                date_to,
+                campo='data_importacao',
+            )
         if busca:
             entradas = entradas.filter(Q(numero_nf__icontains=busca) | Q(chave_nf__icontains=busca))
     pode_limpar = bool(getattr(request.user, 'is_superuser', False))
