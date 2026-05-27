@@ -179,6 +179,20 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
         )
     try:
         chaves_lote = [item.get('chave_nfe') for item in lote_novas_entradas if item.get('chave_nfe')]
+        for entrada in entradas:
+            persisted = (
+                EntradaNF.objects.filter(chave_nf=entrada.chave_nf)
+                .order_by('-id')
+                .values('id', 'numero_nf', 'status', 'created_at', 'data_importacao')
+                .first()
+            )
+            exists_check = persisted is not None
+            logger.error(
+                'POS SAVE EXISTS chave=%s exists=%s id=%s',
+                entrada.chave_nf,
+                exists_check,
+                persisted.get('id') if persisted else None,
+            )
         for entrada in (
             EntradaNF.objects.filter(chave_nf__in=chaves_lote)
             .order_by('-id')
@@ -201,6 +215,13 @@ def _persistir_entradas_nf_em_lote(lote_novas_entradas, tipo_entrada, chaves_not
             .values('id', 'chave_nf', 'numero_nf', 'status', 'data_importacao')
             .first(),
         )
+        close_old_connections()
+        ultimo = (
+            EntradaNF.objects.order_by('-id')
+            .values('id', 'numero_nf', 'status', 'created_at', 'data_importacao')
+            .first()
+        )
+        logger.error('ULTIMO REGISTRO POS IMPORT=%s', ultimo)
     except Exception:
         logger.exception('Falha no diagnostico pos-persistencia da fila.')
     logger.info('Persistencia entradas lote: criadas=%s modo=bulk_create', len(entradas))
