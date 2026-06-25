@@ -10,35 +10,23 @@ from apps.rotas.models import Rota
 
 
 @lru_cache(maxsize=None)
-def _nota_fiscal_colunas(alias):
-	connection = connections[alias]
-	with connection.cursor() as cursor:
-		return {
-			coluna.name
-			for coluna in connection.introspection.get_table_description(cursor, 'nf_notafiscal')
-		}
+def _migration_aplicada(alias, app_label, migration_name):
+	"""Verifica coluna brownfield via django_migrations, sem introspecção de schema."""
+	from django.db.migrations.recorder import MigrationRecorder
 
-
-@lru_cache(maxsize=None)
-def _entrada_nf_colunas(alias):
-	connection = connections[alias]
-	with connection.cursor() as cursor:
-		return {
-			coluna.name
-			for coluna in connection.introspection.get_table_description(cursor, 'nf_entradanf')
-		}
+	try:
+		recorder = MigrationRecorder(connections[alias])
+		return recorder.migration_qs.filter(app=app_label, name=migration_name).exists()
+	except (OperationalError, ProgrammingError):
+		return False
 
 
 def invalidar_cache_colunas_nota_fiscal():
-	_nota_fiscal_colunas.cache_clear()
-	_entrada_nf_colunas.cache_clear()
+	_migration_aplicada.cache_clear()
 
 
 def nota_fiscal_bairro_disponivel(alias='default'):
-	try:
-		return 'bairro' in _nota_fiscal_colunas(alias)
-	except (OperationalError, ProgrammingError):
-		return False
+	return _migration_aplicada(alias, 'nf', '0012_notafiscal_bairro')
 
 
 def nota_fiscal_bairro_valor(nf):
@@ -49,10 +37,7 @@ def nota_fiscal_bairro_valor(nf):
 
 
 def entrada_nf_rota_disponivel(alias='default'):
-	try:
-		return 'rota' in _entrada_nf_colunas(alias)
-	except (OperationalError, ProgrammingError):
-		return False
+	return _migration_aplicada(alias, 'nf', '0015_entradanf_rota')
 
 
 class NotaFiscalQuerySet(models.QuerySet):
