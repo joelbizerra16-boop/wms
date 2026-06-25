@@ -328,7 +328,20 @@ class ImportacaoProdutosBloqueioTarefaTests(TestCase):
         )
         client = Client()
         client.force_login(self.gestor)
-        response = client.get(reverse('web-separacao-exec', args=[tarefa.id]))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Diagnóstico operacional')
-        self.assertContains(response, 'Dias parada')
+        response_aberta = client.get(reverse('web-separacao-exec', args=[tarefa.id]))
+        self.assertRedirects(response_aberta, reverse('web-separacao-aceite', args=[tarefa.id]))
+
+        response_aceite = client.get(reverse('web-separacao-aceite', args=[tarefa.id]))
+        self.assertEqual(response_aceite.status_code, 200)
+        self.assertContains(response_aceite, 'Aceitar tarefa', html=False)
+        self.assertContains(response_aceite, 'Cancelar', html=False)
+
+        tarefa.status = Tarefa.Status.EM_EXECUCAO
+        tarefa.usuario = self.gestor
+        tarefa.usuario_em_execucao = self.gestor
+        tarefa.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
+        response_exec = client.get(reverse('web-separacao-exec', args=[tarefa.id]))
+        self.assertEqual(response_exec.status_code, 200)
+        self.assertContains(response_exec, 'input-posicao', html=False)
+        self.assertContains(response_exec, 'input-produto', html=False)
+        self.assertContains(response_exec, 'input-quantidade', html=False)

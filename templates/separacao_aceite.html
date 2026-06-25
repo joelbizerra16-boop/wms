@@ -1,0 +1,171 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Aceite Tarefa {{ tarefa.id }} | WMS</title>
+    <style>
+        :root {
+            --bg: #eef2f7;
+            --card: #ffffff;
+            --text: #0f172a;
+            --muted: #64748b;
+            --line: #dbe4ee;
+            --brand: #f97316;
+            --ok: #16a34a;
+            --header: #0f172a;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+        .op-header {
+            position: fixed;
+            inset: 0 0 auto 0;
+            z-index: 20;
+            display: grid;
+            grid-template-columns: 40px 1fr auto;
+            align-items: center;
+            gap: 8px;
+            min-height: 48px;
+            padding: 6px 10px;
+            background: var(--header);
+            color: #fff;
+        }
+        .op-back {
+            color: #fff;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 1.15rem;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            background: rgba(255,255,255,0.1);
+        }
+        .op-user-label {
+            font-size: 0.62rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.65);
+        }
+        .op-user-name { font-size: 0.88rem; font-weight: 700; }
+        .op-main {
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 58px 10px 24px;
+            display: grid;
+            gap: 12px;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 14px;
+        }
+        .card-title {
+            margin: 0 0 12px;
+            font-size: 1rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .info-grid {
+            display: grid;
+            gap: 10px;
+        }
+        .info-item span {
+            display: block;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .info-item strong {
+            display: block;
+            margin-top: 2px;
+            font-size: 0.95rem;
+            word-break: break-word;
+        }
+        .actions {
+            display: grid;
+            gap: 10px;
+        }
+        .btn {
+            min-height: 52px;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 700;
+            border: 0;
+            touch-action: manipulation;
+            cursor: pointer;
+        }
+        .btn-cancel {
+            background: #fff;
+            color: var(--text);
+            border: 2px solid var(--line);
+        }
+        .btn-accept {
+            background: var(--ok);
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <header class="op-header">
+        <a class="op-back" href="{% url 'web-separacao-lista' %}" aria-label="Voltar">←</a>
+        <div>
+            <div class="op-user-label">Aceite da tarefa</div>
+            <div class="op-user-name">Tarefa #{{ tarefa.id }}</div>
+        </div>
+    </header>
+
+    <main class="op-main">
+        <section class="card">
+            <h1 class="card-title">Confirmar aceite</h1>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span>NF</span>
+                    <strong>{{ cabecalho_tarefa.nf_numero }}</strong>
+                </div>
+                <div class="info-item">
+                    <span>Cliente</span>
+                    <strong>{{ cabecalho_tarefa.cliente_nome }}</strong>
+                </div>
+                <div class="info-item">
+                    <span>Rota</span>
+                    <strong>{{ tarefa.rota.nome|default:"-" }}</strong>
+                </div>
+                <div class="info-item">
+                    <span>Setor</span>
+                    <strong>{{ tarefa.get_setor_display }}</strong>
+                </div>
+                <div class="info-item">
+                    <span>Quantidade de itens</span>
+                    <strong>{{ resumo_aceite.total_linhas }}</strong>
+                </div>
+                <div class="info-item">
+                    <span>Quantidade total de volumes</span>
+                    <strong>{{ resumo_aceite.total_volumes|floatformat:0 }}</strong>
+                </div>
+                <div class="info-item">
+                    <span>Operador</span>
+                    <strong>{{ operador_nome }}</strong>
+                </div>
+            </div>
+        </section>
+
+        <form method="post" class="actions">
+            {% csrf_token %}
+            <button type="submit" name="acao" value="cancelar" class="btn btn-cancel">Cancelar</button>
+            <button type="submit" name="acao" value="aceitar" class="btn btn-accept">Aceitar tarefa</button>
+        </form>
+    </main>
+</body>
+</html>

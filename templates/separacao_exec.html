@@ -91,80 +91,22 @@
         .op-main {
             max-width: 520px;
             margin: 0 auto;
-            padding: 54px 10px 72px;
+            padding: 54px 10px 96px;
             display: grid;
             gap: 8px;
         }
 
-        .meta-strip {
+        .cabecalho-operacional {
+            position: sticky;
+            top: 48px;
+            z-index: 12;
             display: grid;
-            gap: 6px;
-        }
-        .meta-setor {
-            font-size: 0.72rem;
-            font-weight: 800;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            color: var(--muted);
-        }
-        .meta-nf {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px 12px;
-            font-size: 0.74rem;
-            color: var(--muted);
-        }
-        .meta-nf strong { color: var(--text); font-weight: 600; }
-        .status-pill {
-            display: inline-flex;
-            padding: 2px 8px;
-            border-radius: 999px;
-            font-size: 0.7rem;
-            font-weight: 700;
-            background: #e2e8f0;
-        }
-        .status-pill.ok { background: #dcfce7; color: #166534; }
-        .status-pill.warn { background: #fef3c7; color: #92400e; }
-        .status-pill.danger { background: #fee2e2; color: #991b1b; }
-
-        .scanner-status {
-            display: inline-flex;
-            align-items: center;
             gap: 8px;
-            padding: 7px 12px;
-            border-radius: 999px;
-            border: 1px solid #bfdbfe;
-            background: var(--info-soft);
-            color: var(--info);
-            font-size: 0.82rem;
-            font-weight: 700;
         }
-        .scanner-status::before {
-            content: '';
-            width: 10px;
-            height: 10px;
-            border-radius: 999px;
-            background: #3b82f6;
+
+        .cabecalho-operacional .card {
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
         }
-        .scanner-status.ready::before { background: #22c55e; }
-        .scanner-status.manual {
-            border-color: #fcd34d;
-            background: #fef3c7;
-            color: #92400e;
-        }
-        .scanner-status.manual::before { background: #f59e0b; }
-        .scanner-status.offline {
-            border-color: #fecaca;
-            background: #fef2f2;
-            color: #b91c1c;
-        }
-        .scanner-status.offline::before { background: #ef4444; }
-        .scanner-status.waiting {
-            border-color: #d1d5db;
-            background: #f8fafc;
-            color: #475569;
-        }
-        .scanner-status.waiting::before { background: #94a3b8; }
 
         .card {
             background: var(--card);
@@ -173,7 +115,28 @@
             padding: 12px;
         }
 
-        .produto-card { display: grid; gap: 8px; }
+        .cabecalho-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px 12px;
+        }
+        .cabecalho-item span {
+            display: block;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .cabecalho-item strong {
+            display: block;
+            font-size: 0.92rem;
+            font-weight: 700;
+            margin-top: 2px;
+            word-break: break-word;
+        }
+        .cabecalho-item--full { grid-column: 1 / -1; }
+
         .lbl {
             font-size: 0.68rem;
             font-weight: 700;
@@ -181,78 +144,82 @@
             text-transform: uppercase;
             color: var(--muted);
         }
+        .produto-card { display: grid; gap: 10px; }
         .produto-descricao {
-            font-size: clamp(1.05rem, 4.5vw, 1.28rem);
+            font-size: clamp(1rem, 4.2vw, 1.2rem);
             font-weight: 800;
             line-height: 1.25;
-            color: var(--text);
             word-break: break-word;
         }
-        .produto-linha {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: baseline;
+        .produto-meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 8px;
         }
+        .produto-meta strong {
+            display: block;
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-top: 2px;
+        }
         .produto-codigo {
-            font-size: clamp(1.65rem, 7vw, 2.1rem);
+            font-size: clamp(1.4rem, 6vw, 1.85rem);
             font-weight: 800;
             color: var(--info);
-            line-height: 1;
+            line-height: 1.1;
         }
-        .produto-progresso {
-            font-size: clamp(1.1rem, 4.5vw, 1.35rem);
-            font-weight: 700;
-            color: var(--muted);
-        }
-
-        .posicao-card {
-            padding: 10px 12px;
+        .endereco-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
             text-align: center;
         }
-        .posicao-linha {
-            margin: 0;
-            font-size: clamp(1.35rem, 6.5vw, 1.85rem);
-            font-weight: 800;
-            line-height: 1.15;
-            letter-spacing: 0.02em;
-            color: var(--text);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .posicao-linha .pos-qtd {
-            color: var(--info);
-        }
-        .posicao-linha.pos-placeholder .pos-endereco {
-            color: var(--muted);
-            letter-spacing: 0.08em;
+        .endereco-grid strong {
+            display: block;
+            font-size: 0.95rem;
+            margin-top: 2px;
         }
 
-        .scan-wrap {
-            position: relative;
-            min-height: 76px;
+        .etapas { display: grid; gap: 8px; }
+        .etapa {
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 10px;
+            background: #f8fafc;
+            opacity: 0.55;
         }
+        .etapa.ativa {
+            opacity: 1;
+            border-color: var(--brand);
+            background: #fff;
+        }
+        .etapa.concluida {
+            opacity: 1;
+            border-color: #bbf7d0;
+            background: #f0fdf4;
+        }
+        .etapa-titulo {
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 8px;
+        }
+
+        .scan-wrap { position: relative; min-height: 56px; }
         .scan-industrial {
             pointer-events: none;
-            min-height: 76px;
-            border: 3px solid var(--brand);
-            border-radius: 12px;
+            min-height: 56px;
+            border: 2px solid var(--brand);
+            border-radius: 10px;
             background: #fff;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
-            padding: 12px;
-        }
-        .scan-industrial svg {
-            width: 28px;
-            height: 28px;
-            flex-shrink: 0;
-            stroke: var(--brand-dark);
+            padding: 10px;
         }
         .scan-industrial-text {
-            font-size: clamp(1rem, 4vw, 1.15rem);
+            font-size: 0.95rem;
             font-weight: 800;
             letter-spacing: 0.04em;
             color: var(--header);
@@ -271,10 +238,66 @@
             font-size: 16px;
             touch-action: manipulation;
         }
-        .scan-input-ghost:focus {
-            outline: none;
+        .scan-input-ghost:disabled { pointer-events: none; }
+
+        .qty-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            align-items: end;
         }
-        .scan-form { margin: 0; }
+        .qty-input {
+            width: 100%;
+            min-height: 48px;
+            border: 2px solid var(--line);
+            border-radius: 10px;
+            font-size: 1.35rem;
+            font-weight: 700;
+            text-align: center;
+            padding: 8px;
+        }
+        .qty-input:disabled {
+            background: #f1f5f9;
+            color: var(--muted);
+        }
+        .btn-salvar {
+            min-height: 48px;
+            min-width: 96px;
+            border: 0;
+            border-radius: 10px;
+            background: var(--ok);
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 800;
+            touch-action: manipulation;
+        }
+        .btn-salvar:disabled {
+            background: #94a3b8;
+        }
+
+        .scanner-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid #bfdbfe;
+            background: var(--info-soft);
+            color: var(--info);
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+        .scanner-status::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #3b82f6;
+        }
+        .scanner-status.manual { border-color: #fcd34d; background: #fef3c7; color: #92400e; }
+        .scanner-status.manual::before { background: #f59e0b; }
+        .scanner-status.offline { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+        .scanner-status.offline::before { background: #ef4444; }
 
         .feedback {
             border-radius: 10px;
@@ -283,20 +306,7 @@
             font-size: 0.86rem;
         }
         .feedback.ok { background: #dcfce7; border-color: #bbf7d0; color: #166534; }
-        .feedback.warn { background: #fef3c7; border-color: #fde68a; color: #92400e; }
         .feedback.error { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
-
-        .accept-panel { display: grid; gap: 8px; }
-        .accept-btn {
-            min-height: 52px;
-            border: 0;
-            border-radius: 12px;
-            background: var(--ok);
-            color: #fff;
-            font-size: 1rem;
-            font-weight: 700;
-            touch-action: manipulation;
-        }
 
         .progress-footer {
             position: fixed;
@@ -312,15 +322,16 @@
             max-width: 520px;
             margin: 0 auto;
             display: grid;
-            gap: 5px;
+            gap: 4px;
         }
-        .progress-top {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.88rem;
-            font-weight: 700;
+        .footer-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 4px 12px;
+            font-size: 0.78rem;
         }
+        .footer-stats span { color: var(--muted); }
+        .footer-stats strong { color: var(--text); }
         .progress-track {
             height: 4px;
             border-radius: 999px;
@@ -333,115 +344,69 @@
             background: var(--brand);
             transition: width 0.15s linear;
         }
-
-        @media (min-width: 520px) {
-            .op-main { padding-left: 16px; padding-right: 16px; }
-        }
-
-        .diag-panel {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 12px;
-            padding: 12px;
-            display: grid;
-            gap: 10px;
-        }
-        .diag-panel h2 {
-            margin: 0;
-            font-size: 0.95rem;
-        }
-        .diag-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 8px 12px;
-        }
-        .diag-grid span {
-            display: block;
-            font-size: 0.68rem;
-            color: var(--muted);
-            text-transform: uppercase;
-        }
-        .diag-grid strong {
-            font-size: 0.86rem;
-        }
-        .diag-auditoria {
-            border-top: 1px solid var(--line);
-            padding-top: 8px;
-            font-size: 0.82rem;
-        }
-        .diag-auditoria ul {
-            margin: 6px 0 0;
-            padding-left: 18px;
-        }
     </style>
 </head>
 <body class="operacional">
     <header class="op-header">
         <a class="op-back" href="{% url 'web-separacao-lista' %}" aria-label="Voltar">←</a>
         <div class="op-user-block">
-            <div class="op-user-label">Usuário</div>
-            <div class="op-user-name">{{ usuario.nome|default:usuario.username }}</div>
+            <div class="op-user-label">Separação</div>
+            <div class="op-user-name">Tarefa #{{ tarefa.id }}</div>
         </div>
         <div class="op-online" aria-label="Online">Online</div>
     </header>
 
     <main class="op-main">
-        <section class="meta-strip">
-            <div class="meta-setor" id="item-atual-setor">{{ item_atual.setor|default:tarefa.setor|default:'-' }}</div>
-            <div class="meta-nf">
-                <span>NF <strong id="tarefa-nf">{{ cabecalho_tarefa.nf_numero }}</strong></span>
-                <span>Rota <strong>{{ tarefa.rota.nome|default:"-" }}</strong></span>
-                <span id="tarefa-status" class="status-pill {% if tarefa.status == 'EM_EXECUCAO' %}warn{% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' %}ok{% else %}danger{% endif %}">{{ tarefa.status }}</span>
+        <div class="cabecalho-operacional">
+        <section class="card cabecalho-grid">
+            <div class="cabecalho-item">
+                <span>NF</span>
+                <strong id="hdr-nf">{{ cabecalho_tarefa.nf_numero }}</strong>
             </div>
-            <div id="scanner-status" class="scanner-status {% if tarefa.status == 'ABERTO' %}waiting{% else %}ready{% endif %}">
-                {% if tarefa.status == 'ABERTO' %}Aguardando aceite{% else %}Scanner pronto{% endif %}
+            <div class="cabecalho-item">
+                <span>Cliente</span>
+                <strong id="hdr-cliente">{{ cabecalho_tarefa.cliente_nome }}</strong>
+            </div>
+            <div class="cabecalho-item">
+                <span>Rota</span>
+                <strong id="hdr-rota">{{ tarefa.rota.nome|default:"-" }}</strong>
+            </div>
+            <div class="cabecalho-item">
+                <span>Setor</span>
+                <strong id="hdr-setor">{{ item_atual.setor|default:tarefa.get_setor_display }}</strong>
+            </div>
+            <div class="cabecalho-item">
+                <span>Operador</span>
+                <strong id="hdr-operador">{{ operador_nome }}</strong>
+            </div>
+            <div class="cabecalho-item">
+                <span>Status</span>
+                <strong id="tarefa-status">{{ tarefa.get_status_display|upper }}</strong>
+            </div>
+            <div class="cabecalho-item">
+                <span>Itens</span>
+                <strong id="hdr-itens">{{ indice_item_atual|default:1 }} de {{ total_itens_exibicao|default:resumo_tarefa.total }}</strong>
+            </div>
+            <div class="cabecalho-item">
+                <span>Volumes</span>
+                <strong id="hdr-volumes">{{ resumo_tarefa.separado_unidades|floatformat:0 }} / {{ resumo_tarefa.total_unidades|floatformat:0 }}</strong>
+            </div>
+            <div class="cabecalho-item">
+                <span>Item atual</span>
+                <strong id="hdr-item-atual">{% if item_atual %}{{ item_atual.produto }}{% else %}-{% endif %}</strong>
+            </div>
+            <div class="cabecalho-item">
+                <span>Qtd item</span>
+                <strong id="hdr-qtd-item">{% if item_atual %}{{ item_atual.quantidade_separada|floatformat:0 }} / {{ item_atual.quantidade_total|floatformat:0 }}{% else %}-{% endif %}</strong>
+            </div>
+            <div class="cabecalho-item cabecalho-item--full">
+                <span>Progresso da tarefa</span>
+                <strong id="hdr-progresso">{{ resumo_tarefa.percentual|default:0 }}%</strong>
             </div>
         </section>
+        </div>
 
-        {% if diagnostico_tarefa %}
-        <section class="diag-panel">
-            <h2>Diagnóstico operacional</h2>
-            <div class="diag-grid">
-                <div><span>Dias parada</span><strong>{{ diagnostico_tarefa.dias_parada }}</strong></div>
-                <div><span>Última atualização</span><strong>{{ diagnostico_tarefa.ultima_atualizacao|default:"-" }}</strong></div>
-                <div><span>Última bipagem</span><strong>{{ diagnostico_tarefa.ultima_bipagem|default:"-" }}</strong></div>
-                <div><span>Última movimentação</span><strong>{{ diagnostico_tarefa.ultima_movimentacao|default:"-" }}</strong></div>
-                <div><span>Possui conferência</span><strong>{% if diagnostico_tarefa.possui_conferencia %}Sim{% else %}Não{% endif %}</strong></div>
-                <div><span>Possui separação</span><strong>{% if diagnostico_tarefa.possui_separacao %}Sim{% else %}Não{% endif %}</strong></div>
-                <div><span>Qtd. separada</span><strong>{{ diagnostico_tarefa.quantidade_separada }}</strong></div>
-                <div><span>Qtd. pendente</span><strong>{{ diagnostico_tarefa.quantidade_pendente }}</strong></div>
-            </div>
-            <div class="diag-auditoria">
-                <strong>Auditoria</strong>
-                <div>Origem: {{ diagnostico_tarefa.auditoria.origem }}</div>
-                {% if diagnostico_tarefa.auditoria.nfs %}
-                <ul>
-                    {% for nf in diagnostico_tarefa.auditoria.nfs %}
-                    <li>
-                        NF {{ nf.nf_numero }}
-                        {% if nf.usuario_importacao %} — importada por {{ nf.usuario_importacao }}{% endif %}
-                        {% if nf.data_importacao %} em {{ nf.data_importacao }}{% endif %}
-                        {% if nf.xml_entrada_id %} (XML entrada #{{ nf.xml_entrada_id }}){% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <div>Sem vínculo de NF/XML registrado no cabeçalho da tarefa.</div>
-                {% endif %}
-            </div>
-        </section>
-        {% endif %}
-
-        {% if tarefa.status == 'ABERTO' %}
-        <section class="card accept-panel">
-            <form method="post">
-                {% csrf_token %}
-                <input type="hidden" name="acao" value="iniciar">
-                <button class="accept-btn" type="submit">Aceitar separação</button>
-            </form>
-            <div class="feedback warn">Aceite a tarefa para iniciar a bipagem.</div>
-        </section>
-        {% endif %}
+        <div id="scanner-status" class="scanner-status">Scanner pronto</div>
 
         {% if item_atual %}
         <section class="card produto-card">
@@ -450,38 +415,44 @@
                 <div class="produto-descricao" id="item-atual-descricao">{{ item_atual.descricao }}</div>
             </div>
             <div>
-                <div class="lbl">Produto</div>
-                <div class="produto-linha">
-                    <span class="produto-codigo" id="item-atual-codigo">{{ item_atual.produto }}</span>
-                    <span class="produto-progresso" id="item-atual-progresso">({{ item_atual.quantidade_separada|floatformat:0 }}/{{ item_atual.quantidade_total|floatformat:0 }})</span>
+                <div class="lbl">Código</div>
+                <div class="produto-codigo" id="item-atual-codigo">{{ item_atual.produto }}</div>
+            </div>
+            <div class="produto-meta">
+                <div>
+                    <div class="lbl">Embalagem</div>
+                    <strong id="item-atual-embalagem">{{ item_atual.embalagem|default:"-" }}</strong>
                 </div>
+                <div>
+                    <div class="lbl">EAN</div>
+                    <strong id="item-atual-ean">{{ item_atual.ean|default:"-" }}</strong>
+                </div>
+                <div>
+                    <div class="lbl">Quantidade</div>
+                    <strong id="item-atual-qtd-pendente">{{ item_atual.quantidade_pendente|floatformat:0 }}</strong>
+                </div>
+                <div>
+                    <div class="lbl">Local</div>
+                    <strong id="item-atual-local">{{ item_atual.codigo_posicao|default:"-" }}</strong>
+                </div>
+            </div>
+            <div class="endereco-grid">
+                <div><div class="lbl">Corredor</div><strong id="item-corredor">{{ item_atual.corredor|default:"-" }}</strong></div>
+                <div><div class="lbl">Prédio</div><strong id="item-predio">{{ item_atual.predio|default:"-" }}</strong></div>
+                <div><div class="lbl">Nível</div><strong id="item-nivel">{{ item_atual.nivel|default:"-" }}</strong></div>
+                <div><div class="lbl">Apartamento</div><strong id="item-apartamento">{{ item_atual.apartamento|default:"-" }}</strong></div>
             </div>
         </section>
 
-        <section class="card posicao-card" aria-label="Posição operacional">
-            <p class="posicao-linha {% if not item_atual.rua or not item_atual.posicao or not item_atual.altura or not item_atual.lado %}pos-placeholder{% endif %}" id="posicao-operacional-linha">
-                <span class="pos-endereco" id="posicao-endereco">{% if item_atual.rua and item_atual.posicao and item_atual.altura and item_atual.lado %}{{ item_atual.rua }}-{{ item_atual.posicao }}-{{ item_atual.altura }}-{{ item_atual.lado }}{% else %}*-*-*-*{% endif %}</span>
-                | <span class="pos-qtd">QTD {{ item_atual.quantidade_total|floatformat:0 }}</span>
-            </p>
-        </section>
-
-        {% if tarefa.status != 'ABERTO' %}
-        <section class="card">
-            <div class="lbl">Bipagem</div>
-            <form method="post" id="bipagem-separacao-form" class="scan-form">
-                {% csrf_token %}
-                <input type="hidden" name="acao" value="bipar">
+        <section class="etapas">
+            <div class="etapa ativa" id="etapa-posicao" data-etapa="posicao">
+                <div class="etapa-titulo">1. Posição</div>
                 <div class="scan-wrap">
                     <div class="scan-industrial" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke="currentColor" aria-hidden="true">
-                            <path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3"/>
-                            <line x1="5" y1="12" x2="19" y2="12"/>
-                        </svg>
-                        <span class="scan-industrial-text">Bipar código</span>
+                        <span class="scan-industrial-text">Bipar posição</span>
                     </div>
                     <input
-                        id="codigo"
-                        name="codigo"
+                        id="input-posicao"
                         type="text"
                         class="scan-input-ghost scanner-input"
                         autocomplete="off"
@@ -489,15 +460,51 @@
                         autocorrect="off"
                         spellcheck="false"
                         inputmode="none"
-                        enterkeyhint="done"
-                        aria-label="Campo de bipagem"
+                        aria-label="Bipar posição"
                     >
                 </div>
-            </form>
+            </div>
+
+            <div class="etapa" id="etapa-produto" data-etapa="produto">
+                <div class="etapa-titulo">2. Produto / EAN</div>
+                <div class="scan-wrap">
+                    <div class="scan-industrial" aria-hidden="true">
+                        <span class="scan-industrial-text">Bipar produto</span>
+                    </div>
+                    <input
+                        id="input-produto"
+                        type="text"
+                        class="scan-input-ghost scanner-input"
+                        autocomplete="off"
+                        autocapitalize="off"
+                        autocorrect="off"
+                        spellcheck="false"
+                        inputmode="none"
+                        disabled
+                        aria-label="Bipar produto"
+                    >
+                </div>
+            </div>
+
+            <div class="etapa" id="etapa-quantidade" data-etapa="quantidade">
+                <div class="etapa-titulo">3. Quantidade</div>
+                <div class="qty-row">
+                    <input
+                        id="input-quantidade"
+                        type="number"
+                        class="qty-input"
+                        min="1"
+                        step="1"
+                        inputmode="numeric"
+                        disabled
+                        aria-label="Quantidade a separar"
+                    >
+                    <button type="button" class="btn-salvar" id="btn-salvar" disabled>Salvar</button>
+                </div>
+            </div>
         </section>
-        {% endif %}
         {% else %}
-        <section class="card"><div class="feedback warn">Sem itens pendentes para esta tarefa.</div></section>
+        <section class="card"><div class="feedback ok">Todos os itens foram separados.</div></section>
         {% endif %}
 
         <div id="separacao-feedback" class="feedback" style="display:none;" role="alert"></div>
@@ -505,9 +512,11 @@
 
     <footer class="progress-footer" aria-label="Progresso da separação">
         <div class="progress-footer-inner">
-            <div class="progress-top">
-                <strong id="progress-text">{{ resumo_tarefa.separado|floatformat:0 }} / {{ resumo_tarefa.total|floatformat:0 }}</strong>
-                <span id="progress-percent">0%</span>
+            <div class="footer-stats">
+                <div><span>Separados</span> <strong id="footer-separados">{{ resumo_tarefa.separado_unidades|floatformat:0 }}</strong></div>
+                <div><span>Restantes</span> <strong id="footer-restantes">{{ resumo_tarefa.pendente_unidades|floatformat:0 }}</strong></div>
+                <div><span>Percentual</span> <strong id="footer-percentual">{{ resumo_tarefa.percentual|default:0 }}%</strong></div>
+                <div><span>Tempo</span> <strong id="footer-tempo">00:00:00</strong></div>
             </div>
             <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
         </div>
@@ -518,236 +527,391 @@
     <script>
     (function () {
         if (window.WMSAudioFeedback) window.WMSAudioFeedback.init();
+
         const tarefaId = {{ tarefa.id }};
-        const postForms = document.querySelectorAll('form[method="post"]');
-        const form = document.getElementById('bipagem-separacao-form');
-        const codigoInput = document.getElementById('codigo');
-        const statusEl = document.getElementById('tarefa-status');
+        const listaSeparacaoUrl = "{% url 'web-separacao-lista' %}";
+        const dataInicioIso = "{{ data_inicio_iso|default:'' }}";
+        const BIP_DELAY_MS = 170;
+        const pollingIntervalMs = 10000;
+
+        const inputPosicao = document.getElementById('input-posicao');
+        const inputProduto = document.getElementById('input-produto');
+        const inputQuantidade = document.getElementById('input-quantidade');
+        const btnSalvar = document.getElementById('btn-salvar');
         const feedbackEl = document.getElementById('separacao-feedback');
         const scannerStatusEl = document.getElementById('scanner-status');
-        const itemAtualCodigoEl = document.getElementById('item-atual-codigo');
-        const itemAtualProgressoEl = document.getElementById('item-atual-progresso');
-        const itemAtualDescricaoEl = document.getElementById('item-atual-descricao');
-        const itemAtualSetorEl = document.getElementById('item-atual-setor');
-        const posicaoOperacionalEl = document.getElementById('posicao-operacional-linha');
-        const posicaoEnderecoEl = document.getElementById('posicao-endereco');
-        const progressTextEl = document.getElementById('progress-text');
-        const progressPercentEl = document.getElementById('progress-percent');
         const progressFillEl = document.getElementById('progress-fill');
+        const statusEl = document.getElementById('tarefa-status');
+
+        let etapaAtual = 'posicao';
+        let posicaoValidada = false;
+        let produtoValidado = false;
+        let itemAtual = {% if item_atual %}{
+            produto: "{{ item_atual.produto|escapejs }}",
+            descricao: "{{ item_atual.descricao|escapejs }}",
+            ean: "{{ item_atual.ean|default:'-'|escapejs }}",
+            embalagem: "{{ item_atual.embalagem|default:'-'|escapejs }}",
+            codigo_posicao: "{{ item_atual.codigo_posicao|default:''|escapejs }}",
+            rua: "{{ item_atual.rua|default:''|escapejs }}",
+            posicao: "{{ item_atual.posicao|default:''|escapejs }}",
+            altura: "{{ item_atual.altura|default:''|escapejs }}",
+            lado: "{{ item_atual.lado|default:''|escapejs }}",
+            quantidade_total: {{ item_atual.quantidade_total|default:0 }},
+            quantidade_separada: {{ item_atual.quantidade_separada|default:0 }},
+            quantidade_pendente: {{ item_atual.quantidade_pendente|default:0 }},
+            setor: "{{ item_atual.setor|default:''|escapejs }}",
+            corredor: "{{ item_atual.corredor|default:'-'|escapejs }}",
+            predio: "{{ item_atual.predio|default:'-'|escapejs }}",
+            nivel: "{{ item_atual.nivel|default:'-'|escapejs }}",
+            apartamento: "{{ item_atual.apartamento|default:'-'|escapejs }}",
+        }{% else %}null{% endif %};
+
+        let progressoSeparado = Number({{ resumo_tarefa.separado_unidades|default:0 }});
+        let progressoTotal = Number({{ resumo_tarefa.total_unidades|default:0 }});
+        let totalItensExibicao = Number({{ total_itens_exibicao|default:resumo_tarefa.total|default:0 }});
+        let indiceItemAtual = Number({{ indice_item_atual|default:1 }});
+
+        let scannerPosicao = null;
+        let scannerProduto = null;
+        let pollingHandle = null;
+        let pollingInFlight = false;
         let redirecionandoConclusao = false;
-        const listaSeparacaoUrl = "{% url 'web-separacao-lista' %}";
+        let salvando = false;
+
+        function getCookie(name) {
+            const value = '; ' + document.cookie;
+            const parts = value.split('; ' + name + '=');
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+
+        function unpackEnvelope(payload) {
+            const envelope = payload && typeof payload === 'object' ? payload : {};
+            return {
+                success: envelope.success !== false,
+                message: envelope.message || envelope.mensagem || envelope.erro || '',
+                data: envelope.data !== undefined ? envelope.data : envelope,
+            };
+        }
+
+        function formatNumber(value) {
+            return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value || 0));
+        }
+
+        function normalizarCodigo(valor) {
+            return String(valor || '').trim().toUpperCase();
+        }
+
+        function setFeedback(message, type) {
+            if (!feedbackEl) return;
+            feedbackEl.style.display = 'block';
+            feedbackEl.className = 'feedback ' + (type === 'erro' ? 'error' : 'ok');
+            feedbackEl.textContent = message;
+        }
+
+        function setScannerStatus(mode) {
+            if (!scannerStatusEl) return;
+            scannerStatusEl.classList.remove('manual', 'offline');
+            if (mode === 'manual') {
+                scannerStatusEl.classList.add('manual');
+                scannerStatusEl.textContent = 'Digitação manual';
+                return;
+            }
+            if (mode === 'offline') {
+                scannerStatusEl.classList.add('offline');
+                scannerStatusEl.textContent = 'Indisponível';
+                return;
+            }
+            scannerStatusEl.textContent = 'Etapa: ' + (etapaAtual === 'posicao' ? 'Posição' : etapaAtual === 'produto' ? 'Produto' : 'Quantidade');
+        }
+
+        function posicaoEsperada(item) {
+            if (!item) return '';
+            if (item.codigo_posicao) return normalizarCodigo(item.codigo_posicao);
+            const rua = normalizarCodigo(item.rua);
+            const pos = normalizarCodigo(item.posicao);
+            const alt = normalizarCodigo(item.altura);
+            const lado = normalizarCodigo(item.lado);
+            if (rua && pos && alt && lado) return rua + '-' + pos + '-' + alt + '-' + lado;
+            return '';
+        }
+
+        function posicaoDisponivel(item) {
+            return Boolean(posicaoEsperada(item));
+        }
+
+        function codigoCombinaProduto(codigo, item) {
+            const lido = normalizarCodigo(codigo);
+            if (!lido || !item) return false;
+            const prod = normalizarCodigo(item.produto);
+            const ean = normalizarCodigo(item.ean);
+            return lido === prod || (ean && ean !== '-' && lido === ean);
+        }
+
+        function updateProgress(separado, total) {
+            progressoSeparado = Number(separado || 0);
+            progressoTotal = Number(total || 0);
+            const pct = progressoTotal > 0 ? Math.min(100, Math.round((progressoSeparado / progressoTotal) * 100)) : 0;
+            const restantes = Math.max(progressoTotal - progressoSeparado, 0);
+            const hdrProgresso = document.getElementById('hdr-progresso');
+            const hdrVolumes = document.getElementById('hdr-volumes');
+            const footerSeparados = document.getElementById('footer-separados');
+            const footerRestantes = document.getElementById('footer-restantes');
+            const footerPercentual = document.getElementById('footer-percentual');
+            if (hdrProgresso) hdrProgresso.textContent = pct + '%';
+            if (hdrVolumes) hdrVolumes.textContent = formatNumber(progressoSeparado) + ' / ' + formatNumber(progressoTotal);
+            if (footerSeparados) footerSeparados.textContent = formatNumber(progressoSeparado);
+            if (footerRestantes) footerRestantes.textContent = formatNumber(restantes);
+            if (footerPercentual) footerPercentual.textContent = pct + '%';
+            if (progressFillEl) progressFillEl.style.width = pct + '%';
+        }
+
+        function updateItemDisplay(item, indice) {
+            if (!item) return;
+            itemAtual = item;
+            const qtdSeparada = Number(item.quantidade_separada || 0);
+            const qtdTotal = Number(item.quantidade_total || 0);
+            const map = {
+                'item-atual-descricao': item.descricao || '',
+                'item-atual-codigo': item.produto || '',
+                'item-atual-embalagem': item.embalagem || '-',
+                'item-atual-ean': item.ean || '-',
+                'item-atual-qtd-pendente': formatNumber(Math.max(qtdTotal - qtdSeparada, 0)),
+                'item-atual-local': item.codigo_posicao || '-',
+                'item-corredor': item.corredor || item.rua || '-',
+                'item-predio': item.predio || item.posicao || '-',
+                'item-nivel': item.nivel || item.altura || '-',
+                'item-apartamento': item.apartamento || item.lado || '-',
+                'hdr-setor': item.setor || '-',
+                'hdr-item-atual': item.produto || '-',
+                'hdr-qtd-item': formatNumber(qtdSeparada) + ' / ' + formatNumber(qtdTotal),
+            };
+            Object.keys(map).forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.textContent = map[id];
+            });
+            if (indice) {
+                indiceItemAtual = indice;
+                const hdrItens = document.getElementById('hdr-itens');
+                if (hdrItens) hdrItens.textContent = indice + ' de ' + totalItensExibicao;
+            }
+        }
+
+        function marcarEtapas() {
+            ['posicao', 'produto', 'quantidade'].forEach(function (nome) {
+                const el = document.getElementById('etapa-' + nome);
+                if (!el) return;
+                el.classList.remove('ativa', 'concluida');
+                if (nome === etapaAtual) el.classList.add('ativa');
+                else if (
+                    (nome === 'posicao' && posicaoValidada) ||
+                    (nome === 'produto' && produtoValidado)
+                ) el.classList.add('concluida');
+            });
+        }
+
+        function focarEtapa(nome) {
+            etapaAtual = nome;
+            marcarEtapas();
+            setScannerStatus('scanner');
+            if (nome === 'posicao' && scannerPosicao) scannerPosicao.scheduleInputFocus();
+            if (nome === 'produto' && scannerProduto) scannerProduto.scheduleInputFocus();
+            if (nome === 'quantidade' && inputQuantidade) inputQuantidade.focus();
+        }
+
+        function resetarFluxoItem(item) {
+            posicaoValidada = !posicaoDisponivel(item);
+            produtoValidado = false;
+            if (inputProduto) {
+                inputProduto.value = '';
+                inputProduto.disabled = !posicaoValidada;
+            }
+            if (inputQuantidade) {
+                inputQuantidade.value = '';
+                inputQuantidade.disabled = true;
+            }
+            if (btnSalvar) btnSalvar.disabled = true;
+            if (inputPosicao) inputPosicao.value = '';
+            etapaAtual = posicaoValidada ? 'produto' : 'posicao';
+            marcarEtapas();
+            setScannerStatus('scanner');
+            if (posicaoValidada) focarEtapa('produto');
+            else if (scannerPosicao) scannerPosicao.scheduleInputFocus();
+        }
+
+        function validarPosicao(codigo) {
+            const esperado = posicaoEsperada(itemAtual);
+            const lido = normalizarCodigo(codigo);
+            if (!esperado) {
+                posicaoValidada = true;
+                return true;
+            }
+            if (lido === esperado) {
+                posicaoValidada = true;
+                return true;
+            }
+            setFeedback('Posição incorreta. Esperado: ' + esperado, 'erro');
+            if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
+            return false;
+        }
+
+        function validarProduto(codigo) {
+            if (codigoCombinaProduto(codigo, itemAtual)) {
+                produtoValidado = true;
+                return true;
+            }
+            setFeedback('Produto/EAN não confere com o item atual.', 'erro');
+            if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
+            return false;
+        }
+
+        function avancarPosicao(codigo) {
+            if (!validarPosicao(codigo)) {
+                if (inputPosicao) inputPosicao.value = '';
+                if (scannerPosicao) scannerPosicao.scheduleInputFocus();
+                return;
+            }
+            if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
+            setFeedback('Posição confirmada.', 'ok');
+            if (inputProduto) inputProduto.disabled = false;
+            focarEtapa('produto');
+        }
+
+        function avancarProduto(codigo) {
+            if (!validarProduto(codigo)) {
+                if (inputProduto) inputProduto.value = '';
+                if (scannerProduto) scannerProduto.scheduleInputFocus();
+                return;
+            }
+            if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
+            setFeedback('Produto confirmado. Informe a quantidade.', 'ok');
+            if (inputQuantidade) {
+                inputQuantidade.disabled = false;
+                const pendente = Math.max(Number(itemAtual.quantidade_pendente || 0), 1);
+                inputQuantidade.value = '1';
+                inputQuantidade.max = String(pendente);
+            }
+            if (btnSalvar) btnSalvar.disabled = false;
+            focarEtapa('quantidade');
+        }
+
+        function sleep(ms) {
+            return new Promise(function (resolve) { setTimeout(resolve, ms); });
+        }
+
+        function tarefaConcluida(status) {
+            return status === 'CONCLUIDO' || status === 'CONCLUIDO_COM_RESTRICAO';
+        }
 
         function navegarAposConclusao() {
             if (redirecionandoConclusao) return;
             redirecionandoConclusao = true;
             stopPolling();
-            bloquearBipagem();
             if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepFinalizado();
             window.location.replace(listaSeparacaoUrl);
         }
-        let scannerCtrl = null;
-        const pollingIntervalMs = 10000;
-        let pollingHandle = null;
-        let pollingInFlight = false;
-        let progressoSeparado = Number({{ resumo_tarefa.separado|default:0 }});
-        let progressoTotal = Number({{ resumo_tarefa.total|default:0 }});
-        let refreshPendente = null;
 
-        function agendarRefreshSincrono() {
-            if (refreshPendente) clearTimeout(refreshPendente);
-            refreshPendente = setTimeout(function () {
-                refreshPendente = null;
-                refreshTaskStatus().catch(function () {});
-            }, 400);
+        async function biparUmaUnidade(codigo) {
+            const response = await fetch('/api/separacao/bipar/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                body: JSON.stringify({ tarefa_id: tarefaId, codigo: codigo }),
+            });
+            const payload = unpackEnvelope(await response.json());
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.message || 'Falha na bipagem.');
+            }
+            return payload.data || {};
         }
 
-        function getCookie(name) {
-            const value = `; ${document.cookie}`;
-            const parts = value.split(`; ${name}=`);
-            if (parts.length === 2) return parts.pop().split(';').shift();
-            return '';
-        }
-        function formatNumber(value) {
-            return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value || 0));
-        }
-        function valorPosicaoCampo(valor) {
-            const texto = (valor == null ? '' : String(valor)).trim();
-            if (!texto || texto === '-') return '';
-            return texto;
-        }
-        function enderecoPosicao(item) {
-            const rua = valorPosicaoCampo(item.rua || item.posicao_rua);
-            const posicao = valorPosicaoCampo(item.posicao || item.posicao_numero);
-            const altura = valorPosicaoCampo(item.altura);
-            const lado = valorPosicaoCampo(item.lado);
-            if (rua && posicao && altura && lado) {
-                return { texto: `${rua}-${posicao}-${altura}-${lado}`, placeholder: false };
-            }
-            return { texto: '*-*-*-*', placeholder: true };
-        }
-        function renderPosicaoLinha(item) {
-            if (!posicaoOperacionalEl || !item) return;
-            const endereco = enderecoPosicao(item);
-            const qtd = formatNumber(item.quantidade_total);
-            if (posicaoEnderecoEl) {
-                posicaoEnderecoEl.textContent = endereco.texto;
-            }
-            posicaoOperacionalEl.classList.toggle('pos-placeholder', endereco.placeholder);
-            const qtdEl = posicaoOperacionalEl.querySelector('.pos-qtd');
-            if (qtdEl) qtdEl.textContent = `QTD ${qtd}`;
-        }
-        function updateItemDisplay(item) {
-            if (!item) return;
-            if (itemAtualCodigoEl) itemAtualCodigoEl.textContent = item.produto || '';
-            if (itemAtualProgressoEl) {
-                itemAtualProgressoEl.textContent = `(${formatNumber(item.quantidade_separada)}/${formatNumber(item.quantidade_total)})`;
-            }
-            if (itemAtualDescricaoEl) itemAtualDescricaoEl.textContent = item.descricao || '';
-            if (itemAtualSetorEl) itemAtualSetorEl.textContent = item.setor || '-';
-            renderPosicaoLinha(item);
-        }
-        function setStatusBadge(status) {
-            if (!statusEl) return;
-            statusEl.textContent = status;
-            statusEl.classList.remove('ok', 'warn', 'danger');
-            if (status === 'CONCLUIDO' || status === 'CONCLUIDO_COM_RESTRICAO') statusEl.classList.add('ok');
-            else if (status === 'EM_EXECUCAO' || status === 'LIBERADO_COM_RESTRICAO') statusEl.classList.add('warn');
-            else statusEl.classList.add('danger');
-        }
-        function setFeedback(message, type) {
-            feedbackEl.style.display = 'block';
-            feedbackEl.className = `feedback ${type === 'erro' ? 'error' : 'ok'}`;
-            feedbackEl.textContent = message;
-        }
-        function setScannerStatus(mode) {
-            if (!scannerStatusEl) return;
-            scannerStatusEl.classList.remove('manual', 'offline', 'waiting', 'ready');
-            if (mode === 'manual') {
-                scannerStatusEl.classList.add('manual');
-                scannerStatusEl.textContent = 'Digitação manual ativa';
+        async function salvarQuantidade() {
+            if (salvando || !produtoValidado || !itemAtual) return;
+            const qtd = Math.max(1, parseInt(inputQuantidade.value, 10) || 0);
+            const pendente = Math.max(Number(itemAtual.quantidade_pendente || 0), 0);
+            if (qtd <= 0) {
+                setFeedback('Informe uma quantidade válida.', 'erro');
                 return;
             }
-            if (mode === 'waiting') {
-                scannerStatusEl.classList.add('waiting');
-                scannerStatusEl.textContent = 'Aguardando aceite';
+            if (qtd > pendente) {
+                setFeedback('Quantidade maior que o pendente (' + formatNumber(pendente) + ').', 'erro');
                 return;
             }
-            if (mode === 'offline') {
-                scannerStatusEl.classList.add('offline');
-                scannerStatusEl.textContent = 'Scanner indisponível';
-                return;
-            }
-            scannerStatusEl.classList.add('ready');
-            scannerStatusEl.textContent = 'Scanner pronto';
-        }
-        function updateProgress(separado, total) {
-            const s = Number(separado || 0);
-            const t = Number(total || 0);
-            const pct = t > 0 ? Math.min(100, Math.round((s / t) * 100)) : 0;
-            progressTextEl.textContent = `${formatNumber(s)} / ${formatNumber(t)}`;
-            progressPercentEl.textContent = `${pct}%`;
-            progressFillEl.style.width = `${pct}%`;
-        }
-        function isDone(status) { return status === 'SEPARADO'; }
-        function tarefaConcluida(status) { return status === 'CONCLUIDO' || status === 'CONCLUIDO_COM_RESTRICAO'; }
-        function scannerPronto() {
-            return Boolean(form && codigoInput && !codigoInput.disabled);
-        }
-        function scheduleInputFocus() {
-            if (scannerCtrl) scannerCtrl.scheduleInputFocus();
-        }
-        async function processarCodigo(codigo) {
-            if (!scannerPronto()) return;
-            const valor = (codigo || '').trim();
-            if (!valor) {
-                setFeedback('Informe o código para bipagem.', 'erro');
-                if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
-                scheduleInputFocus();
-                return;
-            }
-
-            codigoInput.value = valor;
-
+            salvando = true;
+            if (btnSalvar) btnSalvar.disabled = true;
             try {
-                const response = await fetch('/api/separacao/bipar/', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken'),
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    body: JSON.stringify({ tarefa_id: tarefaId, codigo: valor }),
-                });
-                const payload = unpackEnvelope(await response.json());
-                const data = payload.data || {};
-                if (!response.ok || !payload.success) throw new Error(payload.message || 'Falha na bipagem.');
+                let ultimo = null;
+                for (let i = 0; i < qtd; i += 1) {
+                    ultimo = await biparUmaUnidade(itemAtual.produto);
+                    if (tarefaConcluida(ultimo.status_tarefa) || ultimo.finalizado) {
+                        updateProgress(progressoSeparado + qtd, progressoTotal);
+                        setFeedback('Separação concluída.', 'ok');
+                        navegarAposConclusao();
+                        return;
+                    }
+                    if (i < qtd - 1) await sleep(BIP_DELAY_MS);
+                }
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepOk();
-
-                if (tarefaConcluida(data.status_tarefa) || data.finalizado) {
-                    setFeedback('Separação concluída.', 'ok');
-                    navegarAposConclusao();
-                    return;
-                }
-
-                progressoSeparado = Math.min(progressoTotal, progressoSeparado + 1);
-                updateProgress(progressoSeparado, progressoTotal);
-                if (data.produto_cod !== undefined) {
-                    updateItemDisplay({
-                        produto: data.produto_cod,
-                        quantidade_separada: data.separado,
-                        quantidade_total: data.esperado,
-                        descricao: itemAtualDescricaoEl ? itemAtualDescricaoEl.textContent : '',
-                        setor: itemAtualSetorEl ? itemAtualSetorEl.textContent : '',
-                    });
-                }
-                setFeedback(`Item separado: ${formatNumber(data.separado)} / ${formatNumber(data.esperado)}`, 'ok');
-                if (scannerCtrl) scannerCtrl.onBipagemConcluida();
-                agendarRefreshSincrono();
+                setFeedback('Separado: ' + formatNumber(ultimo.separado) + ' / ' + formatNumber(ultimo.esperado), 'ok');
+                await refreshTaskStatus(true);
             } catch (error) {
                 setFeedback(error.message, 'erro');
                 if (window.WMSAudioFeedback) window.WMSAudioFeedback.beepErro();
             } finally {
-                if (scannerPronto() && !redirecionandoConclusao) scheduleInputFocus();
+                salvando = false;
+                if (btnSalvar) btnSalvar.disabled = false;
             }
         }
-        function bloquearBipagem() {
-            if (!codigoInput) return;
-            codigoInput.disabled = true;
-            if (scannerCtrl) scannerCtrl.destroy();
-            scannerCtrl = null;
-            document.body.classList.remove('scanner-mode-active');
-            setScannerStatus('offline');
-            stopPolling();
-        }
 
-        async function refreshTaskStatus() {
+        function isDone(status) { return status === 'SEPARADO'; }
+
+        async function refreshTaskStatus(resetFluxo) {
             if (pollingInFlight || document.hidden) return;
             pollingInFlight = true;
-            const response = await fetch(`/api/tarefa-status/${tarefaId}/`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
             try {
-                if (!response.ok) throw new Error('Nao foi possivel atualizar tarefa.');
+                const response = await fetch('/api/tarefa-status/' + tarefaId + '/', {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (!response.ok) return;
                 const payload = unpackEnvelope(await response.json());
                 const data = payload.data || {};
-                setStatusBadge(data.status);
+                if (statusEl) statusEl.textContent = String(data.status || '').replace(/_/g, ' ');
                 if (tarefaConcluida(data.status)) {
-                    bloquearBipagem();
-                    if (redirecionandoConclusao) return;
-                } else if (data.status === 'ABERTO') {
-                    setScannerStatus('waiting');
-                } else {
-                    setScannerStatus('scanner');
+                    navegarAposConclusao();
+                    return;
                 }
 
                 let totalEsperado = 0;
                 let totalSeparado = 0;
-                data.itens.forEach((item) => {
+                (data.itens || []).forEach(function (item) {
                     totalEsperado += Number(item.quantidade_total || 0);
                     totalSeparado += Number(item.quantidade_separada || 0);
                 });
                 updateProgress(totalSeparado, totalEsperado);
+                totalItensExibicao = (data.itens || []).length || totalItensExibicao;
 
-                const currentItem = data.itens.find((item) => !isDone(item.status)) || data.itens[0];
-                if (currentItem) updateItemDisplay(currentItem);
+                const pendentes = (data.itens || []).filter(function (item) { return !isDone(item.status); });
+                const currentItem = pendentes[0] || null;
+                if (currentItem) {
+                    const merged = Object.assign({}, itemAtual || {}, currentItem);
+                    merged.quantidade_pendente = Math.max(
+                        Number(merged.quantidade_total || 0) - Number(merged.quantidade_separada || 0),
+                        0
+                    );
+                    let indice = 1;
+                    (data.itens || []).some(function (item, idx) {
+                        if (item.produto === merged.produto && !isDone(item.status)) {
+                            indice = idx + 1;
+                            return true;
+                        }
+                        return false;
+                    });
+                    updateItemDisplay(merged, indice);
+                    if (resetFluxo) resetarFluxoItem(merged);
+                }
             } finally {
                 pollingInFlight = false;
             }
@@ -760,35 +924,54 @@
             }
         }
 
-        function unpackEnvelope(payload) {
-            const envelope = payload && typeof payload === 'object' ? payload : {};
-            return {
-                success: envelope.success !== false,
-                message: envelope.message || envelope.mensagem || envelope.erro || '',
-                data: envelope.data !== undefined ? envelope.data : envelope,
-                redirect: envelope.redirect || envelope.redirect_url || null,
-                reload: Boolean(envelope.reload),
-            };
-        }
-
         function startPolling() {
-            if (!scannerPronto() || document.hidden || pollingHandle) return;
+            if (document.hidden || pollingHandle || !itemAtual) return;
             pollingHandle = setInterval(function () {
-                refreshTaskStatus().catch(function () {});
+                refreshTaskStatus(false).catch(function () {});
             }, pollingIntervalMs);
         }
 
-        if (form && codigoInput && window.WMSScannerEnterprise) {
-            document.body.classList.add('scanner-mode-active');
-            scannerCtrl = window.WMSScannerEnterprise.create({
-                input: codigoInput,
-                form: form,
-                modulo: 'separacao',
-                isReady: scannerPronto,
-                onProcessar: function (codigo) {
-                    processarCodigo(codigo);
-                },
+        function iniciarTimerTarefa() {
+            const el = document.getElementById('footer-tempo');
+            if (!el || !dataInicioIso) {
+                if (el) el.textContent = '--:--:--';
+                return;
+            }
+            const inicio = new Date(dataInicioIso).getTime();
+            function tick() {
+                const diff = Math.max(0, Date.now() - inicio);
+                const h = Math.floor(diff / 3600000);
+                const m = Math.floor((diff % 3600000) / 60000);
+                const s = Math.floor((diff % 60000) / 1000);
+                el.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+            }
+            tick();
+            setInterval(tick, 1000);
+        }
+
+        if (inputPosicao && window.WMSScannerEnterprise) {
+            scannerPosicao = window.WMSScannerEnterprise.create({
+                input: inputPosicao,
+                modulo: 'separacao-posicao',
+                isReady: function () { return etapaAtual === 'posicao' && !inputPosicao.disabled; },
+                onProcessar: avancarPosicao,
                 setScannerStatus: setScannerStatus,
+            });
+        }
+
+        if (inputProduto && window.WMSScannerEnterprise) {
+            scannerProduto = window.WMSScannerEnterprise.create({
+                input: inputProduto,
+                modulo: 'separacao-produto',
+                isReady: function () { return etapaAtual === 'produto' && !inputProduto.disabled; },
+                onProcessar: avancarProduto,
+                setScannerStatus: setScannerStatus,
+            });
+        }
+
+        if (btnSalvar) {
+            btnSalvar.addEventListener('click', function () {
+                salvarQuantidade();
             });
         }
 
@@ -797,61 +980,22 @@
                 stopPolling();
                 return;
             }
-            refreshTaskStatus().catch(function () {});
+            refreshTaskStatus(false).catch(function () {});
             startPolling();
-            scheduleInputFocus();
         });
 
         window.addEventListener('pagehide', stopPolling);
         window.addEventListener('beforeunload', stopPolling);
 
-        async function aceitarTarefa(event) {
-            event.preventDefault();
-            const submitButton = event.target.querySelector('button[type="submit"]');
-            if (submitButton) {
-                submitButton.disabled = true;
-                submitButton.textContent = 'Aceitando...';
-            }
-            try {
-                const response = await fetch('/api/separacao/iniciar/', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken'),
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    body: JSON.stringify({ tarefa_id: tarefaId }),
-                });
-                const payload = unpackEnvelope(await response.json());
-                if (!response.ok || !payload.success) throw new Error(payload.message || 'Não foi possível aceitar a tarefa.');
-                window.location.replace(window.location.pathname);
-            } catch (error) {
-                setFeedback(error.message, 'erro');
-                if (submitButton) {
-                    submitButton.disabled = false;
-                    submitButton.textContent = 'Aceitar separação';
-                }
-            }
+        updateProgress(progressoSeparado, progressoTotal);
+        iniciarTimerTarefa();
+        if (itemAtual) {
+            resetarFluxoItem(itemAtual);
+            refreshTaskStatus(false).catch(function () {});
+            startPolling();
+        } else {
+            setScannerStatus('offline');
         }
-
-        postForms.forEach(function (postForm) {
-            if (postForm.id === 'bipagem-separacao-form') return;
-            postForm.addEventListener('submit', aceitarTarefa);
-        });
-
-        updateProgress({{ resumo_tarefa.separado|default:0 }}, {{ resumo_tarefa.total|default:0 }});
-        {% if tarefa.status == 'ABERTO' %}
-        setScannerStatus('waiting');
-        {% elif tarefa.status == 'CONCLUIDO' or tarefa.status == 'CONCLUIDO_COM_RESTRICAO' or tarefa.status == 'FECHADO_COM_RESTRICAO' %}
-        setScannerStatus('offline');
-        {% elif not item_atual %}
-        setScannerStatus('offline');
-        {% elif tarefa.status != 'ABERTO' %}
-        setScannerStatus('scanner');
-        {% endif %}
-        refreshTaskStatus().catch(function () {});
-        startPolling();
-        scheduleInputFocus();
     })();
     </script>
 </body>

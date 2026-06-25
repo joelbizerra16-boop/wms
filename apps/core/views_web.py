@@ -564,6 +564,86 @@ def _resumo_tarefa_separacao(itens_exibicao):
     }
 
 
+def _resumo_separacao_pocket(tarefa, itens_exibicao):
+    resumo_linhas = _resumo_tarefa_separacao(itens_exibicao)
+    total_unidades = float(getattr(tarefa, 'itens_total', None) or 0)
+    separado_unidades = float(getattr(tarefa, 'itens_bipados', None) or 0)
+    if total_unidades <= 0 and itens_exibicao:
+        total_unidades = sum(float(item.get('quantidade_total') or 0) for item in itens_exibicao)
+        separado_unidades = sum(float(item.get('quantidade_separada') or 0) for item in itens_exibicao)
+    pendente_unidades = max(total_unidades - separado_unidades, 0)
+    percentual = round((separado_unidades / total_unidades) * 100) if total_unidades > 0 else 0
+    return {
+        **resumo_linhas,
+        'total_unidades': total_unidades,
+        'separado_unidades': separado_unidades,
+        'pendente_unidades': pendente_unidades,
+        'percentual': percentual,
+    }
+
+
+def _enriquecer_tarefas_lista_separacao_pocket(tarefas_lista):
+    if not tarefas_lista:
+        return tarefas_lista
+    nf_ids = {tarefa.get('nf_id') for tarefa in tarefas_lista if tarefa.get('nf_id')}
+    clientes_por_nf = {}
+    if nf_ids:
+        clientes_por_nf = {
+            nf.id: (nf.cliente.nome if nf.cliente_id else 'CONSOLIDADO')
+            for nf in NotaFiscal.objects.filter(id__in=nf_ids).select_related('cliente').only('id', 'cliente__nome')
+        }
+    for tarefa in tarefas_lista:
+        tarefa['cliente_nome'] = clientes_por_nf.get(tarefa.get('nf_id')) or 'CONSOLIDADO'
+        total = float(tarefa.get('itens_total') or 0)
+        bipados = float(tarefa.get('itens_bipados') or 0)
+        tarefa['progresso_label'] = f'{int(bipados)} / {int(total)}' if total else '-'
+        tarefa['progresso_pct'] = int(float(tarefa.get('percentual') or 0))
+    return tarefas_lista
+
+
+def _enriquecer_item_separacao_pocket(item):
+    if not item:
+        return item
+    codigo = (item.get('produto') or '').strip()
+    produto = Produto.objects.filter(cod_prod=codigo).only('embalagem', 'cod_ean', 'descricao').first()
+    item['embalagem'] = (produto.embalagem if produto and produto.embalagem else '-') or '-'
+    item['ean'] = (produto.cod_ean if produto and produto.cod_ean else '-') or '-'
+    item.setdefault('rua', '')
+    item.setdefault('posicao', '')
+    item.setdefault('altura', '')
+    item.setdefault('lado', '')
+    item.setdefault('codigo_posicao', '')
+    try:
+        from apps.estoque.models import EstoqueFisico
+
+        estoque = (
+            EstoqueFisico.objects.filter(codigo_produto=codigo, status=EstoqueFisico.Status.ATIVO, quantidade__gt=0)
+            .select_related('posicao')
+            .order_by('data_entrada', 'id')
+            .first()
+        )
+    except Exception:
+        estoque = None
+    if estoque and estoque.posicao_id:
+        pos = estoque.posicao
+        item['rua'] = pos.rua or ''
+        item['posicao'] = pos.posicao or ''
+        item['altura'] = pos.andar or ''
+        item['lado'] = pos.lado or ''
+        item['codigo_posicao'] = pos.codigo_posicao or ''
+        item['corredor'] = pos.rua or '-'
+        item['predio'] = pos.posicao or '-'
+        item['nivel'] = pos.andar or '-'
+        item['apartamento'] = pos.lado or '-'
+    else:
+        item['corredor'] = item.get('rua') or '-'
+        item['predio'] = item.get('posicao') or '-'
+        item['nivel'] = item.get('altura') or '-'
+        item['apartamento'] = item.get('lado') or '-'
+    item['quantidade_pendente'] = max(float(item.get('quantidade_total') or 0) - float(item.get('quantidade_separada') or 0), 0)
+    return item
+
+
 def _formatar_quantidade_pdf(valor):
     numero = valor if valor is not None else 0
     if isinstance(numero, int):
@@ -1435,6 +1515,7 @@ def separacao_lista_web(request):
             data_fim=date_to,
             path=request.path,
         )
+    tarefas_lista = _enriquecer_tarefas_lista_separacao_pocket(tarefas_lista)
     paginacao = _paginar_lista(
         request,
         tarefas_lista,
@@ -1447,6 +1528,73 @@ def separacao_lista_web(request):
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return _render(request, 'partials/separacao_lista_tabela.html', contexto)
     return _render(request, 'separacao_lista.html', contexto)
+
+
+def _resumo_aceite_separacao(tarefa, itens_exibicao):
+    total_linhas = len(itens_exibicao)
+    total_volumes = float(getattr(tarefa, 'itens_total', None) or 0)
+    if total_volumes <= 0 and itens_exibicao:
+        total_volumes = sum(float(item.get('quantidade_total') or 0) for item in itens_exibicao)
+    return {
+        'total_linhas': total_linhas,
+        'total_volumes': total_volumes,
+    }
+
+
+@require_profiles(Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
+@ensure_csrf_cookie
+def separacao_aceite_web(request, tarefa_id):
+    try:
+        tarefa = _obter_tarefa_permitida(request, tarefa_id)
+    except PermissionDenied as exc:
+        logger.warning(
+            'separacao_aceite_web 403: tarefa_id=%s user_id=%s motivo=%s',
+            tarefa_id,
+            getattr(request.user, 'id', None),
+            str(exc),
+        )
+        return HttpResponseForbidden(str(exc))
+
+    if tarefa.status in {
+        Tarefa.Status.CONCLUIDO,
+        Tarefa.Status.CONCLUIDO_COM_RESTRICAO,
+        Tarefa.Status.FECHADO_COM_RESTRICAO,
+    }:
+        messages.warning(request, 'Tarefa já finalizada e removida da fila operacional.')
+        return redirect('web-separacao-lista')
+
+    if tarefa.status == Tarefa.Status.EM_EXECUCAO:
+        return redirect('web-separacao-exec', tarefa_id=tarefa.id)
+
+    if tarefa.status != Tarefa.Status.ABERTO:
+        messages.warning(request, 'Tarefa indisponível para aceite.')
+        return redirect('web-separacao-lista')
+
+    if request.method == 'POST':
+        acao = request.POST.get('acao')
+        if acao == 'cancelar':
+            return redirect('web-separacao-lista')
+        try:
+            iniciar_tarefa(tarefa.id, request.user)
+            messages.success(request, 'Tarefa aceita. Inicie a bipagem.')
+        except SeparacaoError as exc:
+            messages.error(request, str(exc))
+            return redirect('web-separacao-aceite', tarefa_id=tarefa.id)
+        return redirect('web-separacao-exec', tarefa_id=tarefa.id)
+
+    itens_exibicao = listar_itens_tarefa_para_exibicao_seguro(tarefa)
+    resumo_aceite = _resumo_aceite_separacao(tarefa, itens_exibicao)
+    operador = request.user
+    return _render(
+        request,
+        'separacao_aceite.html',
+        {
+            'tarefa': tarefa,
+            'cabecalho_tarefa': _cabecalho_tarefa_separacao(tarefa),
+            'resumo_aceite': resumo_aceite,
+            'operador_nome': operador.nome or operador.username,
+        },
+    )
 
 
 @require_profiles(Usuario.Perfil.SEPARADOR, Usuario.Perfil.GESTOR)
@@ -1470,6 +1618,9 @@ def separacao_exec_web(request, tarefa_id):
     }:
         messages.warning(request, 'Tarefa já finalizada e removida da fila operacional.')
         return redirect('web-separacao-lista')
+
+    if request.method == 'GET' and tarefa.status == Tarefa.Status.ABERTO:
+        return redirect('web-separacao-aceite', tarefa_id=tarefa.id)
 
     if request.method == 'POST':
         acao = request.POST.get('acao')
@@ -1522,26 +1673,38 @@ def separacao_exec_web(request, tarefa_id):
         return redirect('web-separacao-lista')
     try:
         itens_exibicao = listar_itens_tarefa_para_exibicao_seguro(tarefa)
-        if tarefa.status != Tarefa.Status.ABERTO:
-            from apps.core.operacional_sessao_cache import preload_mapa_bipagem_separacao
+        from apps.core.operacional_sessao_cache import preload_mapa_bipagem_separacao
 
-            preload_mapa_bipagem_separacao(tarefa.id)
+        preload_mapa_bipagem_separacao(tarefa.id)
+        item_atual = _enriquecer_item_separacao_pocket(_item_atual_separacao(itens_exibicao))
+        resumo_tarefa = _resumo_separacao_pocket(tarefa, itens_exibicao)
+        indice_atual = 1
+        if item_atual and itens_exibicao:
+            for idx, linha in enumerate(itens_exibicao, start=1):
+                if linha.get('produto') == item_atual.get('produto') and linha.get('status') != 'SEPARADO':
+                    indice_atual = idx
+                    break
         diagnostico_tarefa = montar_diagnostico_operacional_tarefa(tarefa)
+        operador = request.user
         return _render(
             request,
             'separacao_exec.html',
             {
                 'tarefa': tarefa,
                 'itens_exibicao': itens_exibicao,
-                'item_atual': _item_atual_separacao(itens_exibicao),
-                'resumo_tarefa': _resumo_tarefa_separacao(itens_exibicao),
+                'item_atual': item_atual,
+                'resumo_tarefa': resumo_tarefa,
                 'cabecalho_tarefa': _cabecalho_tarefa_separacao(tarefa),
                 'diagnostico_tarefa': diagnostico_tarefa,
+                'indice_item_atual': indice_atual,
+                'operador_nome': operador.nome or operador.username,
+                'data_inicio_iso': tarefa.data_inicio.isoformat() if tarefa.data_inicio else '',
                 'status_finalizacao': [
-	                Tarefa.Status.CONCLUIDO,
-	                Tarefa.Status.CONCLUIDO_COM_RESTRICAO,
-	                Tarefa.Status.FECHADO_COM_RESTRICAO,
+                    Tarefa.Status.CONCLUIDO,
+                    Tarefa.Status.CONCLUIDO_COM_RESTRICAO,
+                    Tarefa.Status.FECHADO_COM_RESTRICAO,
                 ],
+                'total_itens_exibicao': len(itens_exibicao),
             },
         )
     except Exception as exc:

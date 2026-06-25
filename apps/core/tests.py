@@ -1720,11 +1720,12 @@ class MinutaImportacaoTests(DashboardWebTests):
 		self.assertContains(response, 'WMSScannerEnterprise', html=False)
 		self.assertNotContains(response, 'autofocus')
 		self.assertContains(response, 'scan-input-ghost', html=False)
-		self.assertContains(response, 'Scanner pronto', html=False)
-		self.assertNotContains(response, 'Separado / Total', html=False)
-		self.assertNotContains(response, 'item-atual-quantidade', html=False)
+		self.assertContains(response, 'input-posicao', html=False)
+		self.assertContains(response, 'input-produto', html=False)
+		self.assertContains(response, 'input-quantidade', html=False)
+		self.assertContains(response, 'footer-separados', html=False)
 		self.assertContains(response, '123039')
-		self.assertContains(response, '(3/5)', html=False)
+		self.assertContains(response, 'item-atual-qtd-pendente', html=False)
 		self.assertNotContains(response, '>Finalizar<', html=False)
 		self.assertNotContains(response, '<h1>Separação</h1>', html=False)
 
@@ -1748,10 +1749,32 @@ class MinutaImportacaoTests(DashboardWebTests):
 	def test_tela_separacao_aberta_exibe_aceite_sem_auto_iniciar(self):
 		response = self.client.get(f'/separacao/{self.tarefa.id}/')
 
-		self.assertEqual(response.status_code, 200)
-		self.assertContains(response, 'Aceitar separação', html=False)
+		self.assertRedirects(response, f'/separacao/{self.tarefa.id}/aceite/')
 		self.tarefa.refresh_from_db()
 		self.assertEqual(self.tarefa.status, Tarefa.Status.ABERTO)
+
+	def test_tela_separacao_aceite_cancelar_mantem_aberto(self):
+		response = self.client.post(
+			f'/separacao/{self.tarefa.id}/aceite/',
+			{'acao': 'cancelar'},
+		)
+
+		self.assertRedirects(response, '/separacao/')
+		self.tarefa.refresh_from_db()
+		self.assertEqual(self.tarefa.status, Tarefa.Status.ABERTO)
+
+	def test_tela_separacao_aceite_inicia_e_redireciona_bipagem(self):
+		response = self.client.post(
+			f'/separacao/{self.tarefa.id}/aceite/',
+			{'acao': 'aceitar'},
+		)
+
+		self.assertRedirects(response, f'/separacao/{self.tarefa.id}/')
+		self.tarefa.refresh_from_db()
+		self.assertEqual(self.tarefa.status, Tarefa.Status.EM_EXECUCAO)
+		response_exec = self.client.get(f'/separacao/{self.tarefa.id}/')
+		self.assertEqual(response_exec.status_code, 200)
+		self.assertContains(response_exec, 'input-posicao', html=False)
 
 	def test_tela_separacao_exibe_itens_nao_encontrados_da_tarefa(self):
 		produto_ne = Produto.objects.create(
@@ -1774,14 +1797,18 @@ class MinutaImportacaoTests(DashboardWebTests):
 			quantidade_total='3.00',
 			quantidade_separada='1.00',
 		)
+		tarefa_ne.status = Tarefa.Status.EM_EXECUCAO
+		tarefa_ne.usuario = self.usuario
+		tarefa_ne.usuario_em_execucao = self.usuario
+		tarefa_ne.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
 
 		response = self.client.get(f'/separacao/{tarefa_ne.id}/')
 
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'NE999')
-		self.assertContains(response, '(1/3)', html=False)
 		self.assertContains(response, 'Produto nao encontrado')
-		self.assertContains(response, '0 / 1')
+		self.assertContains(response, 'footer-restantes', html=False)
+		self.assertContains(response, '1 de 1')
 
 	def test_lista_separacao_exibe_rota_no_card_mobile(self):
 		response = self.client.get('/separacao/')
@@ -2070,12 +2097,16 @@ class SeparacaoAgrupamentoTests(TestCase):
 
 	def test_tela_separacao_exibe_agregado_agrupado_em_linha_unica(self):
 		self.client.login(username='gestor_agregado', password='123456')
+		self.tarefa_agregado.status = Tarefa.Status.EM_EXECUCAO
+		self.tarefa_agregado.usuario = self.usuario_agregado
+		self.tarefa_agregado.usuario_em_execucao = self.usuario_agregado
+		self.tarefa_agregado.save(update_fields=['status', 'usuario', 'usuario_em_execucao', 'updated_at'])
 		response = self.client.get(f'/separacao/{self.tarefa_agregado.id}/')
 
 		self.assertEqual(response.status_code, 200)
 		self.assertContains(response, 'AGR001')
 		self.assertContains(response, 'Produto agregado')
-		self.assertContains(response, '(5/17)', html=False)
+		self.assertContains(response, 'item-atual-qtd-pendente', html=False)
 
 
 @override_settings(ROOT_URLCONF='config.urls')
