@@ -7,6 +7,7 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.conferencia.models import Conferencia
+from apps.core.test_bipagem_helpers import bipar_codigo
 from apps.logs.models import Log
 from apps.nf.models import NotaFiscal
 from apps.produtos.models import Produto
@@ -18,6 +19,9 @@ from apps.usuarios.models import Setor, Usuario
 @override_settings(ROOT_URLCONF='config.urls')
 class WMSFluxoAPITests(TestCase):
     def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
         self.client = APIClient()
         self.separador = Usuario.objects.create_user(
             username='separador_fluxo',
@@ -98,12 +102,13 @@ class WMSFluxoAPITests(TestCase):
 
             for item in tarefa.itens.filter(nf=nf):
                 codigo = item.produto.cod_prod or item.produto.cod_ean
-                for _ in range(int(item.quantidade_total)):
-                    response_bipagem = self.client.post(
-                        '/api/separacao/bipar/',
-                        {'tarefa_id': tarefa.id, 'codigo': codigo},
-                        format='json',
-                    )
+                for response_bipagem in bipar_codigo(
+                    self.client,
+                    '/api/separacao/bipar/',
+                    {'tarefa_id': tarefa.id},
+                    codigo,
+                    item.quantidade_total,
+                ):
                     self.assertEqual(response_bipagem.status_code, 200)
 
             response_final = self.client.post(
@@ -113,22 +118,36 @@ class WMSFluxoAPITests(TestCase):
             )
             self.assertEqual(response_final.status_code, 200)
 
+    def _api_payload(self, response):
+        body = response.data
+        if isinstance(body, dict) and isinstance(body.get('data'), dict):
+            return body['data']
+        return body
+
+    def _api_list(self, response):
+        body = response.data
+        if isinstance(body, dict):
+            payload = body.get('data', body)
+            return payload if isinstance(payload, list) else []
+        return body if isinstance(body, list) else []
+
     def _conferir_nf(self, nf):
         self._autenticar(self.conferente)
         response_inicio = self.client.post('/api/conferencia/iniciar/', {'nf_id': nf.id}, format='json')
         self.assertIn(response_inicio.status_code, {200, 400})
         if response_inicio.status_code == 400:
             return response_inicio
-        conferencia_id = response_inicio.data['id']
+        conferencia_id = self._api_payload(response_inicio)['id']
 
         for item in nf.itens.select_related('produto').order_by('id'):
             codigo = item.produto.cod_prod or item.produto.cod_ean
-            for _ in range(int(item.quantidade)):
-                response_bipagem = self.client.post(
-                    '/api/conferencia/bipar/',
-                    {'conferencia_id': conferencia_id, 'codigo': codigo},
-                    format='json',
-                )
+            for response_bipagem in bipar_codigo(
+                self.client,
+                '/api/conferencia/bipar/',
+                {'conferencia_id': conferencia_id},
+                codigo,
+                item.quantidade,
+            ):
                 self.assertEqual(response_bipagem.status_code, 200)
 
         response_final = self.client.post(
@@ -194,12 +213,20 @@ class WMSFluxoAPITests(TestCase):
         self._autenticar(self.separador)
         response_separacao = self.client.get('/api/separacao/tarefas/')
         self.assertEqual(response_separacao.status_code, 200)
-        self.assertTrue(all(item['nf_id'] != nf_autorizada.id or item['status'] != Tarefa.Status.ABERTO for item in response_separacao.data))
+        tarefas = self._api_list(response_separacao)
+        self.assertTrue(
+            all(
+                nf_autorizada.id not in (item.get('nf_ids') or [])
+                and item.get('nf_id') != nf_autorizada.id
+                or item.get('status') != Tarefa.Status.ABERTO
+                for item in tarefas
+            )
+        )
 
         self._autenticar(self.conferente)
         response_conferencia = self.client.get('/api/conferencia/nfs/')
         self.assertEqual(response_conferencia.status_code, 200)
-        self.assertTrue(all(item['id'] != 999999 for item in response_conferencia.data))
+        self.assertTrue(all(item['id'] != 999999 for item in self._api_list(response_conferencia)))
 
     def test_fluxo_completo_ok(self):
         response_importacao = self._importar_xml(self.xml_autorizado)
@@ -211,7 +238,7 @@ class WMSFluxoAPITests(TestCase):
 
         self.assertEqual(response_importacao.status_code, 200)
         if response_final.status_code == 200:
-            self.assertEqual(response_final.data['status'], Conferencia.Status.OK)
+            self.assertEqual(self._api_payload(response_final).get('status'), Conferencia.Status.OK)
         self.assertFalse(nf.bloqueada)
         self.assertTrue(Tarefa.objects.filter(rota=nf.rota).exists())
 

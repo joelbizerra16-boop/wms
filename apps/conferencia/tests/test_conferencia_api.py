@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db.models import Q
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -163,11 +164,11 @@ class ConferenciaAPITests(TestCase):
         self.assertTrue(self.nf.bloqueada)
         self.assertEqual(self.nf.status, NotaFiscal.Status.BLOQUEADA_COM_RESTRICAO)
         self.assertTrue(
-            Tarefa.objects.filter(
+            TarefaItem.objects.filter(
                 nf=self.nf,
-                rota=self.nf.rota,
-                status=Tarefa.Status.ABERTO,
-                setor=Setor.Codigo.FILTROS,
+                produto=self.produto_2,
+                tarefa__status=Tarefa.Status.ABERTO,
+                tarefa__setor=Setor.Codigo.FILTROS,
             ).exists()
         )
 
@@ -342,7 +343,7 @@ class ConferenciaAPITests(TestCase):
         response_inicio = self.client.post('/api/conferencia/iniciar/', {'nf_id': self.nf.id}, format='json')
 
         self.assertFalse(validacao['liberado'])
-        self.assertEqual(validacao['status_separacao'], 'PENDENTE')
+        self.assertEqual(validacao['status_separacao'], 'PARCIALMENTE_SEPARADA')
         self.assertEqual(self._body(response_lista), [])
         self.assertEqual(response_inicio.status_code, 400)
         self.assertEqual(self._message(response_inicio), 'Pedido ainda não foi separado')

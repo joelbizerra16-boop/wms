@@ -1,6 +1,7 @@
 from io import BytesIO
 
 import pandas as pd
+from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -164,6 +165,7 @@ class ImportacaoProdutosExcelTests(TestCase):
 @override_settings(**TEST_STATIC_SETTINGS)
 class ImportacaoProdutosBloqueioTarefaTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.rota = Rota.objects.create(
             nome='AJUSTAR',
             nome_rota='AJUSTAR',
@@ -299,7 +301,7 @@ class ImportacaoProdutosBloqueioTarefaTests(TestCase):
         self.assertNotContains(response_padrao, f'>{tarefa.id}<')
 
         response_antigas = client.get(reverse('web-separacao-lista'), {'mostrar_antigas': '1'})
-        self.assertContains(response_antigas, f'>{tarefa.id}<')
+        self.assertContains(response_antigas, f'id-text">{tarefa.id}<')
         self.assertContains(response_antigas, 'Mostrar tarefas antigas')
 
     def test_diagnostico_operacional_tarefa(self):

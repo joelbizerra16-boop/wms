@@ -73,6 +73,7 @@ def liberar_nf_divergencia(*, nf, usuario, senha, motivo):
             acao='LIBERACAO DIVERGENCIA',
             detalhe=f'NF {nf.numero} liberada com restricao. Motivo: {motivo_validado}.',
         )
+        nf = NotaFiscal.objects.get(pk=nf.pk)
         sincronizar_status_operacional_nf(nf)
 
     return conferencia

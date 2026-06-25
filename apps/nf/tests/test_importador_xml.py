@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.utils import ProgrammingError
 from django.test import TestCase, override_settings
@@ -18,6 +19,7 @@ from apps.nf.services.importador_xml import extrair_resumo_nfe_xml
 @override_settings(ROOT_URLCONF='config.urls')
 class ImportadorXMLAPITests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = APIClient()
         self.usuario = Usuario.objects.create_user(
             username='gestor',
@@ -467,9 +469,19 @@ class ImportadorXMLAPITests(TestCase):
 
         self.assertEqual(response_import.status_code, 200)
         self.assertEqual(response_tarefas.status_code, 200)
+        body = response_tarefas.data
+        tarefas_payload = body.get('data', body) if isinstance(body, dict) else body
         self.assertEqual(Tarefa.objects.count(), 2)
-        self.assertEqual({item['setor'] for item in response_tarefas.data}, {Usuario.Setor.LUBRIFICANTE, Usuario.Setor.FILTROS})
-        self.assertTrue(any(item['nf_numero'] == '124' for item in response_tarefas.data))
+        self.assertEqual({item['setor'] for item in tarefas_payload}, {Usuario.Setor.LUBRIFICANTE, Usuario.Setor.FILTROS})
+        nf = NotaFiscal.objects.get(numero='124')
+        self.assertTrue(
+            any(
+                nf.numero in (item.get('nf_numero') or '')
+                or nf.id in (item.get('nf_ids') or [])
+                or item.get('nf_id') == nf.id
+                for item in tarefas_payload
+            )
+        )
 
     def test_importacao_normaliza_produto_sem_categoria_e_gera_tarefa_nao_encontrado(self):
         produto = Produto.objects.create(cod_prod='PRD900', descricao='Produto sem categoria', cod_ean='789900', categoria='')

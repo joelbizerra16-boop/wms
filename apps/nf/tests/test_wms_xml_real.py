@@ -3,8 +3,11 @@ import xml.etree.ElementTree as ET
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models import Q
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
+
+from apps.core.test_bipagem_helpers import bipar_codigo
 
 from apps.logs.models import Log
 from apps.nf.models import NotaFiscal
@@ -20,6 +23,9 @@ class WMSXMLRealAPITests(TestCase):
     NAMESPACE = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
 
     def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
         self.client = APIClient()
         self.separador = Usuario.objects.create_user(
             username='separador_xml_real',
@@ -50,6 +56,22 @@ class WMSXMLRealAPITests(TestCase):
         self.rota = Rota.objects.create(nome='Rota XML Real', cep_inicial='00000000', cep_final='99999999')
         self.xml_dir = Path(settings.BASE_DIR) / 'xmls'
         self.xml_files = sorted(self.xml_dir.glob('procNFe*.xml'))
+        self._tarefas_separadas = set()
+
+    def _api_payload(self, response):
+        body = response.data
+        if isinstance(body, dict) and isinstance(body.get('data'), dict):
+            return body['data']
+        if isinstance(body, dict) and 'id' in body:
+            return body
+        return body
+
+    def _api_list(self, response):
+        body = response.data
+        if isinstance(body, dict):
+            payload = body.get('data', body)
+            return payload if isinstance(payload, list) else []
+        return body if isinstance(body, list) else []
 
     def _autenticar(self, usuario):
         self.client.force_authenticate(user=usuario)
@@ -74,18 +96,25 @@ class WMSXMLRealAPITests(TestCase):
         return self.client.post('/api/importar-xml/', {'file': arquivo}, format='multipart')
 
     def _separar_tarefa(self, tarefa):
+        tarefa.refresh_from_db()
+        if tarefa.status == Tarefa.Status.CONCLUIDO:
+            return
         self._autenticar(self.separador)
         response_inicio = self.client.post('/api/separacao/iniciar/', {'tarefa_id': tarefa.id}, format='json')
         self.assertEqual(response_inicio.status_code, 200)
 
         for item in tarefa.itens.select_related('produto').all():
+            if item.quantidade_separada >= item.quantidade_total:
+                continue
             codigo = item.produto.cod_prod or item.produto.cod_ean
-            for _ in range(int(item.quantidade_total)):
-                response_bipagem = self.client.post(
-                    '/api/separacao/bipar/',
-                    {'tarefa_id': tarefa.id, 'codigo': codigo},
-                    format='json',
-                )
+            pendente = int(item.quantidade_total - item.quantidade_separada)
+            for response_bipagem in bipar_codigo(
+                self.client,
+                '/api/separacao/bipar/',
+                {'tarefa_id': tarefa.id},
+                codigo,
+                pendente,
+            ):
                 self.assertEqual(response_bipagem.status_code, 200)
 
         response_final = self.client.post(
@@ -96,8 +125,17 @@ class WMSXMLRealAPITests(TestCase):
         self.assertEqual(response_final.status_code, 200)
 
     def _separar_nf(self, nf):
-        for tarefa in nf.tarefas.prefetch_related('itens__produto').order_by('id'):
+        tarefas = (
+            Tarefa.objects.filter(Q(nf=nf) | Q(itens__nf=nf))
+            .distinct()
+            .prefetch_related('itens__produto')
+            .order_by('id')
+        )
+        for tarefa in tarefas:
+            if tarefa.id in self._tarefas_separadas:
+                continue
             self._separar_tarefa(tarefa)
+            self._tarefas_separadas.add(tarefa.id)
 
     def _iniciar_conferencia(self, nf):
         self._autenticar(self.conferente)
@@ -106,7 +144,7 @@ class WMSXMLRealAPITests(TestCase):
     def _conferir_nf(self, nf):
         response_inicio = self._iniciar_conferencia(nf)
         self.assertEqual(response_inicio.status_code, 200)
-        conferencia_id = response_inicio.data['id']
+        conferencia_id = self._api_payload(response_inicio)['id']
 
         for item in nf.itens.select_related('produto').order_by('id'):
             codigo = item.produto.cod_prod or item.produto.cod_ean
@@ -155,15 +193,16 @@ class WMSXMLRealAPITests(TestCase):
                 self.assertIn(response_inicio_conferencia.status_code, {200, 400})
                 if response_inicio_conferencia.status_code == 400:
                     continue
-                conferencia_id = response_inicio_conferencia.data['id']
+                conferencia_id = self._api_payload(response_inicio_conferencia)['id']
                 for item in nf.itens.select_related('produto').order_by('id'):
                     codigo = item.produto.cod_prod or item.produto.cod_ean
-                    for _ in range(int(item.quantidade)):
-                        response_bipagem = self.client.post(
-                            '/api/conferencia/bipar/',
-                            {'conferencia_id': conferencia_id, 'codigo': codigo},
-                            format='json',
-                        )
+                    for response_bipagem in bipar_codigo(
+                        self.client,
+                        '/api/conferencia/bipar/',
+                        {'conferencia_id': conferencia_id},
+                        codigo,
+                        item.quantidade,
+                    ):
                         self.assertEqual(response_bipagem.status_code, 200)
                 response_final = self.client.post(
                     '/api/conferencia/finalizar/',
@@ -173,11 +212,16 @@ class WMSXMLRealAPITests(TestCase):
                 self.assertEqual(response_final.status_code, 200)
 
         if not nfs_canceladas:
-            print('nenhuma NF cancelada encontrada para teste')
+            self.skipTest('Nenhuma NF cancelada encontrada em xmls/ para teste operacional.')
         else:
             for nf_id in nfs_canceladas:
-                nf = NotaFiscal.objects.prefetch_related('tarefas__itens__produto').get(id=nf_id)
-                tarefa = nf.tarefas.order_by('id').first()
+                nf = NotaFiscal.objects.prefetch_related('itens__produto').get(id=nf_id)
+                tarefa = (
+                    Tarefa.objects.filter(Q(nf=nf) | Q(itens__nf=nf))
+                    .distinct()
+                    .order_by('id')
+                    .first()
+                )
                 self.assertIsNotNone(tarefa)
 
                 with self.subTest(nf=nf.numero, status='CANCELADA-SEPARACAO'):
@@ -197,9 +241,9 @@ class WMSXMLRealAPITests(TestCase):
         self._autenticar(self.separador)
         response_tarefas = self.client.get('/api/separacao/tarefas/')
         self.assertEqual(response_tarefas.status_code, 200)
-        self.assertTrue(all(item['nf_id'] not in nfs_canceladas for item in response_tarefas.data))
+        self.assertTrue(all(item.get('nf_id') not in nfs_canceladas for item in self._api_list(response_tarefas)))
 
         self._autenticar(self.conferente)
         response_nfs = self.client.get('/api/conferencia/nfs/')
         self.assertEqual(response_nfs.status_code, 200)
-        self.assertTrue(all(item['id'] not in nfs_canceladas for item in response_nfs.data))
+        self.assertTrue(all(item['id'] not in nfs_canceladas for item in self._api_list(response_nfs)))

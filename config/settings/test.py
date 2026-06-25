@@ -2,6 +2,8 @@ from .base import *
 
 
 DEBUG = False
+DB_TELEMETRY_ENABLED = False
+OPERATIONAL_PAGE_SIZE = 20
 PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 DATABASES = {
     'default': {
