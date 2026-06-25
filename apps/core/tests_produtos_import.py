@@ -1,7 +1,7 @@
 from io import BytesIO
 
 import pandas as pd
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -14,6 +14,15 @@ from apps.produtos.models import Produto
 from apps.rotas.models import Rota
 from apps.tarefas.models import Tarefa, TarefaItem
 from apps.usuarios.models import Setor, Usuario
+
+TEST_STATIC_SETTINGS = {
+    'STORAGES': {
+        'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+        'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+    },
+    'STATICFILES_STORAGE': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+    'DB_TELEMETRY_ENABLED': False,
+}
 
 
 class ImportacaoProdutosExcelTests(TestCase):
@@ -152,6 +161,7 @@ class ImportacaoProdutosExcelTests(TestCase):
         self.assertEqual(Produto.objects.filter(cod_prod__startswith='BATCH').count(), 250)
 
 
+@override_settings(**TEST_STATIC_SETTINGS)
 class ImportacaoProdutosBloqueioTarefaTests(TestCase):
     def setUp(self):
         self.rota = Rota.objects.create(
