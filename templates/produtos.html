@@ -60,6 +60,54 @@
             box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
         }
 
+        .importacao-bloqueio-panel {
+            border: 1px solid #fecaca;
+            background: #fef2f2;
+            border-radius: 12px;
+            padding: 16px 18px;
+            margin-bottom: 16px;
+        }
+
+        .importacao-bloqueio-panel h2 {
+            margin: 0 0 8px;
+            font-size: 1.05rem;
+            color: #991b1b;
+        }
+
+        .importacao-bloqueio-item {
+            background: #fff;
+            border: 1px solid #fecaca;
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-top: 10px;
+        }
+
+        .importacao-bloqueio-item dl {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 8px 16px;
+            margin: 10px 0 0;
+        }
+
+        .importacao-bloqueio-item dt {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            color: #64748b;
+        }
+
+        .importacao-bloqueio-item dd {
+            margin: 0;
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .importacao-bloqueio-actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
         @media (max-width: 768px) {
             .btn-toggle-cards {
                 width: 45px;
@@ -85,6 +133,31 @@
                 >+</button>
             </div>
         </div>
+
+        {% if importacao_bloqueio_tarefas %}
+        <section class="importacao-bloqueio-panel" aria-live="polite">
+            <h2>Importação bloqueada por tarefa operacional</h2>
+            <p class="muted">A regra de segurança permanece ativa: não é possível importar produtos enquanto houver tarefa aberta ou em execução.</p>
+            {% for tarefa in importacao_bloqueio_tarefas %}
+            <article class="importacao-bloqueio-item">
+                <strong>Tarefa #{{ tarefa.id }}</strong> — {{ tarefa.tipo }} / {{ tarefa.status }}
+                <dl>
+                    <div><dt>Criação</dt><dd>{{ tarefa.criacao_data }}</dd></div>
+                    <div><dt>Dias parada</dt><dd>{{ tarefa.dias_parada }}</dd></div>
+                    <div><dt>Setor</dt><dd>{{ tarefa.setor }}</dd></div>
+                    <div><dt>Rota</dt><dd>{{ tarefa.rota|default:"-" }}</dd></div>
+                    <div><dt>NF</dt><dd>{{ tarefa.nfs|join:", "|default:"-" }}</dd></div>
+                    <div><dt>Produto(s)</dt><dd>{{ tarefa.produtos|join:", "|default:"-" }}</dd></div>
+                    <div><dt>Usuário</dt><dd>{{ tarefa.usuario|default:"-" }}</dd></div>
+                </dl>
+                <div class="importacao-bloqueio-actions">
+                    <a class="btn btn-primary" href="{{ tarefa.url_localizar }}">Localizar tarefa</a>
+                    <a class="btn btn-light" href="{% url 'web-separacao-lista' %}?mostrar_antigas=1">Ver na separação (incluir antigas)</a>
+                </div>
+            </article>
+            {% endfor %}
+        </section>
+        {% endif %}
 
         <div id="produtosCardsCollapse" class="produtos-cards-collapse">
         <div class="cadastro-top-grid cadastro-top-grid--produtos">

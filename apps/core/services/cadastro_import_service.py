@@ -15,7 +15,7 @@ from apps.core.services.produto_sync_service import sincronizar_referencias_prod
 from apps.produtos.models import GrupoAgregado, Produto
 from apps.rotas.models import Rota
 from apps.rotas.services.roteirizacao_service import normalizar_cep_para_int
-from apps.tarefas.models import Tarefa
+from apps.core.services.tarefa_importacao_bloqueio_service import validar_tarefas_antes_importacao_produtos
 
 REQUIRED_PRODUCT_COLUMNS = {
     'COD_PROD': 'COD_PROD',
@@ -139,10 +139,7 @@ def _iter_batches(items, batch_size):
 
 
 def importar_produtos_arquivo(file_or_path):
-    if Tarefa.objects.filter(ativo=True, status__in=[Tarefa.Status.ABERTO, Tarefa.Status.EM_EXECUCAO]).exists():
-        raise ValueError(
-            'Existem tarefas abertas/em execução. Finalize ou pause as tarefas antes de importar uma nova base de produtos.'
-        )
+    validar_tarefas_antes_importacao_produtos()
 
     df = _read_excel_or_csv(file_or_path).fillna('')
     total_linhas = int(len(df.index))

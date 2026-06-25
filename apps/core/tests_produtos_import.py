@@ -1,10 +1,19 @@
 from io import BytesIO
 
 import pandas as pd
-from django.test import TestCase
+from django.test import Client, TestCase
+from django.urls import reverse
+from django.utils import timezone
 
 from apps.core.services.cadastro_import_service import importar_produtos_arquivo
+from apps.core.services.tarefa_importacao_bloqueio_service import (
+    ImportacaoProdutosBloqueadaError,
+    montar_diagnostico_operacional_tarefa,
+)
 from apps.produtos.models import Produto
+from apps.rotas.models import Rota
+from apps.tarefas.models import Tarefa, TarefaItem
+from apps.usuarios.models import Setor, Usuario
 
 
 class ImportacaoProdutosExcelTests(TestCase):
@@ -141,3 +150,173 @@ class ImportacaoProdutosExcelTests(TestCase):
         self.assertEqual(resultado['criados'], 250)
         self.assertEqual(resultado['atualizados'], 0)
         self.assertEqual(Produto.objects.filter(cod_prod__startswith='BATCH').count(), 250)
+
+
+class ImportacaoProdutosBloqueioTarefaTests(TestCase):
+    def setUp(self):
+        self.rota = Rota.objects.create(
+            nome='AJUSTAR',
+            nome_rota='AJUSTAR',
+            cep_inicial='01000000',
+            cep_final='01999999',
+        )
+        self.gestor = Usuario.objects.create_user(
+            username='gestor_bloqueio',
+            password='123456',
+            nome='Gestor Bloqueio',
+            perfil=Usuario.Perfil.GESTOR,
+            setor=Setor.Codigo.NAO_ENCONTRADO,
+        )
+        Setor.objects.get_or_create(nome=Setor.Codigo.NAO_ENCONTRADO)
+        self.gestor.setores.add(Setor.objects.get(nome=Setor.Codigo.NAO_ENCONTRADO))
+
+    def _build_excel_file(self):
+        dataframe = pd.DataFrame(
+            [
+                {
+                    'COD_PROD': 'BLOQ001',
+                    'Código': 'BLOQ001',
+                    'Descrição': 'PRODUTO BLOQUEIO',
+                    'EMBALAGEM': 'PC',
+                    'Código de Barras (EAN)': '',
+                    'SETOR': 'AGREGADO',
+                }
+            ]
+        )
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            dataframe.to_excel(writer, index=False)
+        buffer.seek(0)
+        buffer.name = 'produtos.xlsx'
+        return buffer
+
+    def test_importacao_bloqueada_informa_tarefa_responsavel(self):
+        Tarefa.objects.create(
+            tipo=Tarefa.Tipo.ROTA,
+            setor=Setor.Codigo.NAO_ENCONTRADO,
+            rota=self.rota,
+            status=Tarefa.Status.ABERTO,
+            ativo=True,
+        )
+
+        with self.assertRaises(ImportacaoProdutosBloqueadaError) as ctx:
+            importar_produtos_arquivo(self._build_excel_file())
+
+        self.assertEqual(len(ctx.exception.tarefas), 1)
+        self.assertIn('Importação bloqueada pela Tarefa #', str(ctx.exception))
+        self.assertEqual(ctx.exception.tarefas[0]['tipo'], Tarefa.Tipo.ROTA)
+        self.assertIn('url_localizar', ctx.exception.tarefas[0])
+
+    def test_importacao_liberada_sem_tarefa_ativa(self):
+        resultado = importar_produtos_arquivo(self._build_excel_file())
+        self.assertEqual(resultado['criados'], 1)
+
+    def test_importacao_bloqueada_nao_considera_tarefa_inativa(self):
+        Tarefa.objects.create(
+            tipo=Tarefa.Tipo.ROTA,
+            setor=Setor.Codigo.NAO_ENCONTRADO,
+            rota=self.rota,
+            status=Tarefa.Status.ABERTO,
+            ativo=False,
+        )
+        resultado = importar_produtos_arquivo(self._build_excel_file())
+        self.assertEqual(resultado['criados'], 1)
+
+    def test_produtos_web_exibe_painel_de_bloqueio(self):
+        tarefa = Tarefa.objects.create(
+            tipo=Tarefa.Tipo.ROTA,
+            setor=Setor.Codigo.NAO_ENCONTRADO,
+            rota=self.rota,
+            status=Tarefa.Status.ABERTO,
+            ativo=True,
+        )
+        client = Client()
+        client.force_login(self.gestor)
+        session = client.session
+        session['importacao_bloqueio_tarefas'] = [
+            {
+                'id': tarefa.id,
+                'tipo': tarefa.tipo,
+                'status': tarefa.status,
+                'setor': tarefa.setor,
+                'criacao_data': '16/05/2026',
+                'dias_parada': 40,
+                'nfs': ['1415602'],
+                'rota': 'AJUSTAR',
+                'produtos': ['14733'],
+                'usuario': '',
+                'url_localizar': f'/separacao/{tarefa.id}/',
+            }
+        ]
+        session.save()
+
+        response = client.get(reverse('web-produtos'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Importação bloqueada por tarefa operacional')
+        self.assertContains(response, f'Tarefa #{tarefa.id}')
+        self.assertContains(response, 'Localizar tarefa')
+        self.assertContains(response, f'/separacao/{tarefa.id}/')
+
+    def test_separacao_mostrar_antigas_exibe_tarefa_fora_do_periodo(self):
+        produto = Produto.objects.create(
+            cod_prod='ORFAO001',
+            descricao='Produto orfao',
+            setor='NAO_ENCONTRADO',
+            categoria=Produto.Categoria.NAO_ENCONTRADO,
+        )
+        tarefa = Tarefa.objects.create(
+            tipo=Tarefa.Tipo.ROTA,
+            setor=Setor.Codigo.NAO_ENCONTRADO,
+            rota=self.rota,
+            status=Tarefa.Status.ABERTO,
+            ativo=True,
+        )
+        TarefaItem.objects.create(
+            tarefa=tarefa,
+            produto=produto,
+            quantidade_total=10,
+            quantidade_separada=0,
+        )
+        Tarefa.objects.filter(id=tarefa.id).update(
+            created_at=timezone.now() - timezone.timedelta(days=40),
+            updated_at=timezone.now() - timezone.timedelta(days=40),
+        )
+
+        client = Client()
+        client.force_login(self.gestor)
+
+        response_padrao = client.get(reverse('web-separacao-lista'))
+        self.assertNotContains(response_padrao, f'>{tarefa.id}<')
+
+        response_antigas = client.get(reverse('web-separacao-lista'), {'mostrar_antigas': '1'})
+        self.assertContains(response_antigas, f'>{tarefa.id}<')
+        self.assertContains(response_antigas, 'Mostrar tarefas antigas')
+
+    def test_diagnostico_operacional_tarefa(self):
+        tarefa = Tarefa.objects.create(
+            tipo=Tarefa.Tipo.ROTA,
+            setor=Setor.Codigo.NAO_ENCONTRADO,
+            rota=self.rota,
+            status=Tarefa.Status.ABERTO,
+            ativo=True,
+        )
+        diagnostico = montar_diagnostico_operacional_tarefa(tarefa)
+        self.assertEqual(diagnostico['id'], tarefa.id)
+        self.assertIn('dias_parada', diagnostico)
+        self.assertIn('auditoria', diagnostico)
+        self.assertEqual(diagnostico['possui_separacao'], False)
+
+    def test_localizar_tarefa_abre_execucao(self):
+        tarefa = Tarefa.objects.create(
+            tipo=Tarefa.Tipo.ROTA,
+            setor=Setor.Codigo.NAO_ENCONTRADO,
+            rota=self.rota,
+            status=Tarefa.Status.ABERTO,
+            ativo=True,
+        )
+        client = Client()
+        client.force_login(self.gestor)
+        response = client.get(reverse('web-separacao-exec', args=[tarefa.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Diagnóstico operacional')
+        self.assertContains(response, 'Dias parada')

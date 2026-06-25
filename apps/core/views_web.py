@@ -70,6 +70,10 @@ from apps.tarefas.services.separacao_service import (
 from apps.tarefas.separacao_views import OPERACIONAL_STATUS_BLOQUEADO, OPERACIONAL_STATUS_BLOQUEADO_ERRO
 from apps.core.nf_utils import resolve_nf_numero
 from apps.core.services.cadastro_import_service import importar_clientes_arquivo, importar_produtos_arquivo, importar_rotas_arquivo
+from apps.core.services.tarefa_importacao_bloqueio_service import (
+    ImportacaoProdutosBloqueadaError,
+    montar_diagnostico_operacional_tarefa,
+)
 from apps.usuarios.access import build_access_context, require_profiles
 from apps.usuarios.models import Setor, Usuario
 from apps.usuarios.forms import UsuarioForm
@@ -1414,18 +1418,30 @@ def separacao_lista_web(request):
             'tarefas': [],
             'is_paginated': False,
             'pagination_query': '',
+            'mostrar_antigas': request.GET.get('mostrar_antigas') in {'1', 'true', 'on'},
         }
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return _render(request, 'partials/separacao_lista_tabela.html', contexto)
         messages.error(request, 'Usuário sem setor vinculado. Contate o administrador.')
         return _render(request, 'separacao_lista.html', contexto)
     date_from, date_to, busca = resolver_periodo_operacional_request(request)
+    mostrar_antigas = request.GET.get('mostrar_antigas') in {'1', 'true', 'on'}
+    if mostrar_antigas:
+        tarefas_lista = listar_tarefas_disponiveis(request.user, path=request.path)
+    else:
+        tarefas_lista = listar_tarefas_disponiveis(
+            request.user,
+            data_inicio=date_from,
+            data_fim=date_to,
+            path=request.path,
+        )
     paginacao = _paginar_lista(
         request,
-        listar_tarefas_disponiveis(request.user, data_inicio=date_from, data_fim=date_to, path=request.path),
+        tarefas_lista,
     )
     contexto = {
         'tarefas': paginacao['page_obj'],
+        'mostrar_antigas': mostrar_antigas,
         **paginacao,
     }
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -1510,6 +1526,7 @@ def separacao_exec_web(request, tarefa_id):
             from apps.core.operacional_sessao_cache import preload_mapa_bipagem_separacao
 
             preload_mapa_bipagem_separacao(tarefa.id)
+        diagnostico_tarefa = montar_diagnostico_operacional_tarefa(tarefa)
         return _render(
             request,
             'separacao_exec.html',
@@ -1519,6 +1536,7 @@ def separacao_exec_web(request, tarefa_id):
                 'item_atual': _item_atual_separacao(itens_exibicao),
                 'resumo_tarefa': _resumo_tarefa_separacao(itens_exibicao),
                 'cabecalho_tarefa': _cabecalho_tarefa_separacao(tarefa),
+                'diagnostico_tarefa': diagnostico_tarefa,
                 'status_finalizacao': [
 	                Tarefa.Status.CONCLUIDO,
 	                Tarefa.Status.CONCLUIDO_COM_RESTRICAO,
@@ -1691,6 +1709,9 @@ def produtos_web(request):
                         for motivo, quantidade in resultado['ignorado_por_motivo'].items()
                     )
                     messages.warning(request, f'Linhas ignoradas por motivo -> {detalhes}')
+            except ImportacaoProdutosBloqueadaError as exc:
+                request.session['importacao_bloqueio_tarefas'] = exc.tarefas
+                messages.error(request, str(exc))
             except Exception as exc:
                 messages.error(request, f'Erro ao importar arquivo de produtos: {str(exc)}')
         else:
@@ -1752,6 +1773,8 @@ def produtos_web(request):
     paginador = Paginator(produtos_qs, 20)
     produtos_page = paginador.get_page(request.GET.get('page'))
 
+    importacao_bloqueio_tarefas = request.session.pop('importacao_bloqueio_tarefas', None)
+
     return _render(
         request,
         'produtos.html',
@@ -1759,6 +1782,7 @@ def produtos_web(request):
             'produtos': produtos_page,
             'busca': busca,
             'apenas_incompletos': apenas_incompletos,
+            'importacao_bloqueio_tarefas': importacao_bloqueio_tarefas,
             'setores_produto': (
                 ('FILTRO', 'Filtro'),
                 ('LUBRIFICANTE', 'Lubrificante'),

@@ -5,6 +5,21 @@
 
 {% block content %}
 <div class="box box--operacional">
+    <form method="get" class="toolbar toolbar--operacional" id="filtroSeparacaoForm">
+        <label class="balcao-inline">
+            <input
+                type="checkbox"
+                name="mostrar_antigas"
+                value="1"
+                {% if mostrar_antigas %}checked{% endif %}
+                onchange="this.form.submit()"
+            >
+            <span class="balcao-inline__text">Mostrar tarefas antigas</span>
+        </label>
+        {% if mostrar_antigas %}
+        <span class="muted">Exibindo todas as tarefas abertas/em execução, sem filtro de período.</span>
+        {% endif %}
+    </form>
     <div id="conteudo-dinamico">
         {% include 'partials/separacao_lista_tabela.html' %}
     </div>

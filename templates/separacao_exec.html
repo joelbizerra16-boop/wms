@@ -337,6 +337,42 @@
         @media (min-width: 520px) {
             .op-main { padding-left: 16px; padding-right: 16px; }
         }
+
+        .diag-panel {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+            display: grid;
+            gap: 10px;
+        }
+        .diag-panel h2 {
+            margin: 0;
+            font-size: 0.95rem;
+        }
+        .diag-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px 12px;
+        }
+        .diag-grid span {
+            display: block;
+            font-size: 0.68rem;
+            color: var(--muted);
+            text-transform: uppercase;
+        }
+        .diag-grid strong {
+            font-size: 0.86rem;
+        }
+        .diag-auditoria {
+            border-top: 1px solid var(--line);
+            padding-top: 8px;
+            font-size: 0.82rem;
+        }
+        .diag-auditoria ul {
+            margin: 6px 0 0;
+            padding-left: 18px;
+        }
     </style>
 </head>
 <body class="operacional">
@@ -361,6 +397,40 @@
                 {% if tarefa.status == 'ABERTO' %}Aguardando aceite{% else %}Scanner pronto{% endif %}
             </div>
         </section>
+
+        {% if diagnostico_tarefa %}
+        <section class="diag-panel">
+            <h2>Diagnóstico operacional</h2>
+            <div class="diag-grid">
+                <div><span>Dias parada</span><strong>{{ diagnostico_tarefa.dias_parada }}</strong></div>
+                <div><span>Última atualização</span><strong>{{ diagnostico_tarefa.ultima_atualizacao|default:"-" }}</strong></div>
+                <div><span>Última bipagem</span><strong>{{ diagnostico_tarefa.ultima_bipagem|default:"-" }}</strong></div>
+                <div><span>Última movimentação</span><strong>{{ diagnostico_tarefa.ultima_movimentacao|default:"-" }}</strong></div>
+                <div><span>Possui conferência</span><strong>{% if diagnostico_tarefa.possui_conferencia %}Sim{% else %}Não{% endif %}</strong></div>
+                <div><span>Possui separação</span><strong>{% if diagnostico_tarefa.possui_separacao %}Sim{% else %}Não{% endif %}</strong></div>
+                <div><span>Qtd. separada</span><strong>{{ diagnostico_tarefa.quantidade_separada }}</strong></div>
+                <div><span>Qtd. pendente</span><strong>{{ diagnostico_tarefa.quantidade_pendente }}</strong></div>
+            </div>
+            <div class="diag-auditoria">
+                <strong>Auditoria</strong>
+                <div>Origem: {{ diagnostico_tarefa.auditoria.origem }}</div>
+                {% if diagnostico_tarefa.auditoria.nfs %}
+                <ul>
+                    {% for nf in diagnostico_tarefa.auditoria.nfs %}
+                    <li>
+                        NF {{ nf.nf_numero }}
+                        {% if nf.usuario_importacao %} — importada por {{ nf.usuario_importacao }}{% endif %}
+                        {% if nf.data_importacao %} em {{ nf.data_importacao }}{% endif %}
+                        {% if nf.xml_entrada_id %} (XML entrada #{{ nf.xml_entrada_id }}){% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <div>Sem vínculo de NF/XML registrado no cabeçalho da tarefa.</div>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
 
         {% if tarefa.status == 'ABERTO' %}
         <section class="card accept-panel">
